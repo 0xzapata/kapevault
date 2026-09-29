@@ -8,6 +8,25 @@ payee numbers, devices, things and links to files and folders, all in one encryp
 
 Website and docs: https://kapevault.brewedops.cloud
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/pc-main-dark.webp">
+  <img src="docs/screenshots/pc-main.webp" alt="KAPEVault on Windows: the item list, with a GitHub login open showing its password, live 2FA code and website">
+</picture>
+
+On Android: your items, one login with its 2FA code, and sync with your PC through your own bucket.
+
+<p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/phone-home-dark.webp">
+    <img src="docs/screenshots/phone-home.webp" width="32%" alt="KAPEVault on Android: the item list">
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/phone-detail-dark.webp">
+    <img src="docs/screenshots/phone-detail.webp" width="32%" alt="KAPEVault on Android: a Gmail login with its password and 2FA code">
+  </picture>
+  <img src="docs/screenshots/phone-sync.webp" width="32%" alt="KAPEVault on Android: synced with a Windows PC through the user's own R2 bucket">
+</p>
+
 ## How it protects your vault
 
 - Your master password becomes a key through **scrypt** (N=2^17, r=8, p=1), and **AES-256-GCM** seals the
@@ -29,6 +48,32 @@ Website and docs: https://kapevault.brewedops.cloud
   reach your bucket.
 - The **Forever Opener** is one HTML file that opens your vault in any browser, offline, without KAPEVault.
 - An **Emergency Kit** is a printable page with everything needed to recover.
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/pc-lock-dark.webp">
+        <img src="docs/screenshots/pc-lock.webp" alt="The Windows lock screen asking for the master password">
+      </picture>
+      <br><b>Lock screen.</b> The master password unlocks the vault on this PC.
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/pc-security.webp" alt="The Security view listing a weak password, reused passwords and an expiring API token">
+      <br><b>Security check.</b> Weak, reused and expiring items, with a way to fix each.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/pc-air-wall.webp" alt="Settings with Keep KAPEVault offline turned on and Windows Firewall confirming the block">
+      <br><b>Air Wall.</b> Windows Firewall keeps the app offline, and a test proves it.
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/pc-opener.webp" alt="The Forever Opener showing the vault read-only in a web browser">
+      <br><b>Forever Opener.</b> Your vault in any browser, offline, read-only.
+    </td>
+  </tr>
+</table>
 
 The file format is in [FORMAT.md](FORMAT.md), the backup and phone sync design in [SYNC.md](SYNC.md) (a
 premortem; its section 3 is what shipped, code in `core/sync/`), and the most
