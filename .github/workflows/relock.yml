@@ -1,0 +1,160 @@
+name: Relock
+
+# Regenerates the root package-lock.json on Linux and pushes it to a branch for a maintainer to
+# open a PR from (mobile/package-lock.json is relocked by hand; this workflow never touches it).
+# Run this after ANY dependency change instead of trusting a lock written on Windows: npm there never records the wasm32-wasi optional variants (@emnapi/*),
+# so `npm ci` rejects the lock on every Linux checkout - CI, Cloudflare Pages, Vercel,
+# the VPS.
+#
+# It never pushes straight to the branch: a from-scratch resolve moves every
+# transitive dependency to the newest version in range, silently, and this is a
+# password vault's supply chain. It also never opens the PR itself - this repo has
+# "Allow GitHub Actions to create and approve pull requests" turned off, so a
+# GITHUB_TOKEN PR would fail to open (and even if it did open, a token-authored PR
+# does not trigger CI here anyway). Instead it pushes the branch and writes a ready
+# compare link plus the package-change summary to the run summary; a maintainer opens the
+# PR from that link, which is a normal push from them and triggers CI as usual.
+#
+# Run:  gh workflow run relock.yml
+# Then: open the PR from the link in the run summary, review the package changes, merge
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  relock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - name: Regenerate the lock
+        # `npm install --package-lock-only` against an EXISTING lock only validates it still
+        # satisfies package.json - it does not walk the tree fresh, so it never adds the
+        # Linux wasm32-wasi optional variants a Windows-written lock is missing. Delete the
+        # lock first so this is a real from-scratch resolution on this OS. Keep the old one
+        # around so the next step can report what actually moved.
+        run: |
+          cp package-lock.json package-lock.json.orig
+          rm -f package-lock.json
+          npm install --package-lock-only --no-audit --no-fund
+
+      - name: Confirm npm ci now accepts it
+        run: npm ci --no-audit --no-fund
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "lock already correct - nothing to push"
+            rm -f package-lock.json.orig
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Summarize what moved
+        if: steps.diff.outputs.changed == 'true'
+        # Reads both locks' "packages" map (lockfileVersion 2/3) and prints one line per
+        # package whose version changed, plus one line per package that is new (the
+        # Linux-only optional variants this whole workflow exists to add). Capped so a huge
+        # transitive shuffle still produces a readable summary instead of a wall of text.
+        run: |
+          node --input-type=module -e '
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          function versions(path) {
+            const pkgs = JSON.parse(readFileSync(path, "utf8")).packages || {};
+            const out = new Map();
+            for (const [key, meta] of Object.entries(pkgs)) {
+              if (!key || !meta || !meta.version) continue;
+              const idx = key.lastIndexOf("node_modules/");
+              const name = idx === -1 ? key : key.slice(idx + "node_modules/".length);
+              out.set(name, meta.version);
+            }
+            return out;
+          }
+
+          const before = versions("package-lock.json.orig");
+          const after = versions("package-lock.json");
+          const changed = [];
+          const added = [];
+          const removed = [];
+
+          for (const [name, newVersion] of after) {
+            if (!before.has(name)) added.push(`+ ${name} ${newVersion}`);
+            else if (before.get(name) !== newVersion) changed.push(`${name} ${before.get(name)} -> ${newVersion}`);
+          }
+          for (const name of before.keys()) {
+            if (!after.has(name)) removed.push(`- ${name} ${before.get(name)}`);
+          }
+
+          const CAP = 200;
+          const lines = [...changed.sort(), ...added.sort(), ...removed.sort()];
+          const shown = lines.slice(0, CAP);
+          if (lines.length > CAP) shown.push(`... and ${lines.length - CAP} more`);
+
+          const body = [
+            "Regenerated package-lock.json from scratch on Linux (ubuntu-latest).",
+            "",
+            "`npm ci` failed against the previous lock on this OS; this is the from-scratch",
+            "resolve that fixes it. Review the package changes below before merging - a fresh",
+            "resolve can move any transitive dependency to the newest version in range.",
+            "",
+            "```",
+            ...(shown.length ? shown : ["(no package version changes detected)"]),
+            "```",
+          ].join("\n");
+
+          writeFileSync("relock-summary.md", body);
+          console.log(body);
+          '
+          rm -f package-lock.json.orig
+
+      - name: Push the regenerated lock
+        # Pushes with the plain GITHUB_TOKEN (contents: write is enough for a push - no
+        # pull-requests permission needed since this step never opens a PR). Every value
+        # interpolated below comes from env:, never ${{ }} inside run: - a run: block is a
+        # shell script, and splicing an expression straight into it lets a crafted value
+        # (e.g. a branch or ref name) break out of the intended command.
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          BRANCH_NAME: relock/${{ github.run_id }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH_NAME"
+          git add package-lock.json
+          git commit -m "chore: regenerate package lock on Linux"
+          git push origin "$BRANCH_NAME"
+
+      - name: Write the run summary
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          BRANCH_NAME: relock/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.ref_name }}
+        run: |
+          {
+            echo "## Relock: package-lock.json changed"
+            echo ""
+            echo "Pushed to \`$BRANCH_NAME\`. This did not open a PR (Actions can't open PRs on"
+            echo "this repo) - open it yourself so it runs CI as a normal push:"
+            echo ""
+            echo "https://github.com/$REPO/compare/$BASE_REF...$BRANCH_NAME?expand=1"
+            echo ""
+            cat relock-summary.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          rm -f relock-summary.md
+
+      - name: No changes
+        if: steps.diff.outputs.changed == 'false'
+        run: |
+          echo "## Relock: package-lock.json already correct on Linux - nothing pushed" >> "$GITHUB_STEP_SUMMARY"

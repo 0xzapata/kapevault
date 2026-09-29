@@ -1,0 +1,590 @@
+@import "tailwindcss";
+
+/* Design tokens. Every colour in the app comes from here - never hardcode hex in components. */
+@theme {
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --color-canvas: #ffffff;
+  --color-sidebar: rgb(244 245 248 / 0.62); /* tint over the Windows acrylic material */
+  --color-surface: #f5f5f7;
+  --color-raised: #ffffff;
+  --color-glass: rgb(255 255 255 / 0.58);
+  --color-glass-edge: rgb(255 255 255 / 0.7);
+
+  /* Apple system colours - only for category tiles, never as a second accent. */
+  --color-sys-blue: #007aff;
+  --color-sys-orange: #ff9500;
+  --color-sys-green: #34c759;
+  --color-sys-teal: #30b0c7;
+  --color-sys-red: #ff3b30;
+  --color-sys-purple: #af52de;
+  --color-sys-indigo: #5856d6;
+  --color-sys-gray: #8e8e93;
+  --color-sys-brown: #a2845e; /* things (Where Is It): cardboard, a physical box */
+  --color-sys-cyan: #32ade6; /* devices (Sticker Capture) */
+  --color-sys-pink: #ff2d55; /* IDs */
+  --color-mono-top: #a7a7ad; /* Contacts-style monogram */
+  --color-mono-bottom: #85858b;
+  --color-icon-top: #45a3ff; /* login + link tiles (the pre-coffee app icon's blue) */
+  --color-icon-bottom: #0063d8;
+  --color-field: rgb(0 0 0 / 0.05);
+  --color-hover: rgb(0 0 0 / 0.045);
+  --color-select: rgb(0 0 0 / 0.075); /* sidebar selection: neutral, so the list keeps the one blue */
+  --color-line: rgb(0 0 0 / 0.08);
+  --color-line-strong: rgb(0 0 0 / 0.14);
+
+  --color-ink: #1d1d1f;
+  --color-ink-2: #515154;
+  --color-ink-3: #86868b;
+
+  --color-accent: #0071e3;
+  --color-accent-soft: rgb(0 113 227 / 0.1);
+  --color-on-accent: #ffffff;
+  --color-on-accent-2: rgb(255 255 255 / 0.78);
+  --color-ok: #248a3d;
+  --color-ok-soft: rgb(36 138 61 / 0.1);
+  --color-danger: #d70015;
+  --color-danger-soft: rgb(215 0 21 / 0.08);
+  --color-warn: #c93400; /* health issues that are not urgent */
+  --color-warn-soft: rgb(255 149 0 / 0.12);
+  --color-ok-on-dark: #30d158; /* toast glyphs on the ink pill */
+  --color-danger-on-dark: #ff6961;
+  --color-meter-0: #d70015; /* password strength, weakest to strongest */
+  --color-meter-1: #ff6a00;
+  --color-meter-2: #d9a400;
+  --color-meter-3: #34c759;
+  --color-meter-4: #248a3d;
+  --color-scrim: rgb(0 0 0 / 0.22);
+  --color-folder-back: #4da3f0;
+  --color-folder-front: #74bdf8;
+  --color-folder-lip: #9dd1fb;
+  --color-checker: #eceef2;
+  --color-wash-a: rgb(0 113 227 / 0.16); /* lock screen wash, one hue family */
+  --color-wash-b: rgb(48 176 199 / 0.13);
+  --color-wash-base: rgb(255 255 255 / 0.34);
+  --color-toast: #1d1d1f; /* the confirmation pill */
+  --color-stage: #1d1d1f; /* behind a playing video, every theme */
+  --color-paper: #ffffff; /* behind previewed documents (Markdown, HTML): they are styled for white, every theme */
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
+  --shadow-accent: 0 2px 8px rgb(0 113 227 / 0.35);
+  --shadow-tile: 0 1px 1px rgb(0 0 0 / 0.04), 0 3px 10px rgb(0 0 0 / 0.07);
+  --shadow-icon: 0 8px 22px rgb(60 32 14 / 0.22), 0 2px 4px rgb(60 32 14 / 0.12); /* warm, under the coffee icon */
+  --shadow-sheet: 0 2px 8px rgb(0 0 0 / 0.06), 0 24px 64px rgb(0 0 0 / 0.18);
+  --shadow-knob: 0 1px 3px rgb(0 0 0 / 0.25); /* a switch's knob */
+  --shadow-float: 0 4px 18px rgb(0 0 0 / 0.08); /* a glass pill floating on the lock screen wash */
+
+  /* Emil Kowalski's curves (emilkowalski/skills, animate). Never ease-in on UI. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Transparent so the window's acrylic shows through wherever a surface is glass. */
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Frameless window: the top bar drags the window; anything clickable inside it opts out. */
+.drag {
+  -webkit-app-region: drag;
+}
+.drag button,
+.drag input,
+.drag a,
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+/* Drag regions reach through anything painted over them: a real mouse drag on a sheet's scrim
+   moved the window. Every overlay opts out, so it owns its clicks. */
+.scrim,
+.drawer-scrim,
+.drawer,
+[role="menu"],
+[role="dialog"] {
+  -webkit-app-region: no-drag;
+}
+
+/* Glass surfaces keep text legible: slightly heavier ink and a bright top edge catching light. */
+.glass {
+  background: var(--color-glass);
+  box-shadow: inset 0 1px 0 var(--color-glass-edge), var(--shadow-sheet);
+}
+
+/* Themes (Settings > General > Appearance). Classic is the @theme above; each theme only swaps
+   tokens, so components never know which one is on. main.cjs resolves "System" to classic or dark. */
+
+/* Dark: macOS dark system colours; the window material turns dark with it (nativeTheme). */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #1e1e20;
+  --color-sidebar: rgb(38 38 42 / 0.55);
+  --color-surface: #171719;
+  --color-raised: #2a2a2d;
+  --color-glass: rgb(44 44 48 / 0.62);
+  --color-glass-edge: rgb(255 255 255 / 0.08);
+  --color-sys-blue: #0a84ff;
+  --color-sys-orange: #ff9f0a;
+  --color-sys-green: #30d158;
+  --color-sys-teal: #40c8e0;
+  --color-sys-red: #ff453a;
+  --color-sys-purple: #bf5af2;
+  --color-sys-indigo: #5e5ce6;
+  --color-sys-gray: #8e8e93;
+  --color-sys-brown: #ac8e68;
+  --color-sys-cyan: #64d2ff;
+  --color-sys-pink: #ff375f;
+  --color-mono-top: #8e8e93;
+  --color-mono-bottom: #636366;
+  --color-field: rgb(255 255 255 / 0.08);
+  --color-hover: rgb(255 255 255 / 0.06);
+  --color-select: rgb(255 255 255 / 0.1);
+  --color-line: rgb(255 255 255 / 0.09);
+  --color-line-strong: rgb(255 255 255 / 0.18);
+  --color-ink: #f5f5f7;
+  --color-ink-2: #c7c7cc;
+  --color-ink-3: #8e8e93;
+  --color-accent: #0a84ff;
+  --color-accent-soft: rgb(10 132 255 / 0.2);
+  --color-ok: #30d158;
+  --color-ok-soft: rgb(48 209 88 / 0.15);
+  --color-danger: #ff453a;
+  --color-danger-soft: rgb(255 69 58 / 0.15);
+  --color-warn: #ff9f0a;
+  --color-warn-soft: rgb(255 159 10 / 0.16);
+  --color-scrim: rgb(0 0 0 / 0.5);
+  --color-checker: #2c2c2f;
+  --color-wash-a: rgb(10 132 255 / 0.22);
+  --color-wash-b: rgb(64 200 224 / 0.14);
+  --color-wash-base: rgb(20 20 22 / 0.5);
+  --color-toast: #3a3a3c;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-tile: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-accent: 0 2px 8px rgb(10 132 255 / 0.35);
+  --shadow-sheet: 0 2px 8px rgb(0 0 0 / 0.3), 0 24px 64px rgb(0 0 0 / 0.55);
+}
+
+/* Classic values for every token a theme changes. The root gets them from @theme; this block
+   exists so a light subtree (the Classic / Colorblind / High contrast thumbnails in Settings)
+   stays light inside a dark window. Generated from @theme - keep the two in step. */
+[data-theme="classic"],
+[data-theme="colorblind"],
+[data-theme="contrast"] {
+  color-scheme: light;
+  --color-canvas: #ffffff;
+  --color-sidebar: rgb(244 245 248 / 0.62);
+  --color-surface: #f5f5f7;
+  --color-raised: #ffffff;
+  --color-glass: rgb(255 255 255 / 0.58);
+  --color-glass-edge: rgb(255 255 255 / 0.7);
+  --color-sys-blue: #007aff;
+  --color-sys-orange: #ff9500;
+  --color-sys-green: #34c759;
+  --color-sys-teal: #30b0c7;
+  --color-sys-red: #ff3b30;
+  --color-sys-purple: #af52de;
+  --color-sys-indigo: #5856d6;
+  --color-sys-gray: #8e8e93;
+  --color-sys-brown: #a2845e;
+  --color-sys-cyan: #32ade6;
+  --color-sys-pink: #ff2d55;
+  --color-mono-top: #a7a7ad;
+  --color-mono-bottom: #85858b;
+  --color-field: rgb(0 0 0 / 0.05);
+  --color-hover: rgb(0 0 0 / 0.045);
+  --color-select: rgb(0 0 0 / 0.075);
+  --color-line: rgb(0 0 0 / 0.08);
+  --color-line-strong: rgb(0 0 0 / 0.14);
+  --color-ink: #1d1d1f;
+  --color-ink-2: #515154;
+  --color-ink-3: #86868b;
+  --color-accent: #0071e3;
+  --color-accent-soft: rgb(0 113 227 / 0.1);
+  --color-ok: #248a3d;
+  --color-ok-soft: rgb(36 138 61 / 0.1);
+  --color-danger: #d70015;
+  --color-danger-soft: rgb(215 0 21 / 0.08);
+  --color-warn: #c93400;
+  --color-warn-soft: rgb(255 149 0 / 0.12);
+  --color-scrim: rgb(0 0 0 / 0.22);
+  --color-checker: #eceef2;
+  --color-wash-a: rgb(0 113 227 / 0.16);
+  --color-wash-b: rgb(48 176 199 / 0.13);
+  --color-wash-base: rgb(255 255 255 / 0.34);
+  --color-toast: #1d1d1f;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
+  --shadow-tile: 0 1px 1px rgb(0 0 0 / 0.04), 0 3px 10px rgb(0 0 0 / 0.07);
+  --shadow-accent: 0 2px 8px rgb(0 113 227 / 0.35);
+  --shadow-sheet: 0 2px 8px rgb(0 0 0 / 0.06), 0 24px 64px rgb(0 0 0 / 0.18);
+  --color-ok-on-dark: #30d158;
+  --color-danger-on-dark: #ff6961;
+  --color-meter-0: #d70015;
+  --color-meter-1: #ff6a00;
+  --color-meter-2: #d9a400;
+  --color-meter-3: #34c759;
+  --color-meter-4: #248a3d;
+}
+
+/* Colorblind: the Okabe-Ito palette. Good vs bad never rests on red vs green - ok is blue,
+   danger vermillion, warn reddish purple, and the strength meter runs vermillion to blue. */
+[data-theme="colorblind"] {
+  --color-sys-green: #009e73;
+  --color-sys-red: #d55e00;
+  --color-sys-orange: #e69f00;
+  --color-sys-teal: #56b4e9;
+  --color-ok: #0072b2;
+  --color-ok-soft: rgb(0 114 178 / 0.1);
+  --color-danger: #b34f00;
+  --color-danger-soft: rgb(213 94 0 / 0.1);
+  --color-warn: #9e4a7e;
+  --color-warn-soft: rgb(204 121 167 / 0.14);
+  --color-ok-on-dark: #56b4e9;
+  --color-danger-on-dark: #f08c4a;
+  --color-meter-0: #d55e00;
+  --color-meter-1: #e69f00;
+  --color-meter-2: #56b4e9;
+  --color-meter-3: #0072b2;
+  --color-meter-4: #004f7c;
+}
+
+/* High contrast: solid surfaces (no glass), black ink, hairlines you can actually see. */
+[data-theme="contrast"] {
+  --color-sidebar: #eceef2;
+  --color-surface: #f2f2f5;
+  --color-glass: #ffffff;
+  --color-sys-blue: #0040dd;
+  --color-sys-orange: #c93400;
+  --color-sys-green: #007a2e;
+  --color-sys-teal: #007a8a;
+  --color-sys-red: #d70015;
+  --color-sys-purple: #8944ab;
+  --color-sys-indigo: #3634a3;
+  --color-sys-gray: #6c6c70;
+  --color-sys-brown: #7f6545;
+  --color-sys-cyan: #0071a4;
+  --color-sys-pink: #d30f45;
+  --color-field: rgb(0 0 0 / 0.07);
+  --color-hover: rgb(0 0 0 / 0.08);
+  --color-select: rgb(0 0 0 / 0.14);
+  --color-line: rgb(0 0 0 / 0.3);
+  --color-line-strong: rgb(0 0 0 / 0.5);
+  --color-ink: #000000;
+  --color-ink-2: #1d1d1f;
+  --color-ink-3: #48484a;
+  --color-accent: #0040dd;
+  --color-accent-soft: rgb(0 64 221 / 0.12);
+  --color-ok: #006b25;
+  --color-danger: #b00012;
+  --color-warn: #8a2c00;
+}
+
+/* After the themes, so it wins: reduced transparency makes every glass surface solid. */
+@media (prefers-reduced-transparency: reduce) {
+  :root:not([data-theme="contrast"]),
+  [data-theme="classic"],
+  [data-theme="colorblind"] {
+    --color-sidebar: #f4f5f8;
+    --color-glass: #ffffff;
+  }
+  [data-theme="dark"] {
+    --color-sidebar: #26262a;
+    --color-glass: #2c2c30;
+  }
+}
+
+/* Lock screen: soft blue/teal light pooling over the acrylic glass. */
+.lock-wash {
+  background:
+    radial-gradient(55% 45% at 18% 12%, var(--color-wash-a), transparent 70%),
+    radial-gradient(50% 45% at 86% 92%, var(--color-wash-b), transparent 70%),
+    var(--color-wash-base);
+}
+
+/* Keyboard focus, one look on every control: a 2px accent outline 2px off it. The gap shows the surface
+   behind, so it reads on white (4.9:1, WCAG 2.2 non-text 3:1) and around an accent-filled tile or row
+   alike. A list row shows it while its listbox has the focus. focus-ring-inset draws it inside, for rows
+   in a scroller that would clip it; drawn inside an accent-filled row it takes --focus-ring-color
+   (on-accent, 3:1 or better on the accent in every theme). */
+@utility focus-ring {
+  outline: none;
+  &:focus-visible,
+  [role="listbox"]:focus-visible &[aria-selected="true"] {
+    outline: 2px solid var(--focus-ring-color, var(--color-accent));
+    outline-offset: var(--focus-ring-offset, 2px);
+  }
+}
+@utility focus-ring-inset {
+  --focus-ring-offset: -2px;
+}
+
+/* Values the user copies by hand stay selectable. */
+.selectable {
+  user-select: text;
+}
+
+/* Motion follows the animate skill: purpose first, transform/opacity only, UI under 300ms. */
+
+/* Feedback: presses answer on pointer-down (160ms). */
+.press {
+  transition: transform 160ms var(--ease-out);
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+/* State indication for rows clicked tens of times a day: colour only, near-imperceptible. */
+.row {
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+/* Preventing a jarring swap when the selection changes: short and small, it happens a lot. */
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.settle {
+  animation: settle 180ms var(--ease-out);
+}
+
+/* Modal: centred (not trigger-anchored), enters and exits the same way; exit is quicker. */
+.sheet,
+.scrim {
+  transition:
+    opacity 250ms var(--ease-out),
+    transform 250ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+.scrim {
+  @starting-style {
+    transform: none;
+  }
+}
+[data-closing] .sheet,
+.scrim[data-closing] {
+  opacity: 0;
+  transition-duration: 180ms;
+}
+[data-closing] .sheet {
+  transform: scale(0.96);
+}
+
+/* Dropdown: grows out of the button above it. */
+.drop {
+  transform-origin: top center;
+  transition:
+    opacity 180ms var(--ease-out),
+    transform 180ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+/* Icon swap (copy -> tick): the tick blooms in so the change is legible. */
+.swap-in {
+  transition:
+    opacity 160ms var(--ease-out),
+    transform 160ms var(--ease-out),
+    filter 160ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.6);
+    filter: blur(2px);
+  }
+}
+
+/* Occasional group entrances (opening a folder, the lock screen): 40ms stagger, never blocks input. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.stagger > * {
+  animation: rise 300ms var(--ease-out) backwards;
+}
+.stagger > :nth-child(2) { animation-delay: 40ms; }
+.stagger > :nth-child(3) { animation-delay: 80ms; }
+.stagger > :nth-child(4) { animation-delay: 120ms; }
+.stagger > :nth-child(5) { animation-delay: 160ms; }
+.stagger > :nth-child(6) { animation-delay: 200ms; }
+.stagger > :nth-child(n + 7) { animation-delay: 240ms; }
+
+/* Feedback for a wrong master password: a short horizontal shake, like macOS. */
+@keyframes shake {
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+.shake,
+.stagger > .shake {
+  animation: shake 280ms var(--ease-out);
+  animation-delay: 0ms;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Toast: rises from the bottom edge, drops away quicker than it came. */
+.toast {
+  transition:
+    opacity 220ms var(--ease-out),
+    transform 220ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+.toast[data-leaving] {
+  opacity: 0;
+  transform: translateY(6px);
+  transition-duration: 160ms;
+}
+
+/* Menus grow from the edge they are attached to (origin set inline). */
+.menu {
+  transition:
+    opacity 140ms var(--ease-out),
+    transform 140ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+/* Sidebar drawer (narrow windows): slides in from the left over a scrim. */
+.drawer {
+  transition: transform 260ms var(--ease-out);
+  @starting-style {
+    transform: translateX(-100%);
+  }
+}
+.drawer[data-closing] {
+  transform: translateX(-100%);
+  transition-duration: 200ms;
+}
+.drawer-scrim {
+  transition: opacity 260ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+  }
+}
+.drawer-scrim[data-closing] {
+  opacity: 0;
+  transition-duration: 200ms;
+}
+
+/* Compact (one column): the item slides over the list like an iOS push; Back reverses it. */
+.push {
+  animation: push-in 280ms var(--ease-out);
+}
+@keyframes push-in {
+  from {
+    transform: translateX(28%);
+    opacity: 0;
+  }
+}
+
+/* 2FA countdown ring: one linear sweep per code period, restarted with each new code. */
+@keyframes ring-drain {
+  from {
+    stroke-dashoffset: var(--ring-from);
+  }
+  to {
+    stroke-dashoffset: var(--ring-len);
+  }
+}
+.ring-drain {
+  animation: ring-drain linear forwards;
+}
+
+/* Loading placeholder (reading a label): a soft sheen sweeping across, transform only. */
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--color-hover), transparent);
+  animation: shimmer 1.2s var(--ease-in-out) infinite;
+}
+
+/* A dragged item's drop target: a soft accent wash, no layout change. */
+.drop-target {
+  background: var(--color-accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
+}
+
+/* Reduced motion: keep the fades that explain a change, drop every movement. */
+@media (prefers-reduced-motion: reduce) {
+  .settle,
+  .stagger > * {
+    animation: fade 200ms ease;
+  }
+  .shake,
+  .press:active {
+    animation: none;
+    transform: none;
+  }
+  .push {
+    animation: fade 200ms ease;
+  }
+  .shimmer::after {
+    animation: none;
+  }
+  .toast,
+  .menu,
+  .drawer,
+  .drawer[data-closing],
+  .sheet,
+  .drop,
+  .swap-in,
+  [data-closing] .sheet {
+    transform: none;
+    filter: none;
+    @starting-style {
+      transform: none;
+      filter: none;
+    }
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -1,0 +1,58 @@
+name: Mac build
+
+# Builds the macOS .dmg (universal: Apple Silicon + Intel) on a GitHub macOS runner - this project
+# is developed on Windows and cannot build a Mac app locally. macOS minutes cost 10x on a private
+# repo, so this runs only by hand or on a version tag, never on every push.
+#
+# Run:  gh workflow run mac.yml    (or push a tag: git tag v0.2.0 && git push origin v0.2.0)
+# Get:  gh run download <run-id> -n KAPEVault-mac
+#
+# The app is ad-hoc signed (package.json build.mac.identity "-"), not notarized: on another Mac,
+# Gatekeeper blocks the first open - right-click the app > Open, or System Settings > Privacy &
+# Security > Open Anyway.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # The exact Node the host will install. .nvmrc must be a full version.
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # If this rejects a lock written on Windows, relock (see relock.yml) - never relock here.
+      - run: npm ci
+
+      - name: Test
+        run: npm test
+
+      # `prebuild` runs scripts/check-node-pin.mjs; a Vite/TS build also typechecks.
+      - name: Build
+        run: npm run build
+
+      # directories.output in package.json uses ${env.LOCALAPPDATA}, which macOS does not have.
+      - name: Package the dmg
+        run: npx electron-builder --mac --publish never --config.directories.output=dist-installer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KAPEVault-mac
+          path: dist-installer/*.dmg
+          if-no-files-found: error
+          retention-days: 14

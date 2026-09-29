@@ -1,0 +1,90 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+// The version is mobile/package.json's. versionCode = major * 10000 + minor * 100 + patch, so it
+// rises with every version (minor and patch stay under 100); Android refuses an update that lowers it.
+def appVersion = new groovy.json.JsonSlurper().parse(file('../../package.json')).version
+def (major, minor, patch) = appVersion.replaceFirst(/[-+].*/, '').tokenize('.')*.toInteger()
+
+// The release key lives outside the repo: ~/.kapevault-signing/keystore.properties (storeFile,
+// storePassword, keyAlias, keyPassword), or the file KAPEVAULT_SIGNING names. Without it the release
+// APK stays unsigned, as before (CI, and npm run proof -- --release, which signs it with the debug key).
+// KAPEVAULT_SIGNING=none turns the key off on a PC that has it.
+def signingFile = file(System.getenv('KAPEVAULT_SIGNING') ?: "${System.getProperty('user.home')}/.kapevault-signing/keystore.properties")
+def signing = new Properties()
+if (signingFile.isFile()) signingFile.withInputStream { signing.load(it) }
+
+android {
+    namespace = "com.brewedops.kapevault"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.brewedops.kapevault"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode major * 10000 + minor * 100 + patch
+        versionName appVersion
+        aaptOptions {
+            // aapt's default skips files starting with "_", which Vite emits; only dotfiles and VCS junk are left out.
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    if (signing.storeFile) {
+        signingConfigs {
+            release {
+                // A relative storeFile is read beside keystore.properties.
+                storeFile signingFile.parentFile.toPath().resolve(signing.storeFile).toFile()
+                storePassword signing.storePassword
+                keyAlias signing.keyAlias
+                keyPassword signing.keyPassword
+                // v2 for Android 7-8, v3 on 9+: v3 carries a proof-of-rotation record, so the key can be
+                // rotated later without breaking updates to installed copies.
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+        buildTypes {
+            release { signingConfig signingConfigs.release }
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+    }
+}
+
+dependencies {
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    // The QR scan (QrScannerPlugin): CameraX for the picture, ZXing's core library (plain Java, no
+    // dependencies) to read it on the phone. No ML Kit or Play services: nothing leaves the phone.
+    implementation "androidx.camera:camera-camera2:$androidxCameraVersion"
+    implementation "androidx.camera:camera-lifecycle:$androidxCameraVersion"
+    implementation "androidx.camera:camera-view:$androidxCameraVersion"
+    implementation "com.google.zxing:core:$zxingCoreVersion"
+    implementation project(':capacitor-android')
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+// npm run sim:live points the app at a dev server for that run; a release must never ship that.
+def webConfig = file('src/main/assets/capacitor.config.json')
+tasks.register('checkNoDevServer') {
+    inputs.file(webConfig)
+    doLast {
+        if (new groovy.json.JsonSlurper().parse(webConfig).server?.url) {
+            throw new GradleException("capacitor.config.json has a dev server url (left from npm run sim:live). Run `npm run sync` first.")
+        }
+    }
+}
+// The native shell check page is for debug builds only (vite build --mode debug); a release ships the vault alone.
+def shellPage = file('src/main/assets/public/shell.html')
+tasks.register('checkNoShellPage') {
+    doLast {
+        if (shellPage.exists()) {
+            throw new GradleException("The web assets hold the debug-only shell check page (shell.html). Run `npm run sync` first.")
+        }
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn('checkNoDevServer', 'checkNoShellPage') }

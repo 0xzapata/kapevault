@@ -1,0 +1,16 @@
+ext {
+    // Android 11: the platform BiometricPrompt takes BIOMETRIC_STRONG and Keystore keys take
+    // setUserAuthenticationParameters, so no androidx.biometric and no per-version branches.
+    minSdkVersion = 30
+    compileSdkVersion = 36
+    targetSdkVersion = 36
+    androidxActivityVersion = '1.11.0'
+    androidxAppCompatVersion = '1.7.1'
+    androidxCoordinatorLayoutVersion = '1.3.0'
+    androidxCoreVersion = '1.17.0'
+    androidxFragmentVersion = '1.8.9'
+    androidxWebkitVersion = '1.14.0'
+    cordovaAndroidVersion = '14.0.1'
+    androidxCameraVersion = '1.5.3'
+    zxingCoreVersion = '3.5.4'
+}

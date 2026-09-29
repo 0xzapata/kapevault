@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="kapevault-opener" content="{{version}}">
+<meta http-equiv="Content-Security-Policy" content="{{csp}}">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAPEVault Opener</title>
+<style>{{style}}</style>
+</head>
+<body>
+<!-- The app icon (an espresso cup, latte art poured as a keyhole), drawn once and used twice: a
+     gradient inside a hidden svg would not paint. -->
+<svg class="sprite" aria-hidden="true">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdf7ee"/><stop offset="1" stop-color="#ead7bd"/></linearGradient>
+    <linearGradient id="cup" gradientUnits="userSpaceOnUse" x1="70" y1="40" x2="186" y2="216"><stop offset="0" stop-color="#6a4430"/><stop offset="1" stop-color="#2d1b12"/></linearGradient>
+    <radialGradient id="coffee" cx="0.42" cy="0.36" r="0.7"><stop offset="0" stop-color="#9a6438"/><stop offset="1" stop-color="#3a2214"/></radialGradient>
+    <mask id="rim" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><rect width="256" height="256" fill="#fff"/><circle cx="118" cy="128" r="50"/></mask>
+  </defs>
+  <symbol id="app-mark" viewBox="0 0 256 256">
+    <rect width="256" height="256" rx="58" fill="url(#tile)"/>
+    <g transform="translate(4 0)">
+      <circle cx="118" cy="128" r="86" fill="url(#cup)" opacity="0.3"/>
+      <path d="M176 128H204" stroke="url(#cup)" stroke-width="22" stroke-linecap="round"/>
+      <circle cx="118" cy="128" r="64" fill="url(#cup)" mask="url(#rim)"/>
+      <circle cx="118" cy="128" r="50" fill="url(#coffee)"/>
+      <g fill="#f6e8d3"><circle cx="118" cy="117" r="13"/><path d="M113.5 121H122.5L126 143Q126.5 147 122 147H114Q109.5 147 110 143Z"/></g>
+    </g>
+  </symbol>
+</svg>
+<main id="unlock" class="unlock">
+  <div class="card">
+    <svg class="app-icon" aria-hidden="true"><use href="#app-mark"/></svg>
+    <h1>KAPEVault Opener</h1>
+    <p class="lead">Open your vault file in this browser. No app or internet needed.</p>
+    <form id="unlock-form" autocomplete="off" novalidate>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept=".kapevault,.bovault" aria-label="Vault file">
+        <span class="drop-icon" data-icon="fileArrowUp"></span>
+        <span class="drop-text">
+          <span class="drop-title" id="drop-title">Choose a vault file</span>
+          <span class="drop-sub" id="drop-sub">or drop it here</span>
+        </span>
+      </label>
+      <input type="password" id="password" class="input" placeholder="Master password" aria-label="Master password" autocomplete="off" spellcheck="false">
+      <button type="submit" class="primary" id="open">Open</button>
+      <div class="progress" id="progress" hidden><div class="bar" id="bar"></div></div>
+      <p class="message" id="message" role="alert"></p>
+    </form>
+  </div>
+  <section class="about" aria-label="About this page">
+    <p class="version">KAPEVault Opener {{version}} - read only. Keep this file with your backups; it needs only a browser.</p>
+    <!-- The file format, for whoever has to open a vault in twenty years. Folded away: nobody else needs it. -->
+    <details>
+      <summary>How this page works</summary>
+      <p>A KAPEVault vault is one JSON file. Its header names the format (<code>kapevault</code>, or <code>bovault</code> from before the rename), version 1, and the scrypt settings with a random 16-byte salt. Your master password goes through scrypt (N up to 2^17, r = 8, p = 1) to make a 256-bit key, and AES-256-GCM with a 12-byte IV and a 16-byte tag seals the whole vault. This page repeats exactly that with your browser's own WebCrypto and a built-in scrypt. Its security policy blocks every network request, and nothing is saved, so closing the tab forgets everything.</p>
+    </details>
+  </section>
+</main>
+
+<div id="vault" class="vault" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <svg class="brand-icon" aria-hidden="true"><use href="#app-mark"/></svg>
+      <div class="brand-text">
+        <p class="brand-name">KAPEVault Opener</p>
+        <p class="brand-file" id="file-name"></p>
+      </div>
+    </div>
+    <nav class="spaces" id="spaces" aria-label="Spaces"></nav>
+    <div class="side-actions">
+      <button type="button" class="plain" id="download"><span data-icon="downloadSimple"></span>Download everything</button>
+      <button type="button" class="plain" id="close"><span data-icon="lockSimple"></span>Close vault</button>
+    </div>
+  </aside>
+  <section class="content" aria-label="Items">
+    <!-- One sticky block: the search, the download warning and the list heading never hide behind each other. -->
+    <div class="top">
+    <header class="toolbar">
+      <label class="search">
+        <span data-icon="magnifyingGlass"></span>
+        <input type="search" id="search" placeholder="Search" aria-label="Search" autocomplete="off" spellcheck="false">
+      </label>
+      <span class="badge">Read only</span>
+    </header>
+    <div class="export" id="export" hidden>
+      <span class="export-icon" data-icon="warningCircle"></span>
+      <div class="export-text">
+        <p class="export-title">This file is not encrypted</p>
+        <p>Anyone who opens it can read every password. Keep it off shared folders and delete it when you are done.</p>
+        <div class="export-actions">
+          <button type="button" class="primary small" id="download-confirm">Download</button>
+          <button type="button" class="plain small" id="download-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div class="list-head">
+      <h2 id="list-title">All items</h2>
+      <p id="list-count"></p>
+    </div>
+    </div>
+    <ul class="items" id="items"></ul>
+    <p class="empty" id="empty" hidden>No items match.</p>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>{{script}}</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# gitleaks: the default rules. Placeholder keys and mock passwords in tests and the demo vault are
+# marked inline with a `gitleaks:allow` comment on the flagged line, so no whole file is exempt.
+[extend]
+useDefault = true

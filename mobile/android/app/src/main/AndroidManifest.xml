@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- INTERNET: R2 backup sync only. USE_BIOMETRIC: fingerprint unlock (granted at install, no prompt).
+         CAMERA: the QR scan (QrScannerPlugin), asked for when a scan starts. A phone without a camera
+         still installs the app: the keys are typed or pasted there. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- HIDE_OVERLAY_WINDOWS (Android 12+, granted at install): other apps' floating windows are hidden
+         while the vault or the fill screen is up, so nothing can draw over them to steal taps. -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
+    <!-- Autofill checks a browser's signing certificate before trusting the page domain it reports
+         (TrustedBrowsers.kt). Android 11+ hides other apps unless named here; a hidden one fails the
+         check and is treated as a plain app. -->
+    <queries>
+        <package android:name="com.android.chrome" />
+        <package android:name="com.chrome.beta" />
+        <package android:name="com.chrome.dev" />
+        <package android:name="com.chrome.canary" />
+        <package android:name="org.chromium.chrome" />
+        <package android:name="org.mozilla.firefox" />
+        <package android:name="org.mozilla.firefox_beta" />
+        <package android:name="org.mozilla.fenix" />
+        <package android:name="org.mozilla.focus" />
+        <package android:name="com.microsoft.emmx" />
+        <package android:name="com.brave.browser" />
+        <package android:name="com.sec.android.app.sbrowser" />
+        <package android:name="com.opera.browser" />
+        <package android:name="com.duckduckgo.mobile.android" />
+        <package android:name="com.vivaldi.browser" />
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
+        android:theme="@style/AppTheme.NoActionBar">
+
+        <!-- enableOnBackInvokedCallback: predictive Back. MainActivity's own Back callback is always on
+             (closes a layer, else moves the app to the background) - see pageBack there.
+             taskAffinity="": no other app's activity can join the vault's task by claiming our affinity
+             (task hijacking); singleTask still finds the vault's own task by its activity. -->
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".ClipboardClearJob"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
+
+        <!-- Autofill: only the system can bind it (BIND_AUTOFILL_SERVICE); the user picks KAPEVault as
+             the phone's autofill service in Settings. Its suggestion opens AutofillAuthActivity, which
+             only this app can start (not exported; Android starts it through our PendingIntent). -->
+        <service
+            android:name=".KapeAutofillService"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service" />
+        </service>
+
+        <activity
+            android:name=".AutofillAuthActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false" />
+    </application>
+</manifest>

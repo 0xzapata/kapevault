@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The cup of src/assets/app-icon.svg (256 units), centred in the 108dp adaptive-icon canvas so
+     the saucer sits inside the 66dp safe zone. Its rim mask is drawn as a 14-unit ring. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="360"
+    android:viewportHeight="360">
+    <group android:translateX="56" android:translateY="52">
+        <path
+            android:fillAlpha="0.3"
+            android:pathData="M32,128a86,86 0,1 0,172 0a86,86 0,1 0,-172 0z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="70" android:startY="40" android:endX="186" android:endY="216"
+                    android:startColor="#6A4430" android:endColor="#2D1B12" />
+            </aapt:attr>
+        </path>
+        <path
+            android:strokeWidth="22"
+            android:strokeLineCap="round"
+            android:pathData="M176,128H204">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="70" android:startY="40" android:endX="186" android:endY="216"
+                    android:startColor="#6A4430" android:endColor="#2D1B12" />
+            </aapt:attr>
+        </path>
+        <path
+            android:strokeWidth="14"
+            android:pathData="M61,128a57,57 0,1 0,114 0a57,57 0,1 0,-114 0z">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="70" android:startY="40" android:endX="186" android:endY="216"
+                    android:startColor="#6A4430" android:endColor="#2D1B12" />
+            </aapt:attr>
+        </path>
+        <path android:pathData="M68,128a50,50 0,1 0,100 0a50,50 0,1 0,-100 0z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="radial" android:centerX="110" android:centerY="114" android:gradientRadius="70"
+                    android:startColor="#9A6438" android:endColor="#3A2214" />
+            </aapt:attr>
+        </path>
+        <path
+            android:strokeWidth="3"
+            android:strokeColor="#9A6438"
+            android:strokeAlpha="0.45"
+            android:pathData="M71,128a47,47 0,1 0,94 0a47,47 0,1 0,-94 0z" />
+        <path
+            android:fillColor="#F6E8D3"
+            android:pathData="M105,117a13,13 0,1 0,26 0a13,13 0,1 0,-26 0z M113.5,121H122.5L126,143Q126.5,147 122,147H114Q109.5,147 110,143Z" />
+    </group>
+</vector>

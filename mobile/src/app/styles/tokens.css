@@ -1,0 +1,270 @@
+/* The phone's own copy of the design tokens, seeded from the PC's src/index.css (@theme and the
+   Dark, Classic, Colorblind and High contrast blocks) - keep the two in step by hand. Every colour
+   in the app comes from here; components never hardcode hex.
+   One phone-only token: --color-acrylic, the grey the PC gets from Windows acrylic under the lock
+   wash and the sidebar. Android has no acrylic, so the phone paints it (the canvas sampled it). */
+@theme {
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --color-canvas: #ffffff;
+  --color-sidebar: rgb(244 245 248 / 0.62);
+  --color-surface: #f5f5f7;
+  --color-raised: #ffffff;
+  --color-glass: rgb(255 255 255 / 0.58);
+  --color-glass-edge: rgb(255 255 255 / 0.7);
+  --color-acrylic: #909191;
+
+  /* Apple system colours - only for category tiles, never as a second accent. */
+  --color-sys-blue: #007aff;
+  --color-sys-orange: #ff9500;
+  --color-sys-green: #34c759;
+  --color-sys-teal: #30b0c7;
+  --color-sys-red: #ff3b30;
+  --color-sys-purple: #af52de;
+  --color-sys-indigo: #5856d6;
+  --color-sys-gray: #8e8e93;
+  --color-sys-brown: #a2845e;
+  --color-sys-cyan: #32ade6;
+  --color-sys-pink: #ff2d55;
+  --color-mono-top: #a7a7ad;
+  --color-mono-bottom: #85858b;
+  --color-icon-top: #45a3ff;
+  --color-icon-bottom: #0063d8;
+  --color-field: rgb(0 0 0 / 0.05);
+  --color-hover: rgb(0 0 0 / 0.045);
+  --color-select: rgb(0 0 0 / 0.075);
+  --color-line: rgb(0 0 0 / 0.08);
+  --color-line-strong: rgb(0 0 0 / 0.14);
+
+  --color-ink: #1d1d1f;
+  --color-ink-2: #515154;
+  --color-ink-3: #86868b;
+
+  --color-accent: #0071e3;
+  --color-accent-soft: rgb(0 113 227 / 0.1);
+  --color-on-accent: #ffffff;
+  --color-on-accent-2: rgb(255 255 255 / 0.78);
+  --color-ok: #248a3d;
+  --color-ok-soft: rgb(36 138 61 / 0.1);
+  --color-danger: #d70015;
+  --color-danger-soft: rgb(215 0 21 / 0.08);
+  --color-warn: #c93400;
+  --color-warn-soft: rgb(255 149 0 / 0.12);
+  --color-ok-on-dark: #30d158;
+  --color-danger-on-dark: #ff6961;
+  --color-meter-0: #d70015;
+  --color-meter-1: #ff6a00;
+  --color-meter-2: #d9a400;
+  --color-meter-3: #34c759;
+  --color-meter-4: #248a3d;
+  --color-scrim: rgb(0 0 0 / 0.22);
+  --color-folder-back: #4da3f0;
+  --color-folder-front: #74bdf8;
+  --color-folder-lip: #9dd1fb;
+  --color-checker: #eceef2;
+  --color-wash-a: rgb(0 113 227 / 0.16);
+  --color-wash-b: rgb(48 176 199 / 0.13);
+  --color-wash-base: rgb(255 255 255 / 0.34);
+  --color-toast: #1d1d1f;
+  --color-stage: #1d1d1f;
+  --color-paper: #ffffff;
+  /* The warm shadow under the coffee icon (the PC's --shadow-icon), as colours for a ring-free shadow. */
+  --color-icon-shade: rgb(60 32 14 / 0.22);
+  --color-icon-shade-2: rgb(60 32 14 / 0.12);
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
+  --shadow-accent: 0 2px 8px rgb(0 113 227 / 0.35);
+  --shadow-tile: 0 1px 1px rgb(0 0 0 / 0.04), 0 3px 10px rgb(0 0 0 / 0.07);
+  --shadow-icon: 0 8px 22px var(--color-icon-shade), 0 2px 4px var(--color-icon-shade-2);
+  --shadow-sheet: 0 2px 8px rgb(0 0 0 / 0.06), 0 24px 64px rgb(0 0 0 / 0.18);
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* Android's system bars: MainActivity injects --safe-area-inset-* (the page draws behind them); env() elsewhere. */
+:root {
+  --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --kb: 0px; /* the keyboard's overlap, set by useKeyboardInset */
+  --bar: color-mix(in srgb, var(--color-surface) 94%, transparent); /* bottom chrome: 94% opaque, no blur */
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #1e1e20;
+  --color-sidebar: rgb(38 38 42 / 0.55);
+  --color-surface: #171719;
+  --color-raised: #2a2a2d;
+  --color-glass: rgb(44 44 48 / 0.62);
+  --color-glass-edge: rgb(255 255 255 / 0.08);
+  --color-acrylic: #26262a;
+  --color-sys-blue: #0a84ff;
+  --color-sys-orange: #ff9f0a;
+  --color-sys-green: #30d158;
+  --color-sys-teal: #40c8e0;
+  --color-sys-red: #ff453a;
+  --color-sys-purple: #bf5af2;
+  --color-sys-indigo: #5e5ce6;
+  --color-sys-gray: #8e8e93;
+  --color-sys-brown: #ac8e68;
+  --color-sys-cyan: #64d2ff;
+  --color-sys-pink: #ff375f;
+  --color-mono-top: #8e8e93;
+  --color-mono-bottom: #636366;
+  --color-field: rgb(255 255 255 / 0.08);
+  --color-hover: rgb(255 255 255 / 0.06);
+  --color-select: rgb(255 255 255 / 0.1);
+  --color-line: rgb(255 255 255 / 0.09);
+  --color-line-strong: rgb(255 255 255 / 0.18);
+  --color-ink: #f5f5f7;
+  --color-ink-2: #c7c7cc;
+  --color-ink-3: #8e8e93;
+  --color-accent: #0a84ff;
+  --color-accent-soft: rgb(10 132 255 / 0.2);
+  --color-ok: #30d158;
+  --color-ok-soft: rgb(48 209 88 / 0.15);
+  --color-danger: #ff453a;
+  --color-danger-soft: rgb(255 69 58 / 0.15);
+  --color-warn: #ff9f0a;
+  --color-warn-soft: rgb(255 159 10 / 0.16);
+  --color-scrim: rgb(0 0 0 / 0.5);
+  --color-checker: #2c2c2f;
+  --color-wash-a: rgb(10 132 255 / 0.22);
+  --color-wash-b: rgb(64 200 224 / 0.14);
+  --color-wash-base: rgb(20 20 22 / 0.5);
+  --color-toast: #3a3a3c;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 0 0 1px rgb(255 255 255 / 0.04);
+  --shadow-tile: 0 1px 2px rgb(0 0 0 / 0.35);
+  --shadow-accent: 0 2px 8px rgb(10 132 255 / 0.35);
+  --shadow-sheet: 0 2px 8px rgb(0 0 0 / 0.3), 0 24px 64px rgb(0 0 0 / 0.55);
+}
+
+/* Classic values for every token a theme changes, so a light subtree (the theme thumbnails in
+   Settings) stays light inside a dark app. Keep in step with @theme. */
+[data-theme="classic"],
+[data-theme="colorblind"],
+[data-theme="contrast"] {
+  color-scheme: light;
+  --color-canvas: #ffffff;
+  --color-sidebar: rgb(244 245 248 / 0.62);
+  --color-surface: #f5f5f7;
+  --color-raised: #ffffff;
+  --color-glass: rgb(255 255 255 / 0.58);
+  --color-glass-edge: rgb(255 255 255 / 0.7);
+  --color-acrylic: #909191;
+  --color-sys-blue: #007aff;
+  --color-sys-orange: #ff9500;
+  --color-sys-green: #34c759;
+  --color-sys-teal: #30b0c7;
+  --color-sys-red: #ff3b30;
+  --color-sys-purple: #af52de;
+  --color-sys-indigo: #5856d6;
+  --color-sys-gray: #8e8e93;
+  --color-sys-brown: #a2845e;
+  --color-sys-cyan: #32ade6;
+  --color-sys-pink: #ff2d55;
+  --color-mono-top: #a7a7ad;
+  --color-mono-bottom: #85858b;
+  --color-field: rgb(0 0 0 / 0.05);
+  --color-hover: rgb(0 0 0 / 0.045);
+  --color-select: rgb(0 0 0 / 0.075);
+  --color-line: rgb(0 0 0 / 0.08);
+  --color-line-strong: rgb(0 0 0 / 0.14);
+  --color-ink: #1d1d1f;
+  --color-ink-2: #515154;
+  --color-ink-3: #86868b;
+  --color-accent: #0071e3;
+  --color-accent-soft: rgb(0 113 227 / 0.1);
+  --color-ok: #248a3d;
+  --color-ok-soft: rgb(36 138 61 / 0.1);
+  --color-danger: #d70015;
+  --color-danger-soft: rgb(215 0 21 / 0.08);
+  --color-warn: #c93400;
+  --color-warn-soft: rgb(255 149 0 / 0.12);
+  --color-scrim: rgb(0 0 0 / 0.22);
+  --color-checker: #eceef2;
+  --color-wash-a: rgb(0 113 227 / 0.16);
+  --color-wash-b: rgb(48 176 199 / 0.13);
+  --color-wash-base: rgb(255 255 255 / 0.34);
+  --color-toast: #1d1d1f;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 4px 16px rgb(0 0 0 / 0.04);
+  --shadow-tile: 0 1px 1px rgb(0 0 0 / 0.04), 0 3px 10px rgb(0 0 0 / 0.07);
+  --shadow-accent: 0 2px 8px rgb(0 113 227 / 0.35);
+  --shadow-sheet: 0 2px 8px rgb(0 0 0 / 0.06), 0 24px 64px rgb(0 0 0 / 0.18);
+  --color-ok-on-dark: #30d158;
+  --color-danger-on-dark: #ff6961;
+  --color-meter-0: #d70015;
+  --color-meter-1: #ff6a00;
+  --color-meter-2: #d9a400;
+  --color-meter-3: #34c759;
+  --color-meter-4: #248a3d;
+}
+
+/* Colorblind: the Okabe-Ito palette. Good vs bad never rests on red vs green. */
+[data-theme="colorblind"] {
+  --color-sys-green: #009e73;
+  --color-sys-red: #d55e00;
+  --color-sys-orange: #e69f00;
+  --color-sys-teal: #56b4e9;
+  --color-ok: #0072b2;
+  --color-ok-soft: rgb(0 114 178 / 0.1);
+  --color-danger: #b34f00;
+  --color-danger-soft: rgb(213 94 0 / 0.1);
+  --color-warn: #9e4a7e;
+  --color-warn-soft: rgb(204 121 167 / 0.14);
+  --color-ok-on-dark: #56b4e9;
+  --color-danger-on-dark: #f08c4a;
+  --color-meter-0: #d55e00;
+  --color-meter-1: #e69f00;
+  --color-meter-2: #56b4e9;
+  --color-meter-3: #0072b2;
+  --color-meter-4: #004f7c;
+}
+
+/* High contrast: solid surfaces (no glass), black ink, hairlines you can see. */
+[data-theme="contrast"] {
+  --color-sidebar: #eceef2;
+  --color-surface: #f2f2f5;
+  --color-glass: #ffffff;
+  --color-acrylic: #d6d6da;
+  --color-sys-blue: #0040dd;
+  --color-sys-orange: #c93400;
+  --color-sys-green: #007a2e;
+  --color-sys-teal: #007a8a;
+  --color-sys-red: #d70015;
+  --color-sys-purple: #8944ab;
+  --color-sys-indigo: #3634a3;
+  --color-sys-gray: #6c6c70;
+  --color-sys-brown: #7f6545;
+  --color-sys-cyan: #0071a4;
+  --color-sys-pink: #d30f45;
+  --color-field: rgb(0 0 0 / 0.07);
+  --color-hover: rgb(0 0 0 / 0.08);
+  --color-select: rgb(0 0 0 / 0.14);
+  --color-line: rgb(0 0 0 / 0.3);
+  --color-line-strong: rgb(0 0 0 / 0.5);
+  --color-ink: #000000;
+  --color-ink-2: #1d1d1f;
+  --color-ink-3: #48484a;
+  --color-accent: #0040dd;
+  --color-accent-soft: rgb(0 64 221 / 0.12);
+  --color-ok: #006b25;
+  --color-danger: #b00012;
+  --color-warn: #8a2c00;
+}
+
+/* Reduced transparency makes glass and the bottom chrome solid. */
+@media (prefers-reduced-transparency: reduce) {
+  :root:not([data-theme="contrast"]),
+  [data-theme="classic"],
+  [data-theme="colorblind"] {
+    --color-glass: #ffffff;
+    --bar: var(--color-surface);
+  }
+  [data-theme="dark"] {
+    --color-glass: #2c2c30;
+    --bar: var(--color-surface);
+  }
+}

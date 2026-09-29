@@ -1,0 +1,372 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* In the base layer, so every utility (text-accent on a button) wins over it. */
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100dvh;
+  }
+  body {
+    margin: 0;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+    user-select: none;
+  }
+  button {
+    cursor: default;
+    touch-action: manipulation;
+  }
+}
+
+/* Values the user copies by hand stay selectable. */
+.selectable {
+  user-select: text;
+}
+
+/* A control the PC draws under 44 px keeps its PC look; its touch area grows to 44 around it. */
+.hit {
+  position: relative;
+}
+.hit::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Size-specific tracking: small labels open a touch. */
+.track-small {
+  letter-spacing: 0.01em;
+}
+
+/* Keyboard focus, one look on every control (the PC's focus-ring). */
+@utility focus-ring {
+  outline: none;
+  &:focus-visible {
+    outline: 2px solid var(--focus-ring-color, var(--color-accent));
+    outline-offset: var(--focus-ring-offset, 2px);
+  }
+}
+
+/* Lock screen: the PC's wash over the painted acrylic. */
+.lock-wash {
+  background:
+    radial-gradient(55% 45% at 18% 12%, var(--color-wash-a), transparent 70%),
+    radial-gradient(50% 45% at 86% 92%, var(--color-wash-b), transparent 70%),
+    linear-gradient(var(--color-wash-base), var(--color-wash-base)),
+    var(--color-acrylic);
+}
+
+/* Bottom chrome (tab bar, action dock): 94% opaque with a scroll-edge fade instead of a hairline. */
+.bottom-bar {
+  position: relative;
+  background: var(--bar);
+}
+.bottom-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 20px;
+  background: linear-gradient(transparent, var(--bar));
+  pointer-events: none;
+}
+
+/* Feedback: presses answer on touch-down. */
+.press {
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+/* A theme change (use-theme.ts): the old colours cross-fade into the new ones. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 250ms;
+  animation-timing-function: var(--ease-out);
+}
+
+/* Segmented control: one thumb slides to the picked option (form.tsx sets its width and offset). */
+.seg-thumb {
+  transition: transform 250ms var(--ease-out);
+}
+
+/* The tab bar's pill pieces: an opaque ground under the accent tint, so where two pieces overlap the
+   colour is the same and no seam shows. TabBar.tsx moves them by transform. */
+.tab-pill {
+  background:
+    linear-gradient(var(--color-accent-soft), var(--color-accent-soft)),
+    var(--color-surface);
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.settle {
+  animation: settle 180ms var(--ease-out);
+}
+
+/* PC sheets: opacity + scale 0.96 in, the same way out, quicker. */
+.pc-sheet,
+.pc-scrim {
+  transition:
+    opacity 250ms var(--ease-out),
+    scale 250ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+.pc-scrim {
+  @starting-style {
+    scale: 1;
+  }
+}
+[data-closing] .pc-sheet,
+.pc-scrim[data-closing] {
+  opacity: 0;
+  transition-duration: 180ms;
+}
+[data-closing] .pc-sheet {
+  scale: 0.96;
+}
+
+/* Springs (critically damped, response 0.34 s) are solved into linear() at start-up (--spring-dur /
+   --spring-ease, lib/spring.ts). A CSS transition retargets from the live value, so a second tap
+   mid-flight reverses cleanly. While a finger drags, the element follows 1:1 with no transition. */
+.dragging {
+  transition: none !important;
+}
+
+/* The sidebar drawer and the item push: they leave the way they came. visibility waits for the
+   spring so the exit plays, then takes them out of reach. */
+.drawer,
+.push {
+  transition:
+    transform var(--spring-dur, 400ms) var(--spring-ease, var(--ease-out)),
+    visibility 0s linear var(--spring-dur, 400ms);
+  visibility: hidden;
+}
+.drawer {
+  transform: translateX(-100%);
+}
+.push {
+  transform: translateX(100%);
+}
+.drawer[data-open],
+.push[data-open] {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform var(--spring-dur, 400ms) var(--spring-ease, var(--ease-out)),
+    visibility 0s;
+}
+.drawer-scrim {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 260ms var(--ease-out),
+    visibility 0s linear 260ms;
+}
+.drawer-scrim[data-open] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 260ms var(--ease-out),
+    visibility 0s;
+}
+
+/* Dropdown: grows out of the button above it. */
+.drop {
+  transform-origin: top right;
+  transition:
+    opacity 180ms var(--ease-out),
+    transform 180ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+[data-closing] .drop {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transition-duration: 150ms;
+}
+
+/* Icon swap (copy -> tick): the tick blooms in. */
+.swap-in {
+  transition:
+    opacity 160ms var(--ease-out),
+    transform 160ms var(--ease-out),
+    filter 160ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.6);
+    filter: blur(2px);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.stagger > * {
+  animation: rise 300ms var(--ease-out) backwards;
+}
+.stagger > :nth-child(2) { animation-delay: 40ms; }
+.stagger > :nth-child(3) { animation-delay: 80ms; }
+.stagger > :nth-child(n + 4) { animation-delay: 120ms; }
+/* A wrong try's error is feedback: it shows at once, never behind the entrance stagger. */
+.stagger > [role="alert"] {
+  animation: fade 150ms var(--ease-out);
+}
+
+@keyframes shake {
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+.shake {
+  animation: shake 280ms var(--ease-out);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Toast: the PC's ink pill, rises from the bottom edge, drops away quicker than it came. */
+.toast {
+  transition:
+    opacity 220ms var(--ease-out),
+    transform 220ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+.toast[data-leaving] {
+  opacity: 0;
+  transform: translateY(6px);
+  transition-duration: 160ms;
+}
+
+/* 2FA countdown ring: one linear sweep per code period. */
+@keyframes ring-drain {
+  from {
+    stroke-dashoffset: var(--ring-from);
+  }
+  to {
+    stroke-dashoffset: var(--ring-len);
+  }
+}
+.ring-drain {
+  animation: ring-drain linear forwards;
+}
+
+/* Loading placeholder and Sync now: a sheen sweeping across, transform only. Never a spinner. */
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--color-hover), transparent);
+  animation: shimmer 1.2s var(--ease-in-out) infinite;
+}
+.shimmer.accent::after {
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  animation-duration: 1s;
+}
+
+/* Reduced motion: keep the fades that explain a change, drop every movement. */
+@media (prefers-reduced-motion: reduce) {
+  .settle,
+  .stagger > * {
+    animation: fade 200ms ease;
+  }
+  .shake,
+  .press:active {
+    animation: none;
+    transform: none;
+  }
+  .shimmer::after {
+    animation: none;
+  }
+  .seg-thumb {
+    transition: none;
+  }
+  .drawer,
+  .push,
+  .drawer[data-open],
+  .push[data-open] {
+    transform: none !important;
+    transition:
+      opacity 200ms ease,
+      visibility 0s linear 200ms;
+  }
+  .drawer:not([data-open]),
+  .push:not([data-open]) {
+    opacity: 0;
+  }
+  .drawer[data-open],
+  .push[data-open] {
+    transition:
+      opacity 200ms ease,
+      visibility 0s;
+  }
+  .pc-sheet,
+  [data-closing] .pc-sheet,
+  .toast,
+  .toast[data-leaving],
+  .drop,
+  [data-closing] .drop,
+  .swap-in {
+    scale: 1;
+    transform: none;
+    filter: none;
+    @starting-style {
+      scale: 1;
+      transform: none;
+      filter: none;
+    }
+  }
+}

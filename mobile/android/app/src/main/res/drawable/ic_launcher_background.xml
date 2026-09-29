@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The crema tile of src/assets/app-icon.svg. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="270" android:startColor="#FDF7EE" android:endColor="#EAD7BD" />
+</shape>
