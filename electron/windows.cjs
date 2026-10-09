@@ -3,6 +3,7 @@
 const path = require("node:path");
 const { app, BrowserWindow, Menu, screen } = require("electron");
 const { cleanUp: cleanUpCourier } = require("./courier.cjs");
+const { APP_ORIGIN } = require("./app-protocol.cjs");
 
 const MIN_SIZE = { width: 400, height: 560 }; // the narrowest layout is a single column
 const DEFAULT_SIZE = { width: 1440, height: 900 };
@@ -46,6 +47,7 @@ function createWindows({ settings, devEnv, isMac, resolvedTheme, isQuitting, bio
     contextIsolation: true,
     sandbox: true,
     nodeIntegration: false,
+    devTools: !app.isPackaged, // a packaged build opens no inspector on an unlocked vault
   });
 
   // Kept out of every screen capture (Recall, screenshots, recordings, screen sharing, taskbar and
@@ -68,8 +70,8 @@ function createWindows({ settings, devEnv, isMac, resolvedTheme, isQuitting, bio
   // The theme rides in the query so the first paint is already in it; changes arrive as app:theme.
   function loadPage(w, hash) {
     const query = { theme: resolvedTheme() };
-    if (devEnv.KAPEVAULT_DEV_URL) w.loadURL(`${devEnv.KAPEVAULT_DEV_URL}?${new URLSearchParams(query)}${hash ? `#${hash}` : ""}`);
-    else w.loadFile(path.join(__dirname, "..", "dist", "index.html"), { query, ...(hash ? { hash } : {}) });
+    const page = devEnv.KAPEVAULT_DEV_URL || `${APP_ORIGIN}/`;
+    w.loadURL(`${page}?${new URLSearchParams(query)}${hash ? `#${hash}` : ""}`);
   }
 
   // A theme change: the Windows caption buttons follow it, and both pages redraw.
@@ -103,11 +105,11 @@ function createWindows({ settings, devEnv, isMac, resolvedTheme, isQuitting, bio
       clearTimeout(saveTimer);
       saveTimer = setTimeout(rememberBounds, 400);
     };
-    for (const e of ["resize", "move", "maximize", "unmaximize"]) win.on(e, saveSoon);
+    for (const e of /** @type {const} */ (["resize", "move", "maximize", "unmaximize"])) /** @type {any} */ (win).on(e, saveSoon);
     // The title bar leaves room for the Mac traffic lights only outside full screen (TitleBar.tsx).
     const sendWindowState = () => win?.webContents.send("window:state", { maximized: win.isMaximized(), fullScreen: win.isFullScreen() });
     win.webContents.on("did-finish-load", sendWindowState);
-    for (const e of ["enter-full-screen", "leave-full-screen", "maximize", "unmaximize"]) win.on(e, sendWindowState);
+    for (const e of /** @type {const} */ (["enter-full-screen", "leave-full-screen", "maximize", "unmaximize"])) /** @type {any} */ (win).on(e, sendWindowState);
 
     // With quick search on, closing hides KAPEVault to the tray (locked) instead of quitting.
     win.on("close", (e) => {
@@ -177,7 +179,7 @@ function createWindows({ settings, devEnv, isMac, resolvedTheme, isQuitting, bio
   function showQuick() {
     if (!quickWin) createQuickWindow();
     const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    const [w, h] = quickWin.getSize();
+    const [w] = quickWin.getSize();
     quickWin.setPosition(Math.round(workArea.x + (workArea.width - w) / 2), Math.round(workArea.y + workArea.height * 0.18));
     const reveal = () => {
       quickWin.show();

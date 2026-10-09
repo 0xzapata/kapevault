@@ -52,6 +52,7 @@ function register({ handle, attempt, vault, biometric, biometricName, biometricK
     }
     const result = vault.unlockWithKey(key);
     if (result.masterRequired) return { ok: false, code: "master-required", error: result.error };
+    if (result.newer) return { ok: false, code: "failed", error: result.error }; // the key still fits: Hello stays on
     if (!result.ok) {
       await biometricKeyChanged();
       return { ok: false, code: "changed", error: `${biometricName} no longer opens this vault. Unlock with your master password, then turn it on again in Settings.` };

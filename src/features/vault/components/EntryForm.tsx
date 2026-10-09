@@ -5,8 +5,6 @@ import { Button, ErrorText, Label, Select, TextArea, TextInput } from "@/compone
 import { keys, modPressed } from "@/lib/platform";
 import { ipcMessage } from "@/lib/ipc-message";
 import { LogoPicker } from "@/features/brands/LogoPicker";
-import { PayeeFields } from "@/features/payee/components/PayeeFields";
-import { usePayeeForm } from "@/features/payee/hooks/use-payee-form";
 import { peopleHeldFor } from "@/features/held-for/lib/held-for";
 import { COMMON_THINGS } from "@/features/things/lib/things";
 import { ThingExpires, ThingFields } from "@/features/things/components/ThingFields";
@@ -44,14 +42,13 @@ const KINDS: { value: EntryKind; label: string }[] = [
   { value: "note", label: "Secure note" },
   { value: "key", label: "API key" },
   { value: "link", label: "File link" },
-  { value: "payee", label: "Payee" },
   { value: "thing", label: "Thing" },
   { value: "device", label: "Device" },
   { value: "id", label: "ID" },
 ];
 
 // Validation messages (a bad 2FA key or expiry) are shown as-is; anything else stays generic.
-const VALIDATION = /2FA|setup key|HOTP|Authenticator|Expiry|Account number|Security questions|where it is kept|Grab|IMEI|MAC address|Photo could not|no room for more photos|device type|which ID|ID name|ID number/i;
+const VALIDATION = /2FA|setup key|HOTP|Authenticator|Expiry|Security questions|where it is kept|Grab|IMEI|MAC address|Photo could not|no room for more photos|device type|which ID|ID name|ID number/i;
 
 function saveErrorMessage(err: unknown): string {
   const message = err instanceof Error ? ipcMessage(err) : "";
@@ -66,12 +63,11 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
   const peopleId = useId();
   const thingsId = useId();
   const formRef = useRef<HTMLFormElement>(null);
-  const payeeEntry = entry?.kind === "payee" ? entry : null;
   const idEntry = entry?.kind === "id" ? entry : null;
 
   const [kind, setKind] = useState<EntryKind>(entry?.kind ?? defaultKind ?? "login");
-  // A payee saved untitled is "Who Provider", an ID its type: on edit it keeps following them.
-  const followsAuto = (payeeEntry && payeeEntry.title === `${payeeEntry.who} ${payeeEntry.provider}`) || (idEntry && idEntry.title === idEntry.idType);
+  // An ID saved untitled is its type: on edit it keeps following it.
+  const followsAuto = idEntry && idEntry.title === idEntry.idType;
   const [title, setTitle] = useState(followsAuto ? "" : (entry?.title ?? ""));
   const [spaceId, setSpaceId] = useState(entry?.spaceId ?? defaultSpaceId);
   // The one field a login and an API key share, so it stays here.
@@ -85,7 +81,6 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
   const note = useNoteForm(entry?.kind === "note" ? entry : null);
   const apiKey = useKeyForm(entry?.kind === "key" ? entry : null);
   const link = useLinkForm(entry?.kind === "link" ? entry : null);
-  const payee = usePayeeForm(payeeEntry);
   const thing = useThingForm(entry?.kind === "thing" ? entry : null);
   const idCard = useIdForm(idEntry);
   // A label scan fills the title only if it is empty, and adds a CCTV box's verification code to the notes.
@@ -94,7 +89,6 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
     if (scannedTitle) setTitle((t) => (t.trim() ? t : scannedTitle));
     if (scannedNotes) setNotes((n) => (n.includes(scannedNotes) ? n : n.trim() ? `${n.trimEnd()}\n${scannedNotes}` : scannedNotes));
   });
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -113,7 +107,6 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
     if (kind === "login") return { ...base, ...login.input(), url };
     if (kind === "note") return { ...base, ...note.input() };
     if (kind === "key") return { ...base, ...apiKey.input(), url };
-    if (kind === "payee") return { ...base, ...payee.input(), title: title.trim() || payee.autoTitle };
     if (kind === "thing") return { ...base, ...thing.input() };
     if (kind === "device") return { ...base, ...device.input() };
     if (kind === "id") return { ...base, ...idCard.input(), title: title.trim() || idCard.autoTitle };
@@ -122,9 +115,8 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
 
   // What stops a save, in words, in the order the form reads; "" when it can be saved.
   function problem(): string {
-    if (kind === "payee" && payee.problem()) return payee.problem();
     if (kind === "id") return idCard.problem();
-    if (!title.trim() && !(kind === "payee" && payee.autoTitle)) return "Give it a title.";
+    if (!title.trim()) return "Give it a title.";
     if (kind === "thing") return thing.problem();
     return "";
   }
@@ -151,15 +143,12 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
 
   async function remove(close: () => void) {
     if (!entry) return;
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
+    // No confirm: the item goes to the Trash and the Undo toast brings it back.
     try {
       await onDelete(entry.id);
       close();
     } catch {
-      setError("Could not delete. If the vault locked, unlock it and try again.");
+      setError("Could not move it to the Trash. If the vault locked, unlock it and try again.");
     }
   }
 
@@ -177,12 +166,12 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
 
   const titleRow = (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <Label text={kind === "payee" || kind === "id" ? "Title (optional)" : "Title"} hint={kind === "device" && <FromLabel show={device.fromLabel("title", title)} />}>
+      <Label text={kind === "id" ? "Title (optional)" : "Title"} hint={kind === "device" && <FromLabel show={device.fromLabel("title", title)} />}>
         <TextInput
-          autoFocus={kind !== "payee" && kind !== "id"}
+          autoFocus={kind !== "id"}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={kind === "payee" ? payee.autoTitle || "Mama GCash" : kind === "id" ? idCard.autoTitle || "Passport" : kind === "thing" ? "Passport" : kind === "device" ? "Home Wi-Fi router" : "GitHub"}
+          placeholder={kind === "id" ? idCard.autoTitle || "Passport" : kind === "thing" ? "Passport" : kind === "device" ? "Home Wi-Fi router" : "GitHub"}
           list={kind === "thing" ? thingsId : undefined}
           autoComplete="off"
         />
@@ -218,13 +207,11 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
             <KindPicker kinds={KINDS} value={kind} onChange={setKind} />
           )}
 
-          {/* A payee starts from who it is; its title can be left to "Who Provider". */}
-          {kind !== "payee" && kind !== "device" && kind !== "id" && titleRow}
+          {kind !== "device" && kind !== "id" && titleRow}
 
           {/* A device starts from its sticker: scan it, then check what was read. */}
           {kind === "device" && <DeviceFields device={device} titleRow={titleRow} startScan={startScan} />}
 
-          {kind === "payee" && <PayeeFields payee={payee} titleRow={titleRow} />}
           {kind === "id" && <IdFields idCard={idCard} titleRow={titleRow} />}
           {kind === "login" && <LoginFields login={login} entries={entries} url={url} onUrl={setUrl} />}
           {kind === "note" && <NoteFields note={note} />}
@@ -232,7 +219,7 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
           {kind === "thing" && <ThingFields thing={thing} entries={entries} />}
           {kind === "link" && <LinkFields link={link} />}
 
-          {kind !== "payee" && kind !== "thing" && kind !== "id" && (
+          {kind !== "thing" && kind !== "id" && (
             <div>
               <span className="mb-1.5 block text-[12.5px] font-medium text-ink-2">Logo</span>
               <LogoPicker value={brand} link={kind === "link" ? link.location : url} title={kind === "device" ? `${title} ${device.draft.model}` : title} onChange={setBrand} />
@@ -265,7 +252,7 @@ export function EntryForm({ entry, entries, spaces, defaultSpaceId, defaultKind,
           <div className="sticky -bottom-7 -mx-7 -mb-7 flex flex-wrap items-center gap-2 border-t border-line bg-raised px-7 py-4">
             {entry && (
               <Button type="button" variant="danger" onClick={() => remove(close)}>
-                {confirmDelete ? "Confirm delete" : "Delete"}
+                Move to Trash
               </Button>
             )}
             <div className="flex-1" />

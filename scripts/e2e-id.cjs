@@ -4,10 +4,10 @@
 // Show photo, remove, never copied), edit, search, quick search, the IDs list, then the Forever Opener
 // in Playwright's Chromium from file:// with the number and photo masked. Part of npm run e2e.
 // Throwaway vault, mock names only. Page screenshots (light + dark) in %TEMP%\kapevault-e2e-v2.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const { pathToFileURL } = require("url");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { chromium } = require("./playwright.cjs");
 const { createHarness, shows, gone, clip, waitFor } = require("./e2e-harness.cjs");
 const { renderIdCard } = require("./mock-sticker.cjs");
@@ -18,7 +18,7 @@ const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
 fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-id-"));
 const { check, launch, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
+const MASTER = "mock kettle harbor pass orbit gazelle";
 const NUMBER = "P1234567A"; // the number printed on the mock card
 const OTHER_NUMBER = "MOCK-BRGY-0042";
 

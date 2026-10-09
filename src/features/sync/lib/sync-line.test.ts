@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { deviceNames, reviewSentences, syncLine } from "./sync-line.ts";
 import type { SyncReview, SyncStatus } from "@/lib/vault-api";
 
-const idle: SyncStatus = { state: "idle", off: null, manual: false, error: "", problems: [], newMaster: null, thisDevice: "Mock PC", lastSync: null, devices: [], needsLook: [], review: null, fingerprint: "0123abcd" };
+const idle: SyncStatus = { state: "idle", off: null, manual: false, error: "", problems: [], newMaster: null, thisDevice: "Mock PC", lastSync: null, devices: [], lockOut: [], needsLook: [], review: null, fingerprint: "0123abcd" };
 const ago = () => "2 min ago";
 const review: SyncReview = { from: ["Mock Phone"], reasons: ["deletes"], added: [], changed: [], deleted: ["a", "b", "c", "d", "e", "f"], copies: [], secretItems: 0 };
 
@@ -17,6 +17,13 @@ test("the line says when and with whom it last synced, or that it has not yet", 
 test("with automatic backup off the line says sync happens only on Sync now", () => {
   assert.deepEqual(syncLine({ ...idle, manual: true }, ago), { text: "Not synced yet · only on Sync now", tone: "quiet" });
   assert.equal(syncLine({ ...idle, manual: true, lastSync: { at: 1, with: ["MOCK-DESKTOP"] } }, ago)?.text, "Synced with MOCK-DESKTOP · 2 min ago · only on Sync now");
+});
+
+test("a removed device that is not locked out yet stays on the line until the master password changes", () => {
+  const lockOut = [{ ref: "r1", name: "Mock Phone" }, { ref: "r2", name: "Mock Tablet" }];
+  assert.deepEqual(syncLine({ ...idle, lockOut }, ago), { text: "Finish locking out Mock Phone and Mock Tablet", tone: "warn" });
+  assert.equal(syncLine({ ...idle, lockOut, error: "Could not reach R2." }, ago)?.text, "Finish locking out Mock Phone and Mock Tablet", "ahead of a plain failure");
+  assert.equal(syncLine({ ...idle, lockOut, review }, ago)?.text, "Changes from Mock Phone wait for you", "a held review is still more urgent");
 });
 
 test("the most urgent news wins: running, a review, a new master password, a failure, a device problem", () => {

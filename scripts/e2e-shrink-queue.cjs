@@ -4,17 +4,17 @@
 // health checks skipping closing accounts, Back in use, Confirm it's gone (every secret wiped, the
 // tombstone in Closed, read only, out of search), and Delete for good. Part of npm run e2e.
 // Throwaway vault, mock names only. Page screenshots (light + dark) in %TEMP%\kapevault-e2e-v2.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createHarness, shows, gone, clip, opened, waitFor } = require("./e2e-harness.cjs");
 const { openFile, encryptWithKey } = require("../electron/vault-crypto.cjs");
 
 const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
 fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-shrink-"));
-const { check, launch, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
+const { check, launch, lockedBy, report } = createHarness();
+const MASTER = "mock kettle harbor pass orbit gazelle";
 const FORUM_PASSWORD = "password1"; // weak on purpose: a health issue to see disappear
 
 (async () => {
@@ -118,7 +118,7 @@ const FORUM_PASSWORD = "password1"; // weak on purpose: a health issue to see di
   check("Back in use takes it off the Closing list", await gone(rowOf("Mock Shop")));
 
   // ---- The follow-up day passes: the date is moved back in the vault file itself
-  await page.evaluate(() => window.kapevault.lock());
+  await lockedBy(app, page, () => page.evaluate(() => window.kapevault.lock()));
   const file = path.join(dataDir, "vault.kapevault");
   const plain = await openFile(MASTER, JSON.parse(fs.readFileSync(file, "utf8")));
   plain.data.entries.find((e) => e.title === "Mock Old Forum").lifecycle.followUpAt = localDay(-1);

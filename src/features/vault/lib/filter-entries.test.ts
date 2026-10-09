@@ -2,7 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { filterEntries, matchesView, sortEntries } from "./filter-entries.ts";
-import { SPACES, device, id, key, link, login, note, payee, thing } from "./test-entries.ts";
+import { SPACES, device, id, key, link, login, note, thing } from "./test-entries.ts";
 import type { Entry, SortOrder, ViewFilter } from "../types";
 
 const titles = (list: Entry[]) => list.map((e) => e.title);
@@ -38,7 +38,6 @@ test("each kind's own fields are searchable", () => {
     login({ id: "totp", title: "Bank", hasTotp: true, questions: [{ question: "First pet?", hasAnswer: true }] }),
     key({ id: "key", title: "Harbor API", keyId: "pk_live_9" }),
     note({ id: "note", title: "Door" }),
-    payee({ id: "payee", title: "Rent", who: "Landlord", provider: "BDO", number: "0012345678" }),
     thing({ id: "thing", title: "Title deed", room: "Study", spot: "red box" }),
     device({ id: "dev", title: "Office router", ssid: "Lumen-Guest", model: "AX55" }),
     id({ id: "idc", title: "Card", idType: "Passport" }),
@@ -49,8 +48,6 @@ test("each kind's own fields are searchable", () => {
   assert.deepEqual(ids("pet"), ["totp"]);
   assert.deepEqual(ids("pk_live"), ["key"]);
   assert.deepEqual(ids("secure note"), ["note"]);
-  assert.deepEqual(ids("landlord bdo"), ["payee"]);
-  assert.deepEqual(ids("0012345678"), ["payee"]);
   assert.deepEqual(ids("study red"), ["thing"]);
   assert.deepEqual(ids("lumen-guest"), ["dev"]);
   assert.deepEqual(ids("wifi"), ["dev"]);
@@ -106,7 +103,7 @@ test("smart views: favorites, 2FA codes, security, closing, and each kind", () =
   assert.equal(matchesView(closing, "closing"), true);
   assert.equal(matchesView(closing, "login"), true);
   assert.equal(matchesView(login(), "closing"), false);
-  const all = [login(), note(), key(), link(), payee(), thing(), device(), id()];
+  const all = [login(), note(), key(), link(), thing(), device(), id()];
   for (const e of all) assert.deepEqual(all.filter((x) => matchesView(x, e.kind)), [e], e.kind);
 });
 
@@ -115,4 +112,11 @@ test("space and held-for filters", () => {
   assert.deepEqual(search(entries, "", { spaceId: "northwind" }).map((e) => e.id), ["a"]);
   assert.deepEqual(search(entries, "", { heldFor: "mama" }).map((e) => e.id), ["b"]);
   assert.equal(search(entries, "", { heldFor: null }).length, 3);
+});
+
+test("the Trash view holds only trashed items, and searches them", () => {
+  const trashed = login({ id: "t1", title: "Old mail", trashedAt: "2026-03-01T00:00:00.000Z" });
+  assert.equal(matchesView(trashed, "trash"), true);
+  assert.equal(matchesView(login(), "trash"), false);
+  assert.deepEqual(titles(search([trashed, note({ trashedAt: "2026-03-02T00:00:00.000Z" })], "old", { view: "trash" })), ["Old mail"]);
 });

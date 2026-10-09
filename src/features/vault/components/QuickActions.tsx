@@ -12,8 +12,8 @@ function pillLabel(entry: Entry): string {
 }
 
 // The pills leave out a login's username, a key's ID and a Wi-Fi name (their rows copy them), but
-// keep a payee's number and a thing's spot.
-const pillCopies = (entry: Entry) => entryCopies(entry).filter((c) => c.slot !== "username" || entry.kind === "payee" || entry.kind === "thing");
+// keep a thing's spot.
+const pillCopies = (entry: Entry) => entryCopies(entry).filter((c) => c.slot !== "username" || entry.kind === "thing");
 
 const pill = "press flex h-9 items-center gap-2 rounded-full px-4 text-[13.5px] font-semibold focus-ring";
 
@@ -21,7 +21,7 @@ function CopyPill({ label, primary, copy, toastText }: { label: string; primary:
   const { copied, run } = useCopyAction();
   const look = primary ? "bg-accent text-on-accent shadow-accent hover:brightness-110" : "bg-raised text-accent shadow-tile hover:bg-hover";
   return (
-    <button onClick={() => run(copy, toastText)} className={`${pill} ${look}`}>
+    <button type="button" onClick={() => run(copy, toastText)} className={`${pill} ${look}`}>
       {copied ? <Check size={15} weight="bold" className="swap-in" /> : <Copy size={15} weight="bold" />}
       {copied ? "Copied" : label}
     </button>
@@ -40,7 +40,7 @@ export function QuickActions({ entry, onOpen }: { entry: Entry; onOpen: () => vo
         <CopyPill key={c.label} label={c.label} primary={i === 0} copy={c.run} toastText={c.toast} />
       ))}
       {link && (
-        <button onClick={onOpen} className={`${pill} bg-raised text-accent shadow-tile hover:bg-hover`}>
+        <button type="button" onClick={onOpen} className={`${pill} bg-raised text-accent shadow-tile hover:bg-hover`}>
           <ArrowSquareOut size={15} weight="bold" />
           {pillLabel(entry)}
         </button>

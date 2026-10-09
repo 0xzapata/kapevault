@@ -5,15 +5,15 @@
 // bovault file opens too, a field from a later version stays masked - with zero network requests and
 // zero page errors.
 // Run: npm run e2e. Throwaway vault, mock names only.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const http = require("http");
-const { pathToFileURL } = require("url");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const http = require("node:http");
+const { pathToFileURL } = require("node:url");
 const { chromium } = require("./playwright.cjs");
 const { createHarness, shows, waitFor } = require("./e2e-harness.cjs");
 const { version } = require("../package.json");
-const crypto = require("crypto");
+const crypto = require("node:crypto");
 const { openFile, encryptWithKey } = require("../electron/vault-crypto.cjs");
 const { openerHtml } = require("../electron/opener.cjs");
 
@@ -23,7 +23,7 @@ const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-opener-"));
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-opener-out-"));
 const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-opener-other-"));
 const { check, launch, report } = createHarness();
-const MASTER = "mock opener master pass";
+const MASTER = "mock opener kettle harbor orbit gazelle";
 const PASSWORD = "Mock-Opener-Pass-7";
 const OPENER = "KAPEVault Opener.html";
 const OPENER_KEY = `kapevault/opener/kapevault-opener-${version}.html`;
@@ -40,8 +40,16 @@ const r2Server = http.createServer((req, res) => {
       res.writeHead(status, { "content-type": "application/xml" });
       res.end(body);
     };
-    if (req.method === "PUT") return r2.puts.push(key), r2.objects.set(key, Buffer.concat(chunks)), r2.modified.set(key, new Date()), reply(200);
-    if (req.method === "DELETE") return r2.objects.delete(key), reply(204);
+    if (req.method === "PUT") {
+      r2.puts.push(key);
+      r2.objects.set(key, Buffer.concat(chunks));
+      r2.modified.set(key, new Date());
+      return reply(200);
+    }
+    if (req.method === "DELETE") {
+      r2.objects.delete(key);
+      return reply(204);
+    }
     if (req.method === "GET" && !key) {
       const prefix = u.searchParams.get("prefix") || "";
       const items = [...r2.objects].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => `<Contents><Key>${k}</Key><LastModified>${(r2.modified.get(k) ?? new Date()).toISOString()}</LastModified><Size>${v.length}</Size></Contents>`);
@@ -88,7 +96,7 @@ const snapshots = () => [...r2.objects.keys()].filter((k) => k.startsWith("kapev
   fs.writeFileSync(path.join(otherDir, OPENER), "<p>mock page of my own</p>");
   await saveTo(path.join(otherDir, "mock-copy-2.kapevault"));
   await dialog.getByRole("button", { name: "Save encrypted copy..." }).click();
-  check("a file of that name that is not an opener is left alone", await shows(dialog.getByText("Another file there is already called", { exact: false })) && fs.readFileSync(path.join(otherDir, OPENER), "utf8") === "<p>mock page of my own</p>");
+  check("a file of that name that is not an opener is moved aside (.txt) and the real Opener takes its place", (await shows(dialog.getByText("Another file had that name, so it was renamed with .txt added.", { exact: false }))) && fs.readFileSync(path.join(otherDir, OPENER), "utf8") === openerHtml(version) && fs.readdirSync(otherDir).some((f) => f.endsWith(".html.txt") && fs.readFileSync(path.join(otherDir, f), "utf8") === "<p>mock page of my own</p>"));
 
   const ownPath = path.join(outDir, "mock-opener.html");
   await saveTo(ownPath);
@@ -120,7 +128,9 @@ const snapshots = () => [...r2.objects.keys()].filter((k) => k.startsWith("kapev
   fs.writeFileSync(path.join(newerDir, OPENER), newer);
   await saveTo(path.join(newerDir, "mock-copy-4.kapevault"));
   await dialog.getByRole("button", { name: "Save encrypted copy..." }).click();
-  check("one that says it is newer is left alone, and the note does not vouch for it", (await shows(dialog.getByText("Saved mock-copy-4.kapevault. The Opener already there says it is newer, so KAPEVault left it alone."))) && fs.readFileSync(path.join(newerDir, OPENER), "utf8") === newer);
+  check("one that says it is newer is replaced too (a planted 99.0.0 page must not survive)", (await shows(dialog.getByText(`Saved mock-copy-4.kapevault, with ${OPENER} beside it.`))) && fs.readFileSync(path.join(newerDir, OPENER), "utf8") === openerHtml(version) && newer !== openerHtml(version));
+  await dialog.getByRole("button", { name: "Check my Opener" }).click();
+  check("Check my Opener with no backup folder linked says so", await shows(dialog.getByText("No backup folder is set. Choose one under Keep a copy in a folder.")));
 
   // ---- Cloud backup: the opener is checked by its bytes, put back once, and never shows as a backup.
   // Someone changed the one already in the bucket.
@@ -227,6 +237,7 @@ const snapshots = () => [...r2.objects.keys()].filter((k) => k.startsWith("kapev
   });
   plain.data.entries.push({ id: "mock-device", spaceId: plain.data.spaces[0].id, kind: "device", title: "Mock Home Router", type: "router", model: "Mock AX10", ssid: "Mock_Home_2.4G", adminUrl: "192.168.0.1", adminUser: "admin", adminPassword: "mock-admin-77", wifiPassword: "mockwifi-4821", photo, tags: [], updatedAt: "2026-09-26" });
   plain.data.entries.push({ id: "mock-due", spaceId: plain.data.spaces[0].id, kind: "due", title: "Mock SSS contribution", agency: "sss", schedule: { every: "month", day: 31 }, nextDue: "2026-10-31", amount: "1,500", viaEntryId: "mock-codes", receipts: [{ paidAt: "2026-09-26", dueDate: "2026-09-30", reference: "MOCK-PRN-0001", amount: "1,500" }], tags: [], updatedAt: "2026-09-26" });
+  plain.data.genHistory = [{ value: "Mock-Generated-Pass-77", at: "2026-10-09T04:00:00.000Z" }]; // the generator's recent values
   const future = path.join(outDir, "mock-future.kapevault");
   fs.writeFileSync(future, JSON.stringify(encryptWithKey(plain.key, plain.kdf, plain.salt, plain.data)));
   await web.getByRole("button", { name: "Close vault" }).click();
@@ -237,7 +248,7 @@ const snapshots = () => [...r2.objects.keys()].filter((k) => k.startsWith("kapev
   check("a field from a later version shows under its own name", await shows(web.getByText("Admin pin")));
   check("and stays masked until shown", !(await web.content()).includes("0917 000 1234") && (await shows(web.getByRole("button", { name: "Show admin pin" }))));
   await web.getByRole("button", { name: /Mock Tita Rosa GCash/ }).click();
-  check("a payee's number reads plainly", (await shows(web.getByText("09171234567"))) && (await shows(web.getByText("Confirmed by call"))));
+  check("an old vault's payee (a kind since removed) still reads plainly", (await shows(web.getByText("09171234567"))) && (await shows(web.getByText("Confirmed by call"))));
   await web.getByRole("button", { name: /Mock Passport/ }).click();
   check("a thing's room, spot and grab priority read plainly", (await shows(web.getByText("Mock blue folder, top shelf"))) && (await shows(web.getByText("Mock Bedroom"))) && (await shows(web.getByText("Grab first"))));
   await web.getByRole("button", { name: /Mock Home Router/ }).click();
@@ -265,6 +276,11 @@ const snapshots = () => [...r2.objects.keys()].filter((k) => k.startsWith("kapev
   check("Show reveals the answer", await shows(web.getByText("mock velvet otter 38")));
   check("an account being closed says so plainly", await shows(web.getByText("Asked to delete 2026-09-26 (follow up 2026-10-26)")));
   check("who an item is held for reads plainly", (await shows(web.locator(".field-label", { hasText: "Held for" }))) && (await shows(web.locator(".field-value", { hasText: "Mock Lola" }))));
+  // Generated passwords sit beside the items, not in one: the page shows them as one more item, masked.
+  await web.getByRole("button", { name: /Generated passwords/ }).click();
+  check("generated passwords: every value is masked until shown", !(await web.content()).includes("Mock-Generated-Pass-77") && (await shows(web.getByRole("button", { name: /^Show generated/ }))));
+  await web.getByRole("button", { name: /^Show generated/ }).first().click();
+  check("Show reveals that one value", await shows(web.getByText("Mock-Generated-Pass-77")));
   // Scrolled to the bottom, the list heading stays in the sticky block, drawn on top of the list.
   await web.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   const headingOnTop = await web.locator("#list-title").evaluate((h) => {

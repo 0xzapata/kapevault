@@ -31,6 +31,7 @@ export function StrengthMeter({ password, className = "" }: { password: string; 
     <div className={`flex items-center gap-3 ${className}`}>
       <div aria-hidden="true" className="grid flex-1 grid-cols-5 gap-1">
         {FILL.map((_, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: five fixed segments, never reordered
           <span key={i} className="h-1 overflow-hidden rounded-full bg-field">
             <span
               className={`block h-full origin-left rounded-full transition-transform duration-200 ease-out ${FILL[Math.max(score, 0)]} ${i <= score ? "scale-x-100" : "scale-x-0"}`}

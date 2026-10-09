@@ -5,6 +5,7 @@ import { fieldIconButton } from "./buttons";
 // hint: a small tag after the text (a scanned value's "from label").
 export function Label({ text, hint, children }: { text: string; hint?: ReactNode; children: ReactNode }) {
   return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: Label wraps the field passed in as children (a TextInput, TextArea or Select), which is the control
     <label className="block">
       <span className="mb-1.5 block text-[12.5px] font-medium text-ink-2">
         {text}
@@ -39,9 +40,12 @@ const variants: Record<Variant, string> = {
   danger: "bg-danger-soft text-danger enabled:hover:bg-danger enabled:hover:text-on-accent",
 };
 
+// A plain button, not a submit: inside a form the browser's own default is submit, so a form's real
+// submit button says type="submit" and every other one cannot send the form by accident.
 export function Button({ variant = "plain", className = "", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
   return (
     <button
+      type="button"
       {...props}
       className={`press h-9 rounded-full px-4 text-[13.5px] font-medium transition-colors focus-ring disabled:opacity-50 ${variants[variant]} ${className}`}
     />

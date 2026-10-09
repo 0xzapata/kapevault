@@ -43,7 +43,6 @@ test("a change stamps only the field group it touched", () => {
     [login, { lifecycle: { state: "dormant" } }, "life"],
     [{ id: "n1", kind: "note", spaceId: "p", title: "Mock note", body: "a" }, { body: "b" }, "body"],
     [{ id: "k1", kind: "key", spaceId: "p", title: "Mock key", secret: "a" }, { secret: "b" }, "secret"],
-    [{ id: "y1", kind: "payee", spaceId: "p", title: "Mock payee", number: "09170000000" }, { number: "09171111111", confirmedAt: undefined }, "pay"],
     [{ id: "d1", kind: "device", spaceId: "p", title: "Mock router", adminPassword: "a" }, { adminPassword: "b" }, "dpw"],
     [{ id: "d1", kind: "device", spaceId: "p", title: "Mock router", wifiPassword: "a" }, { wifiPassword: "b" }, "wifi"],
     [{ id: "d1", kind: "device", spaceId: "p", title: "Mock router" }, { photo: "data:image/jpeg;base64,AAAA" }, "photo"],
@@ -68,7 +67,11 @@ test("a second edit on the same device moves the counter and only that group's d
 
 test("an item that is still the same object is never compared or hashed", () => {
   let hashed = 0;
-  const counting = { installId: PC, now: 1000, sha256: (t) => (hashed++, sha256(t)) };
+  const counting = { installId: PC, now: 1000, sha256: (t) => {
+      hashed++;
+      return sha256(t);
+    },
+  };
   const data = vault([login, { id: "n1", kind: "note", spaceId: "p", title: "Mock note", body: "a" }]);
   const same = save(data, () => {}, counting);
   assert.equal(same, data.sync, "nothing replaced: the same sync object");
@@ -187,8 +190,11 @@ test("repair on an untouched vault changes nothing", () => {
 // always reads back through validSync unchanged.
 test("stamp and repair never throw, and always write a sync object that validates", () => {
   let seed = 7;
-  const rand = (n) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31), seed % n);
-  const kinds = ["login", "note", "key", "payee", "thing", "device", "link", "fromTheFuture", undefined];
+  const rand = (n) => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31;
+    return seed % n;
+  };
+  const kinds = ["login", "note", "key", "thing", "device", "link", "fromTheFuture", undefined];
   const values = [undefined, null, "", "x", 0, -1.5, true, [], ["a"], [{ password: "p", changedAt: "2026-01-01" }], { state: "gone" }, { nested: [null, { deep: 1 }] }];
   const fields = ["title", "password", "history", "totp", "body", "secret", "number", "photo", "lifecycle", "spaceId", "favorite", "viaEntryId", "lastUsedAt", "someNewField"];
   const randomEntry = (id) => Object.fromEntries([["id", id], ["kind", kinds[rand(kinds.length)]], ...fields.filter(() => rand(2)).map((f) => [f, values[rand(values.length)]])]);

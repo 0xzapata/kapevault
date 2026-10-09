@@ -1,16 +1,17 @@
 // End-to-end checks for Air Wall (Settings > Security) in every state, driven by the test-only
-// KAPEVAULT_AIRWALL_FAKE (no UAC prompt, no firewall change, no network). Part of npm run e2e.
+// KAPEVAULT_AIRWALL_FAKE (no UAC prompt, no firewall change, no network), and for the opt-in update
+// check (Settings > General) driven by KAPEVAULT_UPDATE_FAKE. Part of npm run e2e.
 // The courier itself (R2 through the system curl) is proved by the cloud checks in e2e.cjs.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createHarness, shows, gone } = require("./e2e-harness.cjs");
 
 const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
 fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-airwall-"));
 const { check, launch: launchWith, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
+const MASTER = "mock kettle harbor pass orbit gazelle";
 const SWITCH = "Keep KAPEVault offline";
 
 (async () => {
@@ -76,6 +77,67 @@ const SWITCH = "Keep KAPEVault offline";
   check("the trust page explains Air Wall", await shows(page.getByRole("dialog").getByText("Windows can keep KAPEVault offline")));
   check("no page errors (unpacked)", errors.length === 0, errors.join(" | "));
   await app.close();
+
+  // ---- Check for updates (Settings > General), with KAPEVAULT_UPDATE_FAKE standing in for GitHub. Each run
+  // gets its own folder: an answer is remembered for a day, so a second launch would not ask again.
+  const UPDATES = "Check for updates";
+  async function openUpdates(fake) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-updates-"));
+    const run = await launchWith({ KAPEVAULT_DATA_DIR: dir, KAPEVAULT_UPDATE_FAKE: fake });
+    const { page } = run;
+    await page.getByPlaceholder("Master password", { exact: true }).fill(MASTER);
+    await page.getByPlaceholder("Confirm master password").fill(MASTER);
+    await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: "Settings" }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("dialog").getByRole("tab", { name: "General" }).click();
+    return { ...run, dir, dialog: page.getByRole("dialog") };
+  }
+  const updateSwitch = (dialog, checked) => dialog.getByRole("switch", { name: UPDATES, checked });
+
+  let up = await openUpdates("newer");
+  check("Check for updates is there and off by default", await shows(updateSwitch(up.dialog, false)));
+  check("its helper line says what is asked and what is not sent", await shows(up.dialog.getByText("Asks GitHub once a day whether a newer KAPEVault is out. Nothing about your vault is sent.")));
+  check("off: no release line, no failure line", (await up.dialog.getByText(/is out$|Could not check|Up to date/).count()) === 0);
+  await updateSwitch(up.dialog, false).click();
+  check("switching on shows a newer release", await shows(up.dialog.getByText(/^KAPEVault \d+\.\d+\.\d+ is out$/)));
+  await up.dialog.getByRole("button", { name: "See what is new" }).click();
+  const links = await up.app.evaluate(() => globalThis.__opened);
+  check("its button opens only the project's releases page", links.length === 1 && links[0][0] === "external" && links[0][1].startsWith("https://github.com/brewed-ops/kapevault/releases"), JSON.stringify(links));
+  await updateSwitch(up.dialog, true).click();
+  check("switching off hides the line again", await gone(up.dialog.getByText(/is out$/)));
+  check("no page errors (newer)", up.errors.length === 0, up.errors.join(" | "));
+  await up.app.close();
+  fs.rmSync(up.dir, { recursive: true, force: true });
+
+  up = await openUpdates("same");
+  await updateSwitch(up.dialog, false).click();
+  check("up to date says so, with a date", await shows(up.dialog.getByText(/^Up to date · last checked /)));
+  check("and offers no download", (await up.dialog.getByRole("button", { name: "See what is new" }).count()) === 0);
+
+  // ---- Open source licences (Settings > General > About): the four shipped texts, read by main
+  await up.dialog.getByRole("button", { name: "View" }).click();
+  const licences = up.page.getByRole("dialog", { name: "Open source licences" });
+  check("Open source licences opens its own sheet", await shows(licences));
+  for (const name of ["LICENSE", "LICENSE-EXCEPTION", "NOTICE", "THIRD-PARTY-NOTICES"]) {
+    check(`${name} has its heading`, await shows(licences.getByRole("heading", { name, exact: true })));
+  }
+  check("it names the licence and the version", await shows(licences.getByText(/^KAPEVault \d+\.\d+\.\d+\. KAPEVault is free software under the GNU GPL v3\. See LICENSE\.$/)));
+  check("the GPL text is there", await shows(licences.getByText("GNU GENERAL PUBLIC LICENSE").first()));
+  await licences.getByRole("button", { name: "Done" }).click();
+  check("Done closes it", await gone(licences));
+  check("Settings is back on General", await shows(up.page.getByRole("dialog", { name: "Settings" }).getByRole("switch", { name: UPDATES })));
+  await up.app.close();
+  fs.rmSync(up.dir, { recursive: true, force: true });
+
+  up = await openUpdates("fail");
+  await updateSwitch(up.dialog, false).click();
+  check("a failed check says Could not check, quietly", await shows(up.dialog.getByRole("status").filter({ hasText: "Could not check" })));
+  check("no error dialog opened over Settings", (await up.page.getByRole("dialog").count()) === 1 && (await up.page.getByRole("alertdialog").count()) === 0);
+  check("the switch stays on", await shows(updateSwitch(up.dialog, true)));
+  check("no page errors (fail)", up.errors.length === 0, up.errors.join(" | "));
+  await up.app.close();
+  fs.rmSync(up.dir, { recursive: true, force: true });
 
   fs.rmSync(dataDir, { recursive: true, force: true });
   process.exitCode = report() ? 0 : 1;

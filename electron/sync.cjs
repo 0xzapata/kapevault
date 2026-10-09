@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const core = require("../core/index.js");
+const { compare } = require("../core/sync/hlc.js");
 const { writeFileAtomic } = require("./atomic-write.cjs");
 
 const SYNC_DELAY_MS = 3000; // after a save: a burst of edits syncs once
@@ -19,7 +20,7 @@ const refOf = (id) => sha256(`device:${id}`).slice(0, 16);
 // { name, platform } for sync.devices. throttledUnlock(attempt): main's, for a password typed here.
 // onStatus(status): after every change the page should see; onMerged(): the vault changed under the
 // page; onRekeyed(): another device's master password is now this vault's (Windows Hello goes off).
-function createSync({ vault, cloud, installId, renewInstallId = () => "", device, delayMs = SYNC_DELAY_MS, now = Date.now, throttledUnlock = (attempt) => attempt(), onStatus = () => {}, onMerged = () => {}, onRekeyed = () => {} }) {
+function createSync({ vault, cloud, installId, renewInstallId = () => "", device, delayMs = SYNC_DELAY_MS, now = Date.now, throttledUnlock = (attempt) => attempt(), onStatus = (_status) => {}, onMerged = () => {}, onRekeyed = () => {} }) {
   let holder = null; // "sync" | "restore" | "master": one of the three at a time
   let running = null; // the run in flight
   let timer = null;
@@ -29,6 +30,8 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
   let newMaster = null; // a device under a master password this vault has not seen: { device, key, name }
   let lastSeen = new Map(); // device -> R2 LastModified of its newest snapshot, from the last listing
   let merged = new Map(); // device -> the snapshot key this session already has in it
+  let unopened = new Set(); // snapshotStamp()s that would not open: not downloaded again until the object changes
+  let newer = new Set(); // snapshotStamp()s a newer KAPEVault wrote: named on every run, downloaded once until the object changes
   let mergedIn = 0; // the session generation `merged` belongs to
   let print = { revision: -1, code: "" }; // the shared state's fingerprint, worked out once per save
 
@@ -100,7 +103,8 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
       // A snapshot under this install's id that it never uploaded: another install has the same id.
       if (cloud.notSentHere(objects).length && renewInstallId()) keepLog({ at: now(), with: [], renewedId: true });
       const devices = vault.syncBase().data.sync.devices;
-      const all = core.pickSnapshots(objects, { installId: installId(), devices, now: now() });
+      const all = core.pickSnapshots(objects, { installId: installId(), devices, now: now(), failed: unopened });
+      const stamps = new Map(objects.map((o) => [o.key, core.snapshotStamp(o)]));
       lastSeen = new Map(all.map((p) => [p.device, p.lastSeen]));
       const picks = all.filter((p) => explicit || !p.dead);
       if (mergedIn !== generation) [merged, mergedIn] = [new Map(), generation];
@@ -110,10 +114,10 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
       for (const pick of picks) {
         if (merged.get(pick.device) === pick.keys[0]) continue; // nothing new from it since
         const name = core.nameOf(devices, pick.device);
-        const got = await download(pick, name);
+        const got = await download(pick, name, Boolean(devices[pick.device]), stamps);
         if (got.newKey) newMaster ??= { device: pick.device, key: got.newKey, name };
-        else if (got.problem) found.push(got.problem);
-        else remotes.push({ device: pick.device, ...got });
+        if (got.problem) found.push(got.problem);
+        else if (got.data) remotes.push({ device: pick.device, key: got.key, data: got.data, salt: got.salt });
       }
       const upToDate = picks.filter((p) => merged.get(p.device) === p.keys[0]).map((p) => p.device);
       settle(remotes, upToDate, found, generation);
@@ -127,19 +131,37 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
 
   // A device's newest snapshot that opens; an older one when the newest will not (every older
   // snapshot is a safe subset of a newer one - never read as an empty vault). newKey: it is under a
-  // master password this vault has never had - the user types it once (adoptKey).
-  async function download(pick, name) {
+  // master password this vault has never had - the user types it once (adoptKey), and only a known
+  // device is asked for it: from an unknown one it counts as unopenable. A newKey snapshot does not
+  // hide the device's older ones: anyone holding the bucket keys can plant one (no vault key needed), so
+  // the next that opens is still merged, with newKey beside it for the prompt. One that will not open
+  // is remembered (unopened), so the next run does not download it again.
+  async function download(pick, name, known, stamps) {
+    let newKey = null;
     for (const key of pick.keys) {
-      const opened = vault.openSnapshot(await cloud.fetchSnapshot(key));
-      if (opened?.otherKey) return opened.behind ? { problem: `${name} still uses the old master password. Unlock it there.` } : { newKey: key };
-      if (opened && Array.isArray(opened.data.entries) && Array.isArray(opened.data.spaces)) return { key, data: opened.data, salt: opened.salt };
+      // A device on a newer KAPEVault: its older snapshots are stale, so none of them is merged either.
+      if (newer.has(stamps.get(key))) return { problem: core.newerProblem(name) };
+      const bytes = await cloud.fetchSnapshot(key);
+      const opened = vault.openSnapshot(bytes);
+      if ((!opened && core.isNewerVaultFile(bytes)) || (opened?.data && core.isNewerData(opened.data))) {
+        newer.add(stamps.get(key));
+        return { problem: core.newerProblem(name) };
+      }
+      if (opened?.otherKey && known) {
+        if (opened.behind) return newKey ? { newKey } : { problem: `${name} still uses the old master password. Unlock it there.` };
+        newKey ??= key;
+        continue;
+      }
+      if (opened && !opened.otherKey && Array.isArray(opened.data.entries) && Array.isArray(opened.data.spaces)) return { key, data: opened.data, salt: opened.salt, newKey };
+      unopened.add(stamps.get(key));
     }
-    return { problem: `${name}'s newest backups cannot be opened.` };
+    return newKey ? { newKey } : { problem: `${name}'s newest backups cannot be opened.` };
   }
 
   // Everything from here to the commit is synchronous, on the vault as it is now: a save made during
   // the downloads is merged, never overwritten. rekey: the key of another device's newer master password,
   // adopted with this merge - always after a review.
+  /** @param {{ key: Buffer, kdf: any, salt: Buffer } | null} [rekey] */
   function settle(remotes, upToDate, found, generation, rekey = null) {
     const base = vault.syncBase();
     if (base.generation !== generation) return rekey?.key.fill(0); // locked and opened again meanwhile: that unlock syncs
@@ -206,9 +228,15 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
       const { generation } = vault.syncBase();
       const bytes = await cloud.fetchSnapshot(ask.key);
       const opened = await throttledUnlock(() => vault.openWithPassword(bytes, master));
-      if (!opened.ok) return { ok: false, error: opened.damaged ? opened.error : `That is not the master password set on ${ask.name}.` };
+      if (!opened.ok) return { ok: false, error: opened.damaged || opened.newer ? opened.error : `That is not the master password set on ${ask.name}.` };
       const { key, kdf, salt, data } = opened.opened;
-      const theirs = core.readSync(data, salt.toString("base64"));
+      let theirs;
+      try {
+        theirs = core.readSync(data, salt.toString("base64"));
+      } catch (e) {
+        key.fill(0); // a newer app's vault: its key must not outlive the refusal
+        throw e;
+      }
       const rekey = core.isNewerKey(theirs, vault.syncBase().data.sync) ? { key, kdf, salt } : (key.fill(0), null);
       newMaster = null;
       settle([{ device: ask.device, key: ask.key, data, salt: salt.toString("base64") }], [], [], generation, rekey);
@@ -271,13 +299,18 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
 
   function status() {
     const off = offReason();
-    if (off === "locked") return { state: "off", off, manual: false, error: "", problems: [], newMaster: null, thisDevice: device.name, lastSync: null, devices: [], needsLook: [], review: null, fingerprint: "" };
+    if (off === "locked") return { state: "off", off, manual: false, error: "", problems: [], newMaster: null, thisDevice: device.name, lastSync: null, devices: [], lockOut: [], needsLook: [], review: null, fingerprint: "" };
     const { data, revision } = vault.syncBase();
     // SYNC.md 3.9: two devices that have synced show the same code; a difference means they diverged.
     if (print.revision !== revision) print = { revision, code: sha256(core.sharedState(data)).slice(0, 8) };
     const devices = data.sync.devices;
     const me = installId();
     const last = (data.syncLog ?? []).find((e) => e.with?.length);
+    // Removed devices that still hold a working key: no master password change since they were removed.
+    // Removing alone only stops their folder from merging (SYNC.md 3.9); the new key is what locks them out.
+    const lockOut = Object.entries(devices)
+      .filter(([id, d]) => id !== me && d.revokedAt && !data.sync.keys.some((k) => compare(k.at, d.revokedAt) > 0))
+      .map(([id]) => ({ ref: refOf(id), name: core.nameOf(devices, id) }));
     const others = new Set([...Object.keys(devices).filter((id) => id !== me && !devices[id].revokedAt), ...lastSeen.keys()]);
     return {
       state: off ? "off" : running ? "running" : review ? "review" : "idle",
@@ -289,7 +322,8 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
       thisDevice: device.name,
       lastSync: last ? { at: last.at, with: last.with.map((id) => core.nameOf(devices, id)) } : null,
       devices: [...others].map((id) => ({ ref: refOf(id), name: core.nameOf(devices, id), platform: devices[id]?.platform ?? "", lastSeen: lastSeen.get(id) ?? null })),
-      needsLook: data.entries.filter((e) => core.isConflictCopy(e.title) && e.lifecycle?.state !== "gone").map((e) => ({ id: e.id, title: e.title })),
+      lockOut,
+      needsLook: data.entries.filter((e) => core.isConflictCopy(e.title) && e.lifecycle?.state !== "gone" && !core.isTrashed(e)).map((e) => ({ id: e.id, title: e.title })),
       review: review?.view ?? null,
       fingerprint: print.code,
     };
@@ -316,7 +350,7 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
       clearTimeout(timer);
       timer = null;
       dropReview();
-      [error, problems, newMaster, lastSeen] = ["", [], null, new Map()];
+      [error, problems, newMaster, lastSeen, unopened, newer] = ["", [], null, new Map(), new Set(), new Set()];
     },
   };
 }

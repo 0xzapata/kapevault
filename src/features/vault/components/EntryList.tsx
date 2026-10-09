@@ -2,6 +2,7 @@ import { useEffect, useRef, type DragEvent } from "react";
 import { ArrowsDownUp, Backpack, Clock, MagnifyingGlass, Plus, Printer, SidebarSimple, Star } from "@phosphor-icons/react";
 import { Menu, useMenu, type MenuItem } from "@/components/Menu";
 import { TitleBar } from "@/components/TitleBar";
+import { ConfirmDelete } from "@/components/ConfirmDelete";
 import type { LayoutMode } from "@/hooks/use-layout";
 import { keys } from "@/lib/platform";
 import { localToday } from "@/lib/local-date";
@@ -9,10 +10,11 @@ import { EntryIcon } from "./EntryIcon";
 import { ENTRY_DRAG_TYPE } from "./Sidebar";
 import { entrySubtitle } from "../lib/entry-text";
 import { issueLabel, worstIssue } from "../lib/issues";
-import type { PayeeVerdict } from "@/features/payee/lib/payee-check";
-import { PayeeVerdictCard } from "@/features/payee/components/PayeeVerdictCard";
+import { trashLine } from "../lib/trash-text";
 import { followUpDue, isGone } from "@/features/closing/lib/lifecycle";
 import { SyncLine } from "@/features/sync/components/SyncLine";
+import { MasterIssueRow } from "@/features/security/components/MasterIssueRow";
+import { InstallFolderIssueRow } from "@/features/security/components/InstallFolderIssueRow";
 import type { Entry, SortOrder, Space, ViewFilter } from "../types";
 
 interface EntryListProps {
@@ -32,10 +34,12 @@ interface EntryListProps {
   onNew: () => void;
   onShowSidebar: () => void;
   rowMenu: (entry: Entry) => MenuItem[];
-  payeeVerdict: PayeeVerdict | null; // a number in the search, checked against the saved payees
-  onOpenPayee: (id: string) => void;
   onHandBack?: () => void; // a person's list: print what is kept for them
   onEvacuate?: () => void; // the Things list: the grab-first checklist
+  onEmptyTrash: () => Promise<void>; // the Trash list: let go of everything in it
+  masterWeak: boolean; // Security also lists the master password
+  installWriters: string[]; // ... and a KAPEVault folder other accounts can change
+  onFixMaster: () => void; // opens Settings > Security, Change master password
 }
 
 const SORT_LABELS: Record<SortOrder, string> = { recent: "Recently used", title: "Title", edited: "Date edited" };
@@ -56,7 +60,7 @@ function issueSummary(entries: Entry[]): string {
 }
 
 export function EntryList(props: EntryListProps) {
-  const { heading, entries, spaces, selectedId, query, sort, view, mode, sidebarHidden, showSpace, onQuery, onSort, onSelect, onNew, onShowSidebar, rowMenu, payeeVerdict, onOpenPayee, onHandBack, onEvacuate } = props;
+  const { heading, entries, spaces, selectedId, query, sort, view, mode, sidebarHidden, showSpace, onQuery, onSort, onSelect, onNew, onShowSidebar, rowMenu, onHandBack, onEvacuate, onEmptyTrash, masterWeak, installWriters, onFixMaster } = props;
   const spaceName = (id: string) => spaces.find((s) => s.id === id)?.name ?? "";
   const sortMenu = useMenu();
   const rowMenuState = useMenu();
@@ -64,6 +68,9 @@ export function EntryList(props: EntryListProps) {
   const sortRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const security = view === "security" && !query;
+  const trash = view === "trash"; // trashed items: no New, no drag, days left under each row
+  const sharedFolder = installWriters.length > 0;
+  const fixes = entries.length + (security ? Number(masterWeak) + Number(sharedFolder) : 0);
   const today = localToday();
 
   // Keyboard moves the selection; keep it in view without jumping the list around.
@@ -81,12 +88,13 @@ export function EntryList(props: EntryListProps) {
     <section aria-label="Items" data-flip className={`flex h-full ${WIDTH[mode]} shrink-0 flex-col border-r border-line bg-canvas`}>
       <TitleBar edgeLeft={sidebarHidden} edgeRight={mode === "compact"} className="gap-0.5 px-2">
         {sidebarHidden && (
-          <button aria-label="Show sidebar" title={`Show sidebar (${keys("mod", "\\")})`} onClick={onShowSidebar} className={toolbarButton}>
+          <button type="button" aria-label="Show sidebar" title={`Show sidebar (${keys("mod", "\\")})`} onClick={onShowSidebar} className={toolbarButton}>
             <SidebarSimple size={17} />
           </button>
         )}
         <div className="flex-1" />
         <button
+          type="button"
           ref={sortRef}
           aria-label={`Sort by: ${SORT_LABELS[sort]}`}
           title={`Sort by: ${SORT_LABELS[sort]}`}
@@ -95,28 +103,31 @@ export function EntryList(props: EntryListProps) {
         >
           <ArrowsDownUp size={16} />
         </button>
-        <button onClick={onNew} aria-label="New" title={`New item (${keys("mod", "N")})`} className={toolbarButton}>
-          <Plus size={17} />
-        </button>
+        {!trash && (
+          <button type="button" onClick={onNew} aria-label="New" title={`New item (${keys("mod", "N")})`} className={toolbarButton}>
+            <Plus size={17} />
+          </button>
+        )}
       </TitleBar>
 
       <h2 className="truncate px-5 text-[26px] font-bold leading-[1.15] tracking-[-0.025em]">{query ? "Results" : heading}</h2>
       <div className="px-5 pb-3 pt-0.5">
         {security ? (
-          <p className="text-[12.5px] text-ink-3">{entries.length ? `${entries.length} ${entries.length === 1 ? "item needs" : "items need"} attention: ${issueSummary(entries)}` : "Nothing to fix. Every password is unique, strong and fresh."}</p>
+          <p className="text-[12.5px] text-ink-3">{fixes ? `${fixes} ${fixes === 1 ? "item needs" : "items need"} attention: ${[masterWeak && "weak master password", sharedFolder && "shared KAPEVault folder", issueSummary(entries)].filter(Boolean).join(" · ")}` : "Nothing to fix. Every password is unique, strong and fresh."}</p>
         ) : (
           <div className="flex items-center gap-2">
             <p className="min-w-0 flex-1 truncate text-[12.5px] tabular-nums text-ink-3">
-              {entries.length} {query ? (entries.length === 1 ? "match" : "matches") : entries.length === 1 ? "item" : "items"} · {query ? "Best first" : SORT_LABELS[sort]}
+              {entries.length} {query ? (entries.length === 1 ? "match" : "matches") : entries.length === 1 ? "item" : "items"} · {query ? "Best first" : trash ? "Gone after 30 days" : SORT_LABELS[sort]}
             </p>
+            {trash && !query && <ConfirmDelete label="Empty Trash" onConfirm={onEmptyTrash} />}
             {onHandBack && (
-              <button onClick={onHandBack} className={headerPill}>
+              <button type="button" onClick={onHandBack} className={headerPill}>
                 <Printer size={13} weight="bold" />
                 Hand back
               </button>
             )}
             {onEvacuate && !query && (
-              <button onClick={onEvacuate} className={headerPill}>
+              <button type="button" onClick={onEvacuate} className={headerPill}>
                 <Backpack size={13} weight="bold" />
                 Evacuate
               </button>
@@ -143,25 +154,9 @@ export function EntryList(props: EntryListProps) {
         </div>
       )}
 
-      {/* Above the results, never instead of them. */}
-      {payeeVerdict && (
-        <div className="px-2.5 pb-2">
-          {payeeVerdict.kind === "not-payee" ? (
-            <PayeeVerdictCard verdict={payeeVerdict} />
-          ) : (
-            <button
-              onClick={() => onOpenPayee(payeeVerdict.payee.id)}
-              title={`Show ${payeeVerdict.payee.title}`}
-              className="press block w-full rounded-2xl text-left focus-ring"
-            >
-              <PayeeVerdictCard verdict={payeeVerdict} />
-            </button>
-          )}
-        </div>
-      )}
-
       <ul
         ref={listRef}
+        // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role listbox on a ul
         role="listbox"
         aria-label={query ? "Search results" : heading}
         tabIndex={0}
@@ -170,6 +165,8 @@ export function EntryList(props: EntryListProps) {
         aria-activedescendant={selectedId ? `entry-${selectedId}` : undefined}
         className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3 outline-none"
       >
+        {security && masterWeak && <MasterIssueRow onFix={onFixMaster} />}
+        {security && <InstallFolderIssueRow writers={installWriters} />}
         {entries.map((entry) => {
           const selected = entry.id === selectedId;
           const tone = selected ? "bg-accent text-on-accent" : "hover:bg-hover";
@@ -180,14 +177,17 @@ export function EntryList(props: EntryListProps) {
           let line = entrySubtitle(entry) || spaceName(entry.spaceId);
           if (due) line = "Follow up due";
           if (issue) line = issueLabel(issue);
+          if (trash) line = trashLine(entry);
           return (
             <li key={entry.id} className="group">
+              {/* biome-ignore lint/a11y/useKeyWithClickEvents: an option of a listbox: the list owns the keys (arrows, Enter) through aria-activedescendant, so the row is not a tab stop */}
+              {/* biome-ignore lint/a11y/useFocusableInteractive: an option of a listbox: the list owns the keys (arrows, Enter) through aria-activedescendant, so the row is not a tab stop */}
               <div
                 id={`entry-${entry.id}`}
                 data-entry={entry.id}
                 role="option"
                 aria-selected={selected}
-                draggable={!isGone(entry)}
+                draggable={!isGone(entry) && !trash}
                 onDragStart={(e) => onDragStart(e, entry)}
                 onClick={() => onSelect(entry.id)}
                 onContextMenu={(e) => {
@@ -212,13 +212,14 @@ export function EntryList(props: EntryListProps) {
             </li>
           );
         })}
-        {entries.length === 0 && (
+        {entries.length === 0 && !(security && (masterWeak || sharedFolder)) && (
           <li className="px-6 pt-16 text-center">
             <p className="text-[15px] font-semibold text-ink-2">{query ? "No results" : security ? "All clear" : "Nothing here yet"}</p>
             {query || security ? (
               <p className="mt-1 text-[13px] text-ink-3">{query ? `Nothing matches "${query}".` : "No weak, reused or old passwords, no keys running out, and enough backup codes."}</p>
             ) : (
               <button
+                type="button"
                 onClick={onNew}
                 className="press mx-auto mt-3.5 flex h-9 items-center gap-1.5 rounded-full bg-accent px-4 text-[13.5px] font-semibold text-on-accent shadow-accent hover:brightness-110 focus-ring"
               >

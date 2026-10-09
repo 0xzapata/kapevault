@@ -3,8 +3,9 @@
 // (core), and commit - or hold the merge for the user's review when it would change too much. The upload
 // after it is the normal backup of the merged vault. The rules live in core/ (shared with the PC); this
 // is the phone's host around them.
-import { isConflictCopy, isNewerKey, logEntry, mergeRemotes, nameOf, pickSnapshots, readCopyTitle, readSnapshotKey, readSync, reviewReasons, reviewView, sharedState, syncChanges, withEntry } from "@core";
+import { isConflictCopy, isNewerData, isNewerKey, isNewerVaultFile, isTrashed, logEntry, mergeRemotes, nameOf, newerProblem, pickSnapshots, readCopyTitle, snapshotStamp, readSnapshotKey, readSync, reviewReasons, reviewView, sharedState, syncChanges, withEntry } from "@core";
 import { listSnapshots } from "./cloud";
+import { syncAllowed } from "./pro";
 import { sha256Hex } from "./sha256";
 import { toBase64, type OpenVault, type VaultData } from "./vault-file";
 import type { CloudConfig, R2Client, R2Object } from "./r2";
@@ -38,17 +39,19 @@ export interface SyncHost {
   now(): number;
   base(): { generation: number; revision: number; data: SyncData } | null; // null while locked
   config(): CloudConfig | null;
+  pro(): boolean; // KAPEVault Pro (pro.ts): without it this phone only backs up
   r2(config: CloudConfig): Pick<R2Client, "list" | "get">;
   // A snapshot opened with the SESSION key when its header salt is this vault's (no scrypt, no stored
   // password). otherKey: under another master password - behind when this vault had that one before.
   openSnapshot(text: string): Promise<Opened>;
   // A snapshot under a master password typed here, through the unlock throttle.
-  openWithPassword(text: string, master: string): Promise<{ ok: true; opened: OpenVault } | { ok: false; error: string; damaged?: boolean }>;
+  openWithPassword(text: string, master: string): Promise<{ ok: true; opened: OpenVault } | { ok: false; error: string; damaged?: boolean; newer?: boolean }>;
   // On the change queue, so no save lands between the merge's read and its write: decide() sees the
   // vault as it is now and returns what to write (sync's own save: never stamped, never another sync),
   // or null for nothing. "stale": the vault locked or was opened again first, and decide() never ran.
   commit(generation: number, decide: (data: SyncData, revision: number) => SyncWrite | null): Promise<"written" | "kept" | "stale">;
   upload(): Promise<void>; // this vault as it is on disk, unless that exact file is already up
+  backupError(): string; // the last backup's failure, "" when it went up: a phone that cannot sync shows this
   changed(): void; // the status changed
 }
 
@@ -64,18 +67,21 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
   let newMaster: { device: string; key: string; name: string } | null = null; // a device under a master password this vault has not seen
   let objects: R2Object[] = []; // the last listing: the devices in the Sync sheet
   let merged = new Map<string, string>(); // device -> the snapshot key this session already has in it
+  let unopened = new Set<string>(); // snapshotStamp()s that would not open: not downloaded again until the object changes
+  let newer = new Set<string>(); // snapshotStamp()s a newer KAPEVault wrote: named on every run, downloaded once until the object changes
   let mergedIn = 0; // the session generation `merged` belongs to
   let print = { revision: -1, code: "" }; // the shared state's check code, worked out after each sync
   let merging: Remote[] = []; // what the commit in flight merges: counted as merged once it is written
 
   // Why sync cannot run at all. Automatic backup off is not one: Sync now still syncs.
-  function offReason(): "locked" | "no-cloud" | "apart" | "removed" | null {
+  function offReason(): "locked" | "no-cloud" | "apart" | "removed" | "free" | null {
     const base = host.base();
     if (!base) return "locked";
     const config = host.config();
     if (!config) return "no-cloud";
     if (config.apart) return "apart"; // "Keep this phone's vault": the bucket holds another vault
     if (base.data.sync.devices[host.installId()]?.revokedAt) return "removed"; // another device removed this phone
+    if (!syncAllowed(host.pro())) return "free"; // no Pro: Sync now only backs up
     return null;
   }
 
@@ -105,7 +111,8 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
     try {
       objects = await listSnapshots(r2 as R2Client);
       const devices = start.data.sync.devices as Devices;
-      const all = pickSnapshots(objects, { installId: host.installId(), devices, now: host.now() });
+      const all = pickSnapshots(objects, { installId: host.installId(), devices, now: host.now(), failed: unopened });
+      const stamps = new Map(objects.map((o) => [o.key, snapshotStamp(o)]));
       const picks = all.filter((p) => explicit || !p.dead);
       if (mergedIn !== generation) [merged, mergedIn] = [new Map(), generation];
       const remotes: Remote[] = [];
@@ -114,10 +121,10 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
       for (const pick of picks) {
         if (merged.get(pick.device) === pick.keys[0]) continue; // nothing new from it since
         const name = nameOf(devices, pick.device);
-        const got = await download(r2, pick.keys, name);
-        if ("newKey" in got) newMaster ??= { device: pick.device, key: got.newKey, name };
-        else if ("problem" in got) found.push(got.problem);
-        else remotes.push({ device: pick.device, ...got });
+        const got = await download(r2, pick.keys, name, Boolean(devices[pick.device]), stamps);
+        if ("newKey" in got && got.newKey) newMaster ??= { device: pick.device, key: got.newKey, name };
+        if ("problem" in got) found.push(got.problem);
+        else if ("data" in got) remotes.push({ device: pick.device, key: got.key, data: got.data, salt: got.salt });
       }
       const upToDate = picks.filter((p) => merged.get(p.device) === p.keys[0]).map((p) => p.device);
       await settle(remotes, upToDate, found, generation);
@@ -131,22 +138,43 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
 
   // A device's newest snapshot that opens; an older one when the newest will not (every older snapshot
   // is a safe subset of a newer one - never read as an empty vault). newKey: under a master password this
-  // vault has never had - the user types it once (adoptKey).
-  async function download(r2: Pick<R2Client, "get">, keys: string[], name: string): Promise<{ key: string; data: VaultData; salt: string } | { newKey: string } | { problem: string }> {
+  // vault has never had - the user types it once (adoptKey), and only a known device is asked for it: from
+  // an unknown one it counts as unopenable. A newKey snapshot does not hide the device's older ones: anyone
+  // holding the bucket keys can plant one (no vault key needed), so the next that opens is still merged, with
+  // newKey beside it for the prompt. One that will not open is remembered (unopened), so the next run does
+  // not download it again.
+  async function download(r2: Pick<R2Client, "get">, keys: string[], name: string, known: boolean, stamps: Map<string, string>): Promise<{ key: string; data: VaultData; salt: string; newKey?: string } | { newKey: string } | { problem: string }> {
+    let newKey: string | undefined;
     for (const key of keys) {
-      const opened = await host.openSnapshot(await r2.get(key));
-      if (opened && "otherKey" in opened) return opened.behind ? { problem: `${name} still uses the old master password. Unlock it there.` } : { newKey: key };
-      if (opened && Array.isArray(opened.data.entries) && Array.isArray(opened.data.spaces)) return { key, data: opened.data, salt: opened.salt };
+      // A device on a newer KAPEVault: its older snapshots are stale, so none of them is merged either.
+      if (newer.has(stamps.get(key) ?? key)) return { problem: newerProblem(name) };
+      const text = await r2.get(key);
+      const opened = await host.openSnapshot(text);
+      if ((!opened && isNewerVaultFile(text)) || (opened && "data" in opened && isNewerData(opened.data))) {
+        newer.add(stamps.get(key) ?? key);
+        return { problem: newerProblem(name) };
+      }
+      if (opened && "otherKey" in opened && known) {
+        if (opened.behind) return newKey ? { newKey } : { problem: `${name} still uses the old master password. Unlock it there.` };
+        newKey ??= key;
+        continue;
+      }
+      if (opened && !("otherKey" in opened) && Array.isArray(opened.data.entries) && Array.isArray(opened.data.spaces)) return { key, data: opened.data, salt: opened.salt, newKey };
+      unopened.add(stamps.get(key) ?? key);
     }
-    return { problem: `${name}'s newest backups cannot be opened.` };
+    return newKey ? { newKey } : { problem: `${name}'s newest backups cannot be opened.` };
   }
 
   // On the vault as it is when the change queue reaches it: a save made during the downloads is merged,
   // never overwritten. rekey: another device's newer master password, adopted with this merge - always
-  // after a review.
+  // after a review. Sync turned off meanwhile (Pro refunded): nothing merged, nothing held.
   async function settle(remotes: Remote[], upToDate: string[], found: string[], generation: number, rekey: OpenVault | null = null) {
     const outcome = await host.commit(generation, (data, revision) => {
       merging = [];
+      if (offReason()) {
+        rekey?.raw.fill(0);
+        return null;
+      }
       const result = mergeAll(data, remotes);
       problems = [...found, ...result.problems];
       const changes = syncChanges(data, result.data);
@@ -242,9 +270,15 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
     if (!ask || !config || !base || offReason() || running) return { ok: false, error: "Nothing to open. Sync again." };
     const adopting = (async (): Promise<Result> => {
       const opened = await host.openWithPassword(await host.r2(config).get(ask.key), master);
-      if (!opened.ok) return { ok: false, error: opened.damaged ? opened.error : `That is not the master password set on ${ask.name}.` };
+      if (!opened.ok) return { ok: false, error: opened.damaged || opened.newer ? opened.error : `That is not the master password set on ${ask.name}.` };
       const { data, salt } = opened.opened;
-      const theirs = readSync(data, toBase64(salt));
+      let theirs: Sync;
+      try {
+        theirs = readSync(data, toBase64(salt));
+      } catch (e) {
+        opened.opened.raw.fill(0); // a newer app's vault: its key must not outlive the refusal
+        throw e;
+      }
       const rekey = isNewerKey(theirs, (host.base() ?? base).data.sync) ? opened.opened : (opened.opened.raw.fill(0), null);
       newMaster = null;
       await settle([{ device: ask.device, key: ask.key, data, salt: toBase64(salt) }], [], [], base.generation, rekey);
@@ -264,16 +298,20 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
 
   // An explicit sync also reads devices silent for 180 days, then sends this vault up if the file on
   // disk is not up yet - with automatic backup off too (this is then the only way anything goes up).
+  // Without Pro it only sends it up. A phone that cannot sync reports the backup's own outcome, which
+  // automatic backups update too.
   async function syncNow(): Promise<Result> {
+    const syncs = !offReason();
     await run(true);
     if (!host.base() || !host.config()) return { ok: false, error: "Cloud backup is not set up." };
     try {
       await host.upload();
     } catch (e) {
-      error = message(e);
+      if (syncs) error = message(e);
     }
     host.changed();
-    return error ? { ok: false, error } : { ok: true };
+    const failure = syncs ? error : host.backupError();
+    return failure ? { ok: false, error: failure } : { ok: true };
   }
 
   function status(): SyncStatus {
@@ -283,14 +321,16 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
     const { data, revision } = base;
     const devices = data.sync.devices as Devices;
     const last = ((data.syncLog ?? []) as LogEntry[]).find((e) => e.with?.length);
+    const failure = offReason() ? host.backupError() : error;
     return {
-      state: running ? "syncing" : error ? "error" : "idle",
+      state: running ? "syncing" : failure ? "error" : "idle",
       apart: Boolean(config.apart),
+      backupOnly: offReason() === "free",
       removed: offReason() === "removed",
       manual: !config.auto,
       lastAt: last?.at,
       peer: last ? deviceNames((last.with as string[]).map((id) => nameOf(devices, id))) : undefined,
-      error: error || undefined,
+      error: failure || undefined,
       problems,
       review: review?.view ?? null,
       newMaster: newMaster?.name,
@@ -317,12 +357,13 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
       objects = next;
       host.changed();
     },
-    // Locked, or the R2 setup changed: nothing from the session before carries over.
+    // Locked, or the R2 setup changed: nothing from the session before carries over. (A phone that only
+    // backs up shows its last backup's outcome, which is the backups' own, until the next backup.)
     reset() {
       clearTimeout(timer);
       timer = undefined;
       dropReview();
-      [error, problems, newMaster, objects] = ["", [], null, []];
+      [error, problems, newMaster, objects, unopened, newer] = ["", [], null, [], new Set(), new Set()];
     },
   };
 }
@@ -338,12 +379,13 @@ const PLATFORMS: Record<string, Platform> = { win32: "windows", windows: "window
 const MODELS: Record<Platform, string> = { windows: "Windows PC", mac: "Mac", android: "Android phone", ios: "iPhone" };
 
 // This phone first, then every other device: the ones in the vault's device list, by the name each gave
-// itself, and any with snapshots in the bucket that has not registered yet. A removed device is left out.
+// itself, and any with snapshots in the bucket that has not registered yet. A removed device is left out,
+// and so is another phone's backup-only snapshot (it syncs with nothing); this phone's own still dates its row.
 function devicesFrom(objects: R2Object[], { installId, model, known }: { installId: string; model: string; known: Devices }): SyncDevice[] {
   const newest = new Map<string, number>();
   for (const o of objects) {
     const info = readSnapshotKey(o.key);
-    if (!info?.owner || info.legacy || info.beforeRestore) continue;
+    if (!info?.owner || info.legacy || info.beforeRestore || (info.backupOnly && info.owner !== installId)) continue;
     newest.set(info.owner, Math.max(newest.get(info.owner) ?? 0, o.lastModified ?? info.time));
   }
   const ids = new Set([...Object.keys(known), ...newest.keys()]);
@@ -361,7 +403,7 @@ function devicesFrom(objects: R2Object[], { installId, model, known }: { install
 // was copied from while one of that title is still there.
 function conflictsOf(data: SyncData): ConflictCopy[] {
   return data.entries
-    .filter((e) => isConflictCopy(e.title) && e.lifecycle?.state !== "gone")
+    .filter((e) => isConflictCopy(e.title) && e.lifecycle?.state !== "gone" && !isTrashed(e))
     .map((e) => {
       const parts = readCopyTitle(e.title);
       const title = parts?.title ?? e.title;

@@ -1,0 +1,71 @@
+{
+  "spaces": [
+    {
+      "id": "55ee23e6-417f-479d-a2e9-e07abeac5396",
+      "name": "Personal",
+      "kind": "personal"
+    }
+  ],
+  "entries": [
+    {
+      "id": "de378035-89f8-4f5a-8681-c002633e64a0",
+      "spaceId": "55ee23e6-417f-479d-a2e9-e07abeac5396",
+      "title": "Mock Mail",
+      "tags": [
+        "mock"
+      ],
+      "favorite": true,
+      "notes": "mock note",
+      "updatedAt": "2026-10-09",
+      "kind": "login",
+      "username": "mock.user@example.com",
+      "password": "mock-old-pass-2",
+      "url": "mail.example.com",
+      "signIn": "password",
+      "history": [
+        {
+          "password": "mock-old-pass-1",
+          "changedAt": "2026-10-09"
+        }
+      ],
+      "passwordChangedAt": "2026-10-09"
+    },
+    {
+      "id": "0fed62a1-c8f6-4c44-afe3-0b9bd2a5f536",
+      "spaceId": "55ee23e6-417f-479d-a2e9-e07abeac5396",
+      "title": "Mock Note",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "note",
+      "body": "mock secret body"
+    },
+    {
+      "id": "c4823a54-10ab-4170-9459-1e336b54130b",
+      "spaceId": "55ee23e6-417f-479d-a2e9-e07abeac5396",
+      "title": "Mock API Key",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "key",
+      "keyId": "mock-key-id",
+      "secret": "mock-secret-token",
+      "url": "",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "f1f0c9fd-a8ab-437c-9640-29dbd343a23a",
+      "spaceId": "55ee23e6-417f-479d-a2e9-e07abeac5396",
+      "title": "Mock Docs",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "link",
+      "linkType": "web",
+      "location": "https://example.com/docs"
+    }
+  ]
+}

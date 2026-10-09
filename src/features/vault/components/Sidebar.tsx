@@ -1,5 +1,5 @@
 import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
-import { Archive, Clock, Code, Devices, DotsThree, Gear, HandCoins, HourglassMedium, IdentificationCard, Info, Key, Link, Lock, MagnifyingGlass, NotePencil, Package, PencilSimple, Plus, Printer, ShieldWarning, SidebarSimple, SquaresFour, Star, Trash } from "@phosphor-icons/react";
+import { Archive, Clock, Code, Devices, DotsThree, Gear, HourglassMedium, IdentificationCard, Info, Key, Link, Lock, MagnifyingGlass, NotePencil, Package, PencilSimple, Plus, Printer, ShieldWarning, SidebarSimple, SquaresFour, Star, Trash } from "@phosphor-icons/react";
 import { AppIcon } from "@/components/AppIcon";
 import { Menu, useMenu } from "@/components/Menu";
 import { TitleBar } from "@/components/TitleBar";
@@ -8,7 +8,7 @@ import { localToday } from "@/lib/local-date";
 import { peopleHeldFor, personKey, type Person } from "@/features/held-for/lib/held-for";
 import { followUpDue, isGone } from "@/features/closing/lib/lifecycle";
 import { matchesView } from "../lib/filter-entries";
-import { VIEWS, type ViewDef } from "../lib/views";
+import { VIEWS, viewOf, type ViewDef } from "../lib/views";
 import type { Entry, Space, ViewFilter } from "../types";
 
 // Drag an item row onto a space to move it there. The payload is only the item id.
@@ -16,6 +16,9 @@ export const ENTRY_DRAG_TYPE = "application/x-kapevault-entry";
 
 interface SidebarProps {
   entries: Entry[];
+  trash: Entry[]; // the Trash row shows while it holds something
+  masterWeak: boolean; // counts in Security
+  installWriters: string[]; // other accounts that can change the KAPEVault folder: one more in Security
   spaces: Space[];
   view: ViewFilter;
   spaceId: string | null;
@@ -49,6 +52,7 @@ function SmartRow({ active, icon, tone, label, count, alert = false, onClick }: 
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-pressed={active}
       className={`row flex h-8 w-full items-center gap-2.5 rounded-[7px] px-2 text-left text-[13.5px] font-medium text-ink focus-ring focus-ring-inset ${active ? "bg-select" : "hover:bg-hover"}`}
@@ -127,6 +131,7 @@ function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEnt
     return (
       <form onSubmit={submit} className="px-0.5 py-0.5">
         <input
+          // biome-ignore lint/a11y/noAutofocus: the field opens from the Rename menu item, so typing is the next step
           autoFocus
           aria-label={`Rename ${space.name}`}
           value={name}
@@ -147,8 +152,10 @@ function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEnt
   }
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: a mouse drop target for dragging an item onto a space; the keyboard way to move an item is Move to... in its menu
     <div className="group relative" onDragOver={onDragOver} onDragLeave={() => setDropping(false)} onDrop={onDrop}>
       <button
+        type="button"
         onClick={onClick}
         onContextMenu={menu.openAt}
         aria-current={active ? "true" : undefined}
@@ -159,6 +166,7 @@ function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEnt
         <span className="text-[12px] tabular-nums text-ink-3 group-hover:opacity-0">{count || ""}</span>
       </button>
       <button
+        type="button"
         ref={moreRef}
         aria-label={`${space.name} options`}
         title="Options"
@@ -188,12 +196,13 @@ function PersonRow({ person, active, onClick, onHandBack }: { person: Person; ac
   const moreRef = useRef<HTMLButtonElement>(null);
   return (
     <div className="group relative">
-      <button onClick={onClick} onContextMenu={menu.openAt} aria-current={active ? "true" : undefined} className={`${sourceRow} ${active ? "bg-select" : "hover:bg-hover"}`}>
+      <button type="button" onClick={onClick} onContextMenu={menu.openAt} aria-current={active ? "true" : undefined} className={`${sourceRow} ${active ? "bg-select" : "hover:bg-hover"}`}>
         <Monogram name={person.name} />
         <span className="flex-1 truncate text-left font-medium">{person.name}</span>
         <span className="text-[12px] tabular-nums text-ink-3 group-hover:opacity-0">{person.count}</span>
       </button>
       <button
+        type="button"
         ref={moreRef}
         aria-label={`${person.name} options`}
         title="Options"
@@ -222,6 +231,7 @@ function AddClient({ onAdd }: { onAdd: (name: string) => Promise<void> }) {
   if (!open) {
     return (
       <button
+        type="button"
         aria-label="Add client"
         title="Add client"
         onClick={() => setOpen(true)}
@@ -235,6 +245,7 @@ function AddClient({ onAdd }: { onAdd: (name: string) => Promise<void> }) {
   return (
     <form onSubmit={submit} className="absolute inset-x-0 top-7 z-10 px-3">
       <input
+        // biome-ignore lint/a11y/noAutofocus: the field opens from the Add client button, so typing is the next step
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -260,7 +271,6 @@ const VIEW_ICON: Record<ViewFilter, ReactNode> = {
   login: <Key size={13} weight="fill" />,
   totp: <Clock size={13} weight="bold" />,
   note: <NotePencil size={13} weight="fill" />,
-  payee: <HandCoins size={13} weight="fill" />,
   key: <Code size={13} weight="bold" />,
   link: <Link size={13} weight="bold" />,
   thing: <Package size={13} weight="fill" />,
@@ -269,6 +279,7 @@ const VIEW_ICON: Record<ViewFilter, ReactNode> = {
   security: <ShieldWarning size={13} weight="fill" />,
   closing: <HourglassMedium size={13} weight="fill" />,
   closed: <Archive size={13} weight="fill" />,
+  trash: <Trash size={13} weight="fill" />,
 };
 
 export function Sidebar(props: SidebarProps) {
@@ -285,7 +296,7 @@ export function Sidebar(props: SidebarProps) {
   // One smart list's row. Security's count is a red capsule (gray glyph while there is nothing to
   // fix); Closing shows its follow-ups due as a red capsule instead of its count.
   function smartRow(v: ViewDef) {
-    const n = props.entries.filter((e) => matchesView(e, v.id)).length;
+    const n = props.entries.filter((e) => matchesView(e, v.id)).length + (v.id === "security" ? Number(props.masterWeak) + Number(props.installWriters.length > 0) : 0);
     if (v.hideWhenEmpty && n === 0) return null;
     let look = { tone: v.tone, count: n, alert: false };
     if (v.id === "security") look = { tone: n ? v.tone : "--color-sys-gray", count: n, alert: true };
@@ -312,12 +323,12 @@ export function Sidebar(props: SidebarProps) {
       <TitleBar edgeLeft className="gap-2.5 pl-4 pr-2">
         <AppIcon size={20} />
         <span className="text-[13.5px] font-semibold tracking-[-0.01em]">KAPEVault</span>
-        <button aria-label="How KAPEVault protects you" title="How KAPEVault protects you" onClick={onAbout} className="press -ml-1 grid size-6 place-items-center rounded-full text-ink-3 hover:bg-hover hover:text-accent">
+        <button type="button" aria-label="How KAPEVault protects you" title="How KAPEVault protects you" onClick={onAbout} className="press -ml-1 grid size-6 place-items-center rounded-full text-ink-3 hover:bg-hover hover:text-accent">
           <Info size={15} weight="bold" />
         </button>
         <div className="flex-1" />
         {onCollapse && (
-          <button aria-label="Hide sidebar" title={`Hide sidebar (${keys("mod", "\\")})`} onClick={onCollapse} className="press grid size-8 place-items-center rounded-[7px] text-ink-3 hover:bg-hover hover:text-ink">
+          <button type="button" aria-label="Hide sidebar" title={`Hide sidebar (${keys("mod", "\\")})`} onClick={onCollapse} className="press grid size-8 place-items-center rounded-[7px] text-ink-3 hover:bg-hover hover:text-ink">
             <SidebarSimple size={17} />
           </button>
         )}
@@ -341,7 +352,7 @@ export function Sidebar(props: SidebarProps) {
       {/* Everything between search and the footer scrolls together, so short windows still reach every client. */}
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         <nav aria-label="Smart lists" className="space-y-px">
-          {VIEWS.map(smartRow)}
+          {VIEWS.filter((v) => v.id !== "trash").map(smartRow)}
         </nav>
 
         <p className="mb-1 mt-6 px-2 text-[11px] font-semibold text-ink-3">Mine</p>
@@ -366,14 +377,20 @@ export function Sidebar(props: SidebarProps) {
             </div>
           </>
         )}
+
+        {props.trash.length > 0 && (
+          <div className="mt-5">
+            <SmartRow active={isView("trash")} tone={viewOf("trash").tone} icon={VIEW_ICON.trash} label="Trash" count={props.trash.length} onClick={() => onView("trash")} />
+          </div>
+        )}
       </div>
 
       <div className="flex gap-1 px-3 pb-3 pt-1">
-        <button onClick={onLock} className="press flex h-8 flex-1 items-center gap-2 rounded-[7px] px-2 text-[13px] font-medium text-ink-2 hover:bg-hover hover:text-ink">
+        <button type="button" onClick={onLock} className="press flex h-8 flex-1 items-center gap-2 rounded-[7px] px-2 text-[13px] font-medium text-ink-2 hover:bg-hover hover:text-ink">
           <Lock size={15} weight="bold" />
           Lock vault
         </button>
-        <button aria-label="Settings" title="Settings" onClick={onSettings} className="press grid size-8 place-items-center rounded-[7px] text-ink-2 hover:bg-hover hover:text-ink">
+        <button type="button" aria-label="Settings" title="Settings" onClick={onSettings} className="press grid size-8 place-items-center rounded-[7px] text-ink-2 hover:bg-hover hover:text-ink">
           <Gear size={16} />
         </button>
       </div>

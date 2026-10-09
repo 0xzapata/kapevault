@@ -32,7 +32,7 @@ const backup = { name: "KAPEVault backup.kapevault", mimeType: "application/octe
     // A file that cannot be read (Drive offline) says so and stays on the pick step.
     await page.evaluate(() => {
       const text = File.prototype.text;
-      File.prototype.text = function () {
+      File.prototype.text = () => {
         File.prototype.text = text;
         return Promise.reject(new Error("mock offline"));
       };
@@ -60,8 +60,8 @@ const backup = { name: "KAPEVault backup.kapevault", mimeType: "application/octe
     // A new vault with no R2: the sync line and Settings say No backup yet; Settings restores from a file.
     page = await newPage();
     const pws = page.locator("input[type=password]");
-    await pws.nth(0).fill("Lantern-Mango-Quiet-47");
-    await pws.nth(1).fill("Lantern-Mango-Quiet-47");
+    await pws.nth(0).fill("Lantern-Mango-Quiet-47 orbit gazelle");
+    await pws.nth(1).fill("Lantern-Mango-Quiet-47 orbit gazelle");
     await pws.nth(1).press("Enter");
     await page.getByRole("button", { name: "Not now" }).click();
     await page.getByRole("tab", { name: "Items" }).waitFor();
@@ -82,7 +82,7 @@ const backup = { name: "KAPEVault backup.kapevault", mimeType: "application/octe
     await page.getByRole("tab", { name: "Items" }).click();
     await page.getByRole("button", { name: "Show sidebar" }).click();
     await page.getByRole("button", { name: "Lock vault" }).click();
-    await pws.first().fill("Lantern-Mango-Quiet-47");
+    await pws.first().fill("Lantern-Mango-Quiet-47 orbit gazelle");
     await pws.first().press("Enter");
     r.unlockOpensItems = await page.getByRole("tab", { name: "Items", selected: true }).waitFor({ timeout: 3000 }).then(() => true, () => false);
     r.errors = errors;

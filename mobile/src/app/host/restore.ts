@@ -1,7 +1,7 @@
 // Restores: a backup from R2 or a picked file, opened with its own master password, then written over
 // the vault here, keeping the vault it replaces in the one slot (the PC's restore.cjs rules). Plus the
 // password proofs the host shares: a master password typed for another file, or for this vault's own.
-import { SHARED_FIELDS, readSync, withKeySalt } from "@core";
+import { NewerVaultError, SHARED_FIELDS, checkReader, isNewerVaultFile, readSync, withKeySalt } from "@core";
 import type { createBiometric } from "./biometric";
 import { backupsOf, listSnapshots, readSnapshotKey, type Backups } from "./cloud";
 import { parseR2Url, type CloudConfig, type R2Client, type R2Object } from "./r2";
@@ -18,13 +18,16 @@ export const R2_URL = "Paste the bucket's S3 API URL, like https://<account-id>.
 const WRONG_BACKUP = "Wrong master password for that backup.";
 const NOT_A_BACKUP = "That file is not a KAPEVault backup. Pick the .kapevault file.";
 const FILE_TOO_BIG = "That file is too big to be a KAPEVault backup.";
+// A backup a newer KAPEVault saved is neither a wrong password nor damaged: the throttle does not count it.
+export const newerResult = () => ({ ok: false as const, newer: true as const, error: new NewerVaultError().message });
 const SLOT_TAKEN = "This phone already keeps a vault from an earlier restore, and it stays as it is. Replace the vault here without keeping a copy?";
 
 // A picked backup file, before any key derivation: no bigger than any vault is saved, and a vault file.
 function readBackupFile(text: string): { ok: true; file: VaultFile } | { ok: false; error: string } {
   if (text.length > MAX_VAULT_BYTES) return { ok: false, error: FILE_TOO_BIG }; // base64 in JSON: one byte a char
   const file = parseVaultFile(text);
-  return file ? { ok: true, file } : { ok: false, error: NOT_A_BACKUP };
+  if (file) return { ok: true, file };
+  return isNewerVaultFile(text) ? newerResult() : { ok: false, error: NOT_A_BACKUP };
 }
 
 // A backup's vault as this phone keeps it (a restore, or the bucket's vault): only what syncs comes over -
@@ -71,7 +74,16 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
       async () => {
         await pause();
         const opened = await openFile(master, file, pause);
-        return opened ? { ok: true as const, opened } : { ok: false as const, error: wrong };
+        if (!opened) return { ok: false as const, error: wrong };
+        // Its data can be a newer app's under a header this app reads: a restore would write it, then refuse to start it.
+        try {
+          checkReader(opened.data);
+        } catch (e) {
+          opened.raw.fill(0);
+          if (e instanceof NewerVaultError) return newerResult();
+          throw e;
+        }
+        return { ok: true as const, opened };
       },
       { local: false },
     );
@@ -100,13 +112,14 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
   // A backup downloaded and opened with its own master password.
   async function openBackup(cloud: CloudConfig, backupKey: string, master: string): Promise<Result<{ opened: OpenVault }>> {
     if (!readSnapshotKey(backupKey)) return { ok: false, error: "Unknown backup." };
-    let file;
+    let text;
     try {
-      file = parseVaultFile(await r2For(cloud).get(backupKey));
+      text = await r2For(cloud).get(backupKey);
     } catch (e) {
       return { ok: false, error: message(e, "Could not download that backup.") };
     }
-    if (!file) return { ok: false, error: "That backup is not a KAPEVault file." };
+    const file = parseVaultFile(text);
+    if (!file) return isNewerVaultFile(text) ? newerResult() : { ok: false, error: "That backup is not a KAPEVault file." };
     return openThrottled(file, master, WRONG_BACKUP);
   }
 

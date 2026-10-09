@@ -80,7 +80,7 @@ test("key and thing: a stored impossible expiry survives an edit that leaves it;
 
 test("every kind in KINDS saves a minimal item (a kind without its fields builder fails here)", () => {
   const data = vault();
-  const needs = { payee: { who: "Mama", provider: "GCash", number: "09170000000" }, thing: { spot: "drawer" }, id: { idType: "Passport" } };
+  const needs = { thing: { spot: "drawer" }, id: { idType: "Passport" } };
   for (const kind of KINDS) {
     let saved;
     assert.doesNotThrow(() => (saved = save(data, { ...common, kind, ...needs[kind] })), `kind "${kind}" could not be saved`);
@@ -88,16 +88,9 @@ test("every kind in KINDS saves a minimal item (a kind without its fields builde
   }
 });
 
-test("payee: needs a name and provider, the number is cleaned, a changed number is unconfirmed, no brand", () => {
-  const data = vault();
-  assert.throws(() => upsertEntry(data, { ...common, kind: "payee", provider: "GCash", number: "09171234567" }), /needs a name/);
-  assert.throws(() => upsertEntry(data, { ...common, kind: "payee", who: "Mama", number: "09171234567" }), /needs a provider/);
-  assert.throws(() => upsertEntry(data, { ...common, kind: "payee", who: "Mama", provider: "GCash", number: "12" }), /7 to 20 digits/);
-  const payee = save(data, { ...common, kind: "payee", who: " Mama ", relation: " ", provider: " GCash ", number: "+63 917 123 4567", accountName: " M. Mock " });
-  assert.deepEqual(payee, { ...base(payee.id), brand: undefined, kind: "payee", who: "Mama", relation: undefined, provider: "GCash", number: "09171234567", accountName: "M. Mock", confirmedAt: undefined });
-  data.entries = data.entries.map((e) => ({ ...e, confirmedAt: "2026-09-01" }));
-  assert.equal(save(data, { ...common, id: payee.id, kind: "payee", who: "Mama", provider: "GCash", number: "0917 123 4567" }).confirmedAt, "2026-09-01");
-  assert.equal(save(data, { ...common, id: payee.id, kind: "payee", who: "Mama", provider: "GCash", number: "09181234567" }).confirmedAt, undefined);
+test("payee was removed: it can no longer be saved", () => {
+  assert.equal(KINDS.includes("payee"), false);
+  assert.throws(() => upsertEntry(vault(), { ...common, kind: "payee", who: "Mama", provider: "GCash", number: "09171234567" }), /Unknown item type/);
 });
 
 test("thing: needs its spot, grab defaults to 2, an unknown grab is kept only while the edit leaves it", () => {
@@ -146,4 +139,14 @@ test("a kind change starts the new kind fresh, keeping the id and last use", () 
   data.entries = data.entries.map((e) => ({ ...e, lastUsedAt: 5 }));
   const key = save(data, { ...common, id: note.id, kind: "key" });
   assert.deepEqual(key, { ...base(note.id, { lastUsedAt: 5 }), kind: "key", keyId: "", secret: "", url: "", expires: undefined });
+});
+
+test("a key secret keeps one trailing newline (OpenSSH can refuse a private key without it); the rest is still trimmed", () => {
+  const data = vault();
+  const pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nbW9jaw==\n-----END OPENSSH PRIVATE KEY-----";
+  const saved = (secret) => save(data, { ...common, kind: "key", secret }).secret;
+  assert.equal(saved(`${pem}\n`), `${pem}\n`);
+  assert.equal(saved(`  ${pem}\r\n\n  `), `${pem}\n`, "leading space and extra blank lines go, one newline stays");
+  assert.equal(saved(`  ${pem}  `), pem);
+  assert.equal(saved(" s1 "), "s1");
 });

@@ -1,4 +1,4 @@
-// Made from the PC's src/features/vault/lib/filter-entries.ts by scripts/brands-sync.mjs - change it there, then run the script.
+// Made from the PC's src/features/vault/lib/filter-entries.ts by scripts/sync-shared.mjs - change it there, then run the script.
 import type { Entry } from "../host/types";
 import type { SortOrder } from "./filter";
 import { signInOption } from "./sign-in";
@@ -16,9 +16,6 @@ export function searchText(entry: Entry, spaceName: string): string {
       break;
     case "note":
       specific = ["secure note"];
-      break;
-    case "payee":
-      specific = [entry.who, entry.relation, entry.provider, entry.number, entry.accountName, "payee"];
       break;
     case "thing":
       // "bedroom" lists what is kept there; "blue folder" finds the spot.

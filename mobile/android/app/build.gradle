@@ -42,8 +42,29 @@ android {
                 enableV3Signing true
             }
         }
-        buildTypes {
-            release { signingConfig signingConfigs.release }
+    }
+    testOptions {
+        // android.jar on the JVM is stubs that throw; with this the calls a test never means to check
+        // (DurableFilePlugin's folder fsync) return their default instead.
+        unitTests.returnDefaultValues = true
+    }
+    // One source tree, two builds. play: with Google Play Billing (KAPEVault Pro, BillingPlugin) - the Play
+    // and website APKs. foss: no Google code at all (no com.android.billingclient, no com.google.android.gms),
+    // for people who build it themselves or ship it through F-Droid; its BillingPlugin is a stub
+    // (src/foss), so the Pro screen says Pro is not available in that build.
+    flavorDimensions = ["distribution"]
+    productFlavors {
+        play { dimension = "distribution" }
+        foss { dimension = "distribution" }
+    }
+    buildTypes {
+        release {
+            // R8 shrinks the release. proguard-rules.pro keeps the app's own classes and Capacitor unobfuscated, on
+            // purpose: the plugin bridge finds them by name.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (signing.storeFile) signingConfig signingConfigs.release
         }
     }
 }
@@ -57,16 +78,30 @@ kotlin {
 dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     // The QR scan (QrScannerPlugin): CameraX for the picture, ZXing's core library (plain Java, no
-    // dependencies) to read it on the phone. No ML Kit or Play services: nothing leaves the phone.
+    // dependencies) to read it on the phone. The scanner uses no ML Kit or Play services and no network.
     implementation "androidx.camera:camera-camera2:$androidxCameraVersion"
     implementation "androidx.camera:camera-lifecycle:$androidxCameraVersion"
     implementation "androidx.camera:camera-view:$androidxCameraVersion"
     implementation "com.google.zxing:core:$zxingCoreVersion"
+    // KAPEVault Pro, a one-time Google Play purchase (BillingPlugin), bound only when the page asks. The
+    // play flavor only: the foss flavor has no Google library.
+    // Brings Play services base/location (play-services-location is in its tree) and Google's
+    // datatransport. The merged play manifest gains: BILLING and ACCESS_NETWORK_STATE; two <queries>
+    // intents (InAppBillingService.BIND, the billing test companion); ProxyBillingActivity,
+    // ProxyBillingActivityV2, GoogleApiActivity; datatransport's TransportBackendDiscovery,
+    // JobInfoSchedulerService and AlarmManagerSchedulerBroadcastReceiver (Google's log uploader, which
+    // runs only after the billing code has run).
+    playImplementation "com.android.billingclient:billing:$billingVersion"
     implementation project(':capacitor-android')
     implementation project(':capacitor-cordova-android-plugins')
+    // JVM unit tests (app/src/test): the pure decisions in the Kotlin, no emulator and no Robolectric.
+    testImplementation "junit:junit:$junitVersion"
 }
 
 apply from: 'capacitor.build.gradle'
+
+// AGP makes a unit-test task per flavor only; this runs both (like assembleDebug does for the builds).
+tasks.register('testDebugUnitTest') { dependsOn 'testPlayDebugUnitTest', 'testFossDebugUnitTest' }
 
 // npm run sim:live points the app at a dev server for that run; a release must never ship that.
 def webConfig = file('src/main/assets/capacitor.config.json')
@@ -87,4 +122,4 @@ tasks.register('checkNoShellPage') {
         }
     }
 }
-tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn('checkNoDevServer', 'checkNoShellPage') }
+tasks.matching { it.name ==~ /pre(Play|Foss)ReleaseBuild/ }.configureEach { dependsOn('checkNoDevServer', 'checkNoShellPage') }

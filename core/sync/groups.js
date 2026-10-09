@@ -3,16 +3,13 @@
 // `id` is the item's identity and `lastUsedAt` is bookkeeping (merged by max, never versioned), so
 // neither belongs to a group. A field no table knows yet (a newer app version) falls into `core`.
 
-const SHARED = { title: "core", tags: "core", notes: "core", heldFor: "core", brand: "core", updatedAt: "core", kind: "core", favorite: "fav", spaceId: "space" };
+const SHARED = { title: "core", tags: "core", notes: "core", heldFor: "core", brand: "core", updatedAt: "core", kind: "core", favorite: "fav", spaceId: "space", trashedAt: "trash" };
 
 const BY_KIND = {
   login: { username: "core", url: "core", signIn: "core", viaEntryId: "core", password: "pw", passwordChangedAt: "pw", history: "history", totp: "totp", questions: "qa", recoveryCodes: "codes", lifecycle: "life" },
   link: { linkType: "core", location: "core" },
   note: { body: "body" },
   key: { keyId: "core", url: "core", expires: "core", secret: "secret" },
-  // The number and the call that confirmed it travel together, so a confirmation never lands on a
-  // number nobody called.
-  payee: { who: "core", relation: "core", number: "pay", provider: "pay", accountName: "pay", confirmedAt: "pay" },
   thing: { room: "core", spot: "core", grab: "core", expires: "core" },
   device: { type: "core", model: "core", serial: "core", imei: "core", mac: "core", adminUrl: "core", adminUser: "core", ssid: "core", adminPassword: "dpw", wifiPassword: "wifi", photo: "photo" },
   id: { idType: "core", idNumber: "idnum", photo: "photo" },
@@ -31,7 +28,10 @@ export function splitGroups(entry) {
   const groups = {};
   for (const [field, value] of Object.entries(entry)) {
     const group = groupOf(entry.kind, field);
-    if (group && value !== undefined) (groups[group] ??= {})[field] = value;
+    if (group && value !== undefined) {
+      groups[group] ??= {};
+      groups[group][field] = value;
+    }
   }
   return groups;
 }

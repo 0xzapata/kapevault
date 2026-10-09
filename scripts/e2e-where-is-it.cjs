@@ -3,9 +3,9 @@
 // ticks, close), the printed grab list, and the New item kind picker at the widest and the narrowest
 // window - every kind still creatable. Part of npm run e2e. Throwaway vault, mock names only.
 // Page screenshots (light + dark) in %TEMP%\kapevault-e2e-v2.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createHarness, shows, gone, clip, opened, waitFor } = require("./e2e-harness.cjs");
 
 const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
@@ -13,8 +13,8 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-things-"));
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-things-out-"));
 const { check, launch, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
-const KINDS = ["Login", "Secure note", "API key", "File link", "Payee", "Thing", "Device", "ID"];
+const MASTER = "mock kettle harbor pass orbit gazelle";
+const KINDS = ["Login", "Secure note", "API key", "File link", "Thing", "Device", "ID"];
 
 (async () => {
   const { app, page, errors } = await launch({ KAPEVAULT_DATA_DIR: dataDir });
@@ -47,7 +47,7 @@ const KINDS = ["Login", "Secure note", "API key", "File link", "Payee", "Thing",
   await page.getByRole("button", { name: "New" }).click();
   await page.waitForTimeout(400);
   check("the picker offers every kind", (await picker.getByRole("button").count()) === KINDS.length && (await shows(tile("Thing"))));
-  check("wide: two rows of four", new Set(await tops()).size === 2 && (await tile("Payee").boundingBox()).x === (await tile("Login").boundingBox()).x);
+  check("wide: two rows, four and three", new Set(await tops()).size === 2 && (await tile("Thing").boundingBox()).x === (await tile("Login").boundingBox()).x);
   check("one Tab stop: only the chosen kind is tabbable", (await picker.locator("button[tabindex='0']").count()) === 1 && (await tile("Login").getAttribute("tabindex")) === "0");
   await tile("Login").focus();
   await page.keyboard.press("ArrowRight");
@@ -56,9 +56,9 @@ const KINDS = ["Login", "Secure note", "API key", "File link", "Payee", "Thing",
   check("End chooses the last kind (ID)", (await tile("ID").getAttribute("aria-pressed")) === "true" && (await shows(dialog.getByRole("button", { name: /Add a photo/ }))));
   await page.keyboard.press("ArrowRight");
   check("the arrows wrap around to the first kind", (await tile("Login").getAttribute("aria-pressed")) === "true");
-  for (let i = 0; i < 4; i += 1) await page.keyboard.press("ArrowLeft"); // ID, Device, Thing, Payee
+  for (let i = 0; i < 4; i += 1) await page.keyboard.press("ArrowLeft"); // ID, Device, Thing, File link
   await page.waitForTimeout(100);
-  check("arrowing onto Payee keeps focus on the picker (not its Who field)", (await tile("Payee").getAttribute("aria-pressed")) === "true" && (await tile("Payee").evaluate((b) => b === document.activeElement)));
+  check("arrowing onto File link keeps focus on the picker (not its Title field)", (await tile("File link").getAttribute("aria-pressed")) === "true" && (await tile("File link").evaluate((b) => b === document.activeElement)));
   await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(100);
   check("and off it again", (await tile("Thing").getAttribute("aria-pressed")) === "true" && (await tile("Thing").evaluate((b) => b === document.activeElement)));
@@ -227,11 +227,6 @@ const KINDS = ["Login", "Secure note", "API key", "File link", "Payee", "Thing",
       await dialog.getByPlaceholder("GitHub").fill("Mock Narrow Link");
       await dialog.getByPlaceholder("https://drive.google.com/... or D:\\Clients\\...").fill("https://example.com/mock");
     },
-    Payee: async () => {
-      await dialog.getByPlaceholder("Mama", { exact: true }).fill("Mock Narrow Payee");
-      await dialog.getByRole("button", { name: "GCash", exact: true }).click();
-      await dialog.getByText("Account or mobile number").locator("..").locator("input").fill("09181234567");
-    },
     Thing: async () => {
       await dialog.getByPlaceholder("Passport").fill("Mock Narrow Thing");
       await field("Where exactly").fill("mock drawer");
@@ -252,7 +247,7 @@ const KINDS = ["Login", "Secure note", "API key", "File link", "Payee", "Thing",
     await page.getByRole("button", { name: "Back to list" }).click({ timeout: 3000 }).catch(() => {});
   }
   const kinds = await page.evaluate(async () => (await window.kapevault.view()).entries.filter((e) => e.title.startsWith("Mock Narrow")).map((e) => e.kind).sort());
-  check("each landed as its own kind", JSON.stringify(kinds) === JSON.stringify(["device", "id", "key", "link", "login", "note", "payee", "thing"]), kinds.join(","));
+  check("each landed as its own kind", JSON.stringify(kinds) === JSON.stringify(["device", "id", "key", "link", "login", "note", "thing"]), kinds.join(","));
   await resize(1440, 900);
 
   // ---- The last thing gone: the Things row and list go

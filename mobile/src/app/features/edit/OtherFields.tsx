@@ -2,12 +2,16 @@ import { useState } from "react";
 import { Desktop } from "@phosphor-icons/react";
 import { Label, Segmented, Select, TextArea, TextInput } from "../../components/form";
 import { DEVICE_TYPES, GRAB, LINK_TYPES } from "../../lib/entries";
+import { ProSheet } from "../pro/ProSheet";
+import { ProTag } from "../pro/ProTag";
 import { More, SecretInput } from "./inputs";
-import { LogoField, ProviderPicker } from "./pickers";
+import { LogoField } from "./pickers";
 import type { Draft, SetDraft } from "./use-item-form";
 import type { DeviceType, Space } from "../../host/types";
 
 type FieldsProps = { draft: Draft; set: SetDraft };
+// locked: a client folder this item may not go to without KAPEVault Pro (ItemSheet asks host/pro.ts).
+export type SpaceChoice = Space & { locked?: boolean };
 
 export function TitleField({ draft, set, placeholder, label = "Title" }: FieldsProps & { placeholder: string; label?: string }) {
   return (
@@ -17,17 +21,29 @@ export function TitleField({ draft, set, placeholder, label = "Title" }: FieldsP
   );
 }
 
-export function SpaceField({ draft, set, spaces }: FieldsProps & { spaces: Space[] }) {
+export function SpaceField({ draft, set, spaces }: FieldsProps & { spaces: SpaceChoice[] }) {
+  const [showPro, setShowPro] = useState(false);
   return (
-    <Label text="Space">
-      <Select value={draft.spaceId} onChange={(e) => set("spaceId", e.target.value)}>
-        {spaces.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </Select>
-    </Label>
+    <div>
+      <Label text="Space">
+        <Select value={draft.spaceId} onChange={(e) => set("spaceId", e.target.value)}>
+          {spaces.map((s) => (
+            <option key={s.id} value={s.id} disabled={s.locked}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+      </Label>
+      {spaces.some((s) => s.locked) && (
+        <p className="mt-1.5 text-[12px] text-ink-3">
+          Client folders are part of Pro <ProTag className="align-middle" />{" "}
+          <button type="button" onClick={() => setShowPro(true)} className="press font-medium text-accent focus-ring">
+            See Pro
+          </button>
+        </p>
+      )}
+      {showPro && <ProSheet onClose={() => setShowPro(false)} />}
+    </div>
   );
 }
 
@@ -43,7 +59,7 @@ export function NoteFields({ draft, set }: FieldsProps) {
   return (
     <>
       <Label text="Note">
-        <TextArea value={draft.body ?? ""} placeholder={draft.body === null ? "Loading..." : "PINs, door codes, anything private"} onChange={(e) => set("body", e.target.value)} spellCheck={false} className="h-40 leading-relaxed" />
+        <TextArea value={draft.body ?? ""} placeholder={draft.body === null ? "Loading..." : "PINs, door codes, anything private"} onChange={(e) => set("body", e.target.value)} spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="none" className="h-40 leading-relaxed" />
       </Label>
       <LogoField draft={draft} set={set} />
     </>
@@ -54,7 +70,7 @@ export function KeyFields({ draft, set }: FieldsProps) {
   return (
     <>
       <Label text="Key ID">
-        <TextInput value={draft.keyId} onChange={(e) => set("keyId", e.target.value)} placeholder="Client ID or access key ID" spellCheck={false} autoComplete="off" autoCapitalize="none" className="font-mono" />
+        <TextInput value={draft.keyId} onChange={(e) => set("keyId", e.target.value)} placeholder="Client ID or access key ID" spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="none" className="font-mono" />
       </Label>
       <SecretInput label="Secret" value={draft.secret} onChange={(v) => set("secret", v)} />
       <Label text="Link">
@@ -82,32 +98,6 @@ export function LinkFields({ draft, set }: FieldsProps) {
         <TextInput value={draft.location} onChange={(e) => set("location", e.target.value)} placeholder="https://drive.google.com/..." inputMode="url" autoCapitalize="none" />
       </Label>
       <LogoField draft={draft} set={set} />
-    </>
-  );
-}
-
-// A payee starts from who it is; its title can be left to "Who Provider" (the PC puts Title + Space last).
-export function PayeeFields({ draft, set, spaces, autoTitle }: FieldsProps & { spaces: Space[]; autoTitle: string }) {
-  return (
-    <>
-      <Label text="Who">
-        <TextInput value={draft.who} onChange={(e) => set("who", e.target.value)} placeholder="Mama" />
-      </Label>
-      <Label text="Relation (optional)">
-        <TextInput value={draft.relation} onChange={(e) => set("relation", e.target.value)} placeholder="Mother" />
-      </Label>
-      <ProviderPicker value={draft.provider} onChange={(v) => set("provider", v)} />
-      <div>
-        <Label text="Account or mobile number">
-          <TextInput value={draft.number} onChange={(e) => set("number", e.target.value)} inputMode="numeric" placeholder="0917 123 4567" autoComplete="off" className="font-mono" />
-        </Label>
-        <p className="mt-1.5 text-[12px] text-ink-3">Call {draft.who.trim() || "them"} to check this number before you send money.</p>
-      </div>
-      <Label text="Registered name (optional)">
-        <TextInput value={draft.accountName} onChange={(e) => set("accountName", e.target.value)} placeholder="As the app shows it" spellCheck={false} />
-      </Label>
-      <TitleField draft={draft} set={set} label="Title (optional)" placeholder={autoTitle || "Mama GCash"} />
-      <SpaceField draft={draft} set={set} spaces={spaces} />
     </>
   );
 }

@@ -3,10 +3,9 @@ import { CopyButton, Field, IconButton, SecretField, TotpValue } from "../../com
 import { DEVICE_GLYPH, EntryIcon, SignInMark } from "../../components/icons";
 import { useHost } from "../../host/host-context";
 import { useTotp } from "../../hooks/use-totp";
-import { providerBrand } from "../../lib/brands";
-import { daysFromToday, formatDay, formatNumber, relativeDays } from "../../lib/format";
+import { daysFromToday, formatDay, relativeDays } from "../../lib/format";
 import { deviceTypeLabel, grabLabel, signInLabel } from "../../lib/entries";
-import type { DeviceEntry, Entry, IdEntry, KeyEntry, LinkEntry, LoginEntry, NoteEntry, PayeeEntry, ThingEntry } from "../../host/types";
+import type { DeviceEntry, Entry, IdEntry, KeyEntry, LinkEntry, LoginEntry, NoteEntry, ThingEntry } from "../../host/types";
 
 // The white card of rows under an item's header, one layout per kind (the PC's EntryDetail rows).
 
@@ -78,6 +77,7 @@ export function LoginRows({ entry, entries, onGoTo }: { entry: LoginEntry; entri
         {entry.url ? <span className="text-accent">{entry.url}</span> : none()}
       </Field>
       {entry.questions.map((q, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: questions are addressed by position (getSecret takes the index); the question in the key makes a shifted list remount its rows, so a revealed answer never sticks to another one
         <SecretField key={`${q.question}-${i}`} label={q.question} what="answer" reveal={() => host.getSecret(entry.id, "answer", i)} copy={() => host.copySecret(entry.id, "answer", i)} copiedToast="Answer copied - clears in 30s" dots={8} />
       ))}
     </>
@@ -135,32 +135,6 @@ export function LinkRow({ entry }: { entry: LinkEntry }) {
     <Field label="Location" actions={entry.location && <>{!local && <OpenButton id={entry.id} />}<CopyText id={entry.id} text={entry.location} toast={local ? "Path copied" : "Link copied"} /></>}>
       <span className={local ? "font-mono text-[13px]" : "text-accent"}>{entry.location}</span>
     </Field>
-  );
-}
-
-export function PayeeRows({ entry }: { entry: PayeeEntry }) {
-  const brand = providerBrand(entry.provider);
-  return (
-    <>
-      <Field label="Who">
-        {entry.who}
-        {entry.relation && <span className="text-ink-3"> · {entry.relation}</span>}
-      </Field>
-      <Field label="Wallet or bank">
-        <span className="flex items-center gap-2 font-medium">
-          {brand && (
-            <span className="grid size-6 shrink-0 place-items-center rounded-[6px] border border-line bg-paper">
-              <img src={brand.logo} alt="" className="size-4 object-contain" />
-            </span>
-          )}
-          {entry.provider}
-        </span>
-      </Field>
-      <Field label="Number" actions={<CopyText id={entry.id} text={entry.number} toast="Number copied" label="Copy number" />}>
-        <span className="font-mono text-[15px] tracking-wide">{formatNumber(entry.number)}</span>
-      </Field>
-      <Field label="Account name">{entry.accountName || none("Not saved")}</Field>
-    </>
   );
 }
 

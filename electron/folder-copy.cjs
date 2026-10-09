@@ -6,10 +6,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { writeFileAtomic } = require("./atomic-write.cjs");
 const { isNetworkPath } = require("./file-access.cjs");
-const { writeOpenerBeside } = require("./opener.cjs");
+const { writeOpenerBeside, checkOpenerBeside } = require("./opener.cjs");
 const { MAX_VAULT_BYTES } = require("./vault-crypto.cjs");
 
 const COPY_NAME = "KAPEVault backup.kapevault";
+/** @type {{ at: number | null, error: string, opener: any }} */
 const NOTHING_YET = { at: null, error: "", opener: null };
 const FOREIGN = "That folder holds a copy of a different vault. Restore it, move it out of the folder, or choose another folder.";
 
@@ -45,7 +46,7 @@ function reason(e) {
 // folder() / setFolder(dir): the path kept in settings.json, which only ever holds a checked, local one
 // (checkCopyFolder here, the network check when it is read). ownsFile(bytes): a file of this vault
 // (vault-session). onStatus(status) runs after every change.
-function createFolderCopy({ vaultPath, folder, setFolder, ownsFile, version, delayMs, onStatus = () => {} }) {
+function createFolderCopy({ vaultPath, folder, setFolder, ownsFile, version, delayMs, onStatus = (_status) => {} }) {
   let timer = null;
   let last = NOTHING_YET;
 
@@ -119,7 +120,19 @@ function createFolderCopy({ vaultPath, folder, setFolder, ownsFile, version, del
     return { folder: dir, at, error: last.error, opener: last.opener };
   }
 
-  return { schedule, flush, choose, stop, status };
+  // "Check my Opener": the page beside the copy against this app's own bytes (a changed one is put back).
+  // "no-folder" | "failed" | what checkOpenerBeside says.
+  function checkOpener() {
+    const dir = folder();
+    if (!dir) return "no-folder";
+    try {
+      return checkOpenerBeside(dir, version);
+    } catch {
+      return "failed";
+    }
+  }
+
+  return { schedule, flush, choose, stop, status, checkOpener };
 }
 
 module.exports = { createFolderCopy, checkCopyFolder, copyVaultWithOpener, COPY_NAME };

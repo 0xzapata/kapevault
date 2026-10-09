@@ -25,11 +25,6 @@ export interface Draft {
   expires: string;
   linkType: LinkType;
   location: string;
-  who: string;
-  relation: string;
-  provider: string;
-  number: string;
-  accountName: string;
   room: string;
   spot: string;
   grab: GrabPriority;
@@ -53,9 +48,9 @@ export type SetDraft = <K extends keyof Draft>(field: K, value: Draft[K]) => voi
 
 function draftFrom(e: Entry | null, spaceId: string, heldFor: string): Draft {
   const pick = <K extends EntryKind>(kind: K) => (e?.kind === kind ? (e as Extract<Entry, { kind: K }>) : null);
-  const login = pick("login"), key = pick("key"), note = pick("note"), link = pick("link"), payee = pick("payee"), thing = pick("thing"), device = pick("device"), id = pick("id");
-  // A payee saved untitled is "Who Provider", an ID its type: on edit the title keeps following them.
-  const followsAuto = (payee && payee.title === `${payee.who} ${payee.provider}`) || (id && id.title === id.idType);
+  const login = pick("login"), key = pick("key"), note = pick("note"), link = pick("link"), thing = pick("thing"), device = pick("device"), id = pick("id");
+  // An ID saved untitled is its type: on edit the title keeps following it.
+  const followsAuto = id && id.title === id.idType;
   return {
     kind: e?.kind ?? "login",
     title: followsAuto ? "" : (e?.title ?? ""),
@@ -76,11 +71,6 @@ function draftFrom(e: Entry | null, spaceId: string, heldFor: string): Draft {
     expires: key?.expires ?? thing?.expires ?? "",
     linkType: link?.linkType ?? "web",
     location: link?.location ?? "",
-    who: payee?.who ?? "",
-    relation: payee?.relation ?? "",
-    provider: payee?.provider ?? "",
-    number: payee?.number ?? "",
-    accountName: payee?.accountName ?? "",
     room: thing?.room ?? "",
     spot: thing?.spot ?? "",
     grab: thing?.grab ?? 2,
@@ -127,16 +117,10 @@ export function useItemForm(entry: Entry | null, defaultSpaceId: string, default
     host.getSecret(entry.id, "photo").then((photo) => setDraft((d) => (d.photo === null ? { ...d, photo } : d)), () => {});
   }
 
-  const autoTitle = draft.kind === "id" ? draft.idType.trim() : [draft.who.trim(), draft.provider.trim()].filter(Boolean).join(" ");
+  const autoTitle = draft.idType.trim(); // only an ID leaves its title to its type
 
   // What stops a save, in words, in the order the form reads; "" when it can be saved.
   function problem(): string {
-    if (draft.kind === "payee") {
-      if (!draft.who.trim()) return "Say who this payee is.";
-      if (!draft.provider.trim()) return "Say which wallet or bank.";
-      if (!draft.number.trim()) return "Add the account or mobile number.";
-      return "";
-    }
     if (draft.kind === "id") return autoTitle ? "" : draft.idOther ? "Say which ID it is." : "Pick which ID it is.";
     if (!draft.title.trim()) return "Give it a title.";
     if (draft.kind === "thing" && !draft.spot.trim()) return "Say where it is kept.";
@@ -149,7 +133,7 @@ export function useItemForm(entry: Entry | null, defaultSpaceId: string, default
       id: entry?.id,
       kind: d.kind,
       spaceId: d.spaceId,
-      title: d.kind === "payee" || d.kind === "id" ? d.title.trim() || autoTitle : d.title,
+      title: d.kind === "id" ? d.title.trim() || autoTitle : d.title,
       notes: d.kind === "note" ? "" : d.notes,
       tags: d.tags.split(",").map((t) => t.trim()).filter(Boolean),
       favorite: entry?.favorite ?? false,
@@ -165,8 +149,6 @@ export function useItemForm(entry: Entry | null, defaultSpaceId: string, default
         return { ...base, keyId: d.keyId, secret: orKeep(d.secret), url: d.url, expires: d.expires };
       case "link":
         return { ...base, linkType: d.linkType, location: d.location };
-      case "payee":
-        return { ...base, who: d.who, relation: d.relation, provider: d.provider, number: d.number, accountName: d.accountName };
       case "thing":
         return { ...base, room: d.room, spot: d.spot, grab: d.grab, expires: d.expires };
       case "device":

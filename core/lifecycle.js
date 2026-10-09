@@ -1,7 +1,7 @@
 // Shrink Queue: closing an account on purpose. A login's `lifecycle` is { state: "dormant" |
 // "deletion-requested" | "gone", requestedAt, followUpAt, goneAt }; none = in use.
 import { addDays, today } from "./dates.js";
-import { liveLogin } from "./entries.js";
+import { isTrashed, liveLogin } from "./entries.js";
 /** @import { VaultData } from "./entries.js" */
 
 const FOLLOW_UP_DAYS = 30; // a company gets a month to act on an erasure request
@@ -42,5 +42,5 @@ export function confirmGone(data, id, clearNotes) {
 /** @param {VaultData} data @returns {number} */
 export function followUpsDue(data) {
   const now = today();
-  return data.entries.filter((e) => e.lifecycle?.state === "deletion-requested" && e.lifecycle.followUpAt <= now).length;
+  return data.entries.filter((e) => e.lifecycle?.state === "deletion-requested" && e.lifecycle.followUpAt <= now && !isTrashed(e)).length;
 }

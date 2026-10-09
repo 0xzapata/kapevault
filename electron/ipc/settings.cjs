@@ -4,7 +4,8 @@ const { SESSION_LIMIT_HOURS } = require("../app-settings.cjs");
 const { oldCopyInfo, removeOldCopy, oldInstallPath } = require("../legacy-data.cjs");
 
 // applySettings: main's, run after every change. hotkeyOk: whether the quick search hotkey registered.
-function register({ handle, attempt, requireUnlocked, vault, settings, airWall, applySettings, hotkey, hotkeyOk, legacyDir, devEnv, shownCopy, proveOwnsCopy, windows }) {
+// installWriters: who else can write the install folder (install-folder.cjs), a promise started at startup.
+function register({ handle, attempt, requireUnlocked, settings, airWall, installWriters, applySettings, hotkey, hotkeyOk, legacyDir, devEnv, shownCopy, proveOwnsCopy, windows }) {
   // oldCopy: BOVault's vault, still in its old folder after the carry-over ({ path, modifiedAt } | null).
   // oldInstall: BOVault.exe still installed - it keeps its own Ctrl+Shift+Space (Windows only; a path
   // or null). A test run looks at neither real one.
@@ -42,6 +43,9 @@ function register({ handle, attempt, requireUnlocked, vault, settings, airWall, 
   handle("airwall:status", () => attempt(async () => ({ status: await airWall.status() })));
   handle("airwall:set", (on) => attempt(async () => ({ status: await airWall.set(Boolean(on)) })));
   handle("airwall:test", () => attempt(async () => ({ result: await airWall.test() })));
+
+  // Listed in Security when another account on this PC can change the folder KAPEVault runs from.
+  handle("security:installFolder", () => installWriters);
 
   // Quick search window.
   handle("quick:hide", () => windows.quick()?.hide());

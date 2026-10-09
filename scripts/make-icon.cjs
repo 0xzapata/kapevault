@@ -6,13 +6,13 @@
 // (macOS menu bar). A template image must be black + alpha only - macOS tints it for light/dark -
 // so it comes from TRAY_SILHOUETTE below, not the app icon. Edit both when the logo changes.
 const { chromium } = require("./playwright.cjs");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
 const svg = fs.readFileSync(path.join(ROOT, "src", "assets", "app-icon.svg"), "utf8");
-const svgUrl = "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64");
+const svgUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 const OUT = path.join(ROOT, "build");
 
@@ -26,7 +26,7 @@ const TRAY_SILHOUETTE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32
   <circle cx="15" cy="16" r="9" mask="url(#cut)"/>
   <circle cx="15" cy="14.5" r="2.5"/><rect x="14" y="15" width="2" height="5"/>
 </svg>`;
-const trayUrl = "data:image/svg+xml;base64," + Buffer.from(TRAY_SILHOUETTE).toString("base64");
+const trayUrl = `data:image/svg+xml;base64,${Buffer.from(TRAY_SILHOUETTE).toString("base64")}`;
 
 // ICO container: 6-byte header, one 16-byte entry per frame, then the PNG bytes. 256 is stored as 0.
 function toIco(frames) {
@@ -63,7 +63,7 @@ function toIco(frames) {
   async function assertTemplate(png, name) {
     const colored = await page.evaluate(async (b64) => {
       const img = new Image();
-      img.src = "data:image/png;base64," + b64;
+      img.src = `data:image/png;base64,${b64}`;
       await img.decode();
       const c = document.createElement("canvas");
       c.width = img.width;

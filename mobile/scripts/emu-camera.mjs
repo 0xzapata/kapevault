@@ -15,7 +15,7 @@ import { PANORAMA } from "../src/app/host/test/qr-poster.mjs";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // The running KAPEVault emulator's discovery file: its gRPC port and the folder of keys it trusts.
-function discovery() {
+export function discovery() {
   const dir = path.join(process.env.LOCALAPPDATA ?? os.tmpdir(), "Temp", "avd", "running");
   for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
     if (!/^pid_\d+\.ini$/.test(name)) continue;

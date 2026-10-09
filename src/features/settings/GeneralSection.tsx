@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import { Keyboard, WarningCircle } from "@phosphor-icons/react";
 import { Button, ErrorText, Select } from "@/components/form";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
-import { vaultApi, type AppSettings, type SessionLimitHours } from "@/lib/vault-api";
+import { vaultApi, type AppSettings, type SessionLimitHours, type UpdateStatus } from "@/lib/vault-api";
 import { isMac, keys } from "@/lib/platform";
 import { formatDay, localToday } from "@/lib/local-date";
 import { Group, Kbd, SwitchRow } from "./SettingRow";
@@ -11,20 +11,28 @@ import { hoursText } from "./lib/session-limit";
 
 const HOTKEY = keys("mod", "shift", "Space");
 
-export function GeneralSection({ onShowShortcuts }: { onShowShortcuts: () => void }) {
+export function GeneralSection({ onShowShortcuts, onShowLicences }: { onShowShortcuts: () => void; onShowLicences: () => void }) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [path, setPath] = useState("");
   const [oldError, setOldError] = useState("");
+  const [release, setRelease] = useState<UpdateStatus | null>(null);
   const limitId = useId();
 
   useEffect(() => {
     vaultApi.getSettings().then(setSettings);
     vaultApi.status().then((s) => setPath(s.path));
+    vaultApi.updateStatus().then(setRelease);
   }, []);
 
   async function update(patch: Partial<AppSettings>) {
     setSettings((s) => (s ? { ...s, ...patch } : s)); // the switch answers at once; main confirms
     setSettings(await vaultApi.setSettings(patch));
+  }
+
+  // Switching on asks at once when a day has passed; the answer fills the line under the switch.
+  async function setCheckForUpdates(checkForUpdates: boolean) {
+    await update({ checkForUpdates });
+    setRelease(checkForUpdates ? await vaultApi.updateCheck() : await vaultApi.updateStatus());
   }
 
   // BOVault's old folder goes only on a confirm with the OLD vault's master password, and only while
@@ -78,6 +86,30 @@ export function GeneralSection({ onShowShortcuts }: { onShowShortcuts: () => voi
         </div>
       </Group>
 
+      <Group title="Updates">
+        <SwitchRow
+          title="Check for updates"
+          checked={settings?.checkForUpdates ?? false}
+          disabled={!settings}
+          onChange={setCheckForUpdates}
+          note="Asks GitHub once a day whether a newer KAPEVault is out. Nothing about your vault is sent."
+        />
+        {settings?.checkForUpdates && release?.available && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-field px-3.5 py-3">
+            <p className="min-w-0 flex-1 text-[13.5px] font-medium text-ink">KAPEVault {release.version} is out</p>
+            <Button type="button" className="shrink-0 bg-raised" onClick={() => vaultApi.updateOpen()}>
+              See what is new
+            </Button>
+          </div>
+        )}
+        {settings?.checkForUpdates && release && (release.error || (release.checkedAt && !release.available)) && (
+          <p role="status" className="text-[12.5px] text-ink-3">
+            {release.error ?? "Up to date"}
+            {release.checkedAt ? ` · last checked ${formatDay(localToday(new Date(release.checkedAt)))}` : ""}
+          </p>
+        )}
+      </Group>
+
       <Group title="Vault file">
         <p className="-mt-2 text-[13px] text-ink-3">
           Encrypted with AES-256-GCM. Locks after 5 minutes idle, on sleep, and when {isMac ? "the Mac" : "Windows"} locks. Copied passwords clear after 30 seconds
@@ -113,6 +145,15 @@ export function GeneralSection({ onShowShortcuts }: { onShowShortcuts: () => voi
           </span>
           <Button type="button" className="h-8 shrink-0 bg-raised" onClick={() => vaultApi.revealFile()}>
             Show file
+          </Button>
+        </div>
+      </Group>
+
+      <Group title="About">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="min-w-0 flex-1 text-[13.5px] text-ink">Open source licences</p>
+          <Button type="button" className="shrink-0" onClick={onShowLicences}>
+            View
           </Button>
         </div>
       </Group>

@@ -30,7 +30,7 @@ export function cleanImei(value) {
 // Six hex pairs however they were written (50-c7-bf..., 50:C7:BF..., 50c7.bf12.3456) -> 50:C7:BF:12:34:56.
 export function macOf(value) {
   const hex = typeof value === "string" ? value.replace(/[\s:.-]/g, "") : "";
-  return /^[0-9a-f]{12}$/i.test(hex) ? hex.toUpperCase().match(/../g).join(":") : null;
+  return /^[0-9a-f]{12}$/i.test(hex) ? /** @type {RegExpMatchArray} */ (hex.toUpperCase().match(/../g)).join(":") : null;
 }
 
 export function cleanMac(value) {
@@ -47,7 +47,7 @@ export function cleanPhoto(value) {
   if (value === "") return undefined;
   const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+)={0,2}$/.exec(typeof value === "string" ? value : "");
   const size = m ? Math.floor((m[1].length * 3) / 4) : 0;
-  if (size < 3 || size > MAX_PHOTO_BYTES || !atob(m[1].slice(0, 4)).startsWith("\xff\xd8\xff")) throw new Error("Photo could not be saved. Pick it again");
+  if (size < 3 || size > MAX_PHOTO_BYTES || !atob(/** @type {RegExpExecArray} */ (m)[1].slice(0, 4)).startsWith("\xff\xd8\xff")) throw new Error("Photo could not be saved. Pick it again");
   return value;
 }
 
@@ -165,7 +165,7 @@ export function parseLabel(text) {
   else if (has(/\b(?:router|wi-?fi|wlan|ont|onu|gpon|modem|fibr)\b/i)) type = "router";
   else if (has(/\b(?:laptop|notebook|thinkpad|macbook|ideapad|vivobook|zenbook|inspiron|latitude)\b/i)) type = "laptop";
 
-  const nameOf = (list) => list.find(([re]) => new RegExp(String.raw`(?<![a-z0-9])(?:${re})(?![a-z0-9])`, "i").test(clean))?.[1];
+  const nameOf = (list) => list.find(([re]) => new RegExp(`(?<![a-z0-9])(?:${re})(?![a-z0-9])`, "i").test(clean))?.[1];
   const brand = nameOf(PROVIDERS) ?? nameOf(MAKERS);
   let title;
   if (brand && found.model) title = found.model.toLowerCase().startsWith(brand.toLowerCase()) ? found.model : `${brand} ${found.model}`;
@@ -173,6 +173,7 @@ export function parseLabel(text) {
   else title = found.model;
 
   const { code, ...fields } = found;
+  /** @type {Record<string, any>} */
   const result = { ...fields };
   if (type) result.type = type;
   if (title) result.title = title;

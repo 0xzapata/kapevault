@@ -31,15 +31,16 @@ export const throttleWait = (state, now) => Math.min(MAX_UNLOCK_PAUSE_MS, state.
 /**
  * The state after a guess, or `state` itself when the guess changes nothing (nothing to save):
  * - rule: a new master password refused by the rule - the current one was never tried, not a guess;
+ * - newer: a file a newer KAPEVault saved, refused whatever was typed - not a guess either;
  * - local false: a password proven on another file (a backup, a kept copy, a snapshot under a new master
  *   password). A miss there counts, but its success never clears the count - restoring your own backup
  *   at the lock screen used to reset it between guesses at this vault.
  * A success clears the count ({ failed: 0 }: the host deletes the file).
- * @param {ThrottleState} state @param {{ ok: boolean, rule?: boolean }} result
+ * @param {ThrottleState} state @param {{ ok: boolean, rule?: boolean, newer?: boolean }} result
  * @param {{ local?: boolean, now: number }} context @returns {ThrottleState}
  */
 export function nextThrottle(state, result, { local = true, now }) {
-  if (result.rule || (result.ok && !local)) return state;
+  if (result.rule || result.newer || (result.ok && !local)) return state;
   const failed = result.ok ? 0 : state.failed + 1;
   return { failed, nextAt: failed >= FREE_MISSES ? now + Math.min(MAX_UNLOCK_PAUSE_MS, 1000 * 2 ** (failed - FREE_MISSES)) : 0 };
 }

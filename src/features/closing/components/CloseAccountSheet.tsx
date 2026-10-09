@@ -59,7 +59,7 @@ export function CloseAccountSheet({ entry, step: startStep, onClose }: CloseAcco
         step === "choose" ? (
           <div className="space-y-2.5">
             <p className="pb-2 text-[13.5px] leading-relaxed text-ink-2">An account you no longer use can still leak. Close it properly.</p>
-            <button onClick={() => mark("dormant", close)} disabled={busy} className={choice}>
+            <button type="button" onClick={() => mark("dormant", close)} disabled={busy} className={choice}>
               <span className={glyph}>
                 <Moon size={17} weight="fill" />
               </span>
@@ -68,7 +68,7 @@ export function CloseAccountSheet({ entry, step: startStep, onClose }: CloseAcco
                 <span className="block text-[12.5px] text-ink-3">Moves it to Closing. No more password warnings.</span>
               </span>
             </button>
-            <button onClick={() => setStep("email")} className={choice}>
+            <button type="button" onClick={() => setStep("email")} className={choice}>
               <span className={glyph}>
                 <EnvelopeSimple size={17} weight="fill" />
               </span>
@@ -91,18 +91,18 @@ export function CloseAccountSheet({ entry, step: startStep, onClose }: CloseAcco
                 <span className="text-ink-3">Subject </span>
                 <span className="selectable font-medium">{email.subject}</span>
               </p>
-              <p aria-label="Email" className="selectable max-h-[300px] overflow-y-auto whitespace-pre-wrap px-4 py-3.5 text-[13px] leading-relaxed text-ink">
+              <article aria-label="Email" className="selectable max-h-[300px] overflow-y-auto whitespace-pre-wrap px-4 py-3.5 text-[13px] leading-relaxed text-ink">
                 {email.body}
-              </p>
+              </article>
             </div>
             <p className="text-[12px] text-ink-3">A template, not legal advice.</p>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => copy.run(() => vaultApi.copyText(emailText(email), entry.id), "Email copied")} className={pill}>
+              <button type="button" onClick={() => copy.run(() => vaultApi.copyText(emailText(email), entry.id), "Email copied")} className={pill}>
                 {copy.copied ? <Check size={15} weight="bold" className="swap-in text-ok" /> : <Copy size={15} />}
                 {copy.copied ? "Copied" : "Copy email"}
               </button>
               {entry.url && (
-                <button onClick={openSite} className={pill}>
+                <button type="button" onClick={openSite} className={pill}>
                   <ArrowSquareOut size={15} />
                   Open website
                 </button>

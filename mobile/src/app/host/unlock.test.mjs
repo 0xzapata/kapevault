@@ -12,27 +12,38 @@ import { fakeKeystore, nodeFs, pc, tempDir } from "./test/fixtures.mjs";
 const DAY = 86_400_000;
 const open = async (key) => ({ key }); // the vault opened with that key
 
-test("a crash inside the plugin's delete-then-rename leaves the new file, and reading finishes the swap", async () => {
+test("a read that lands in the middle of a save waits for it, instead of seeing the file half way", async () => {
   const dir = tempDir();
-  let crash = false;
-  const store = createStore(nodeFs(dir, { crash: () => crash }));
+  const base = nodeFs(dir);
+  let hold = false;
+  let release, arrive;
+  const gate = new Promise((r) => (release = r));
+  const reached = new Promise((r) => (arrive = r));
+  const replace = async (name, text) => {
+    if (hold) (arrive(), await gate);
+    await base.replace(name, text);
+  };
+  const store = createStore({ ...base, replace });
   await store.write("vault.kapevault", "old");
-  crash = true;
-  await assert.rejects(store.write("vault.kapevault", "new"));
-  assert.ok(!fs.existsSync(path.join(dir, "vault.kapevault")), "the gap: only the .next file is left");
-  crash = false;
-  assert.equal(await store.read("vault.kapevault"), "new");
+  hold = true;
+  const saving = store.write("vault.kapevault", "new");
+  await reached; // the save has started and waits
+  const reading = store.read("vault.kapevault"); // a backup reading the vault meanwhile
+  release();
+  await saving;
+  assert.equal(await reading, "new");
   assert.deepEqual(fs.readdirSync(dir), ["vault.kapevault"]);
 });
 
-test("a half-made file never replaces the real one, and a leftover that is not valid is never swapped in", async () => {
+test("a failed save leaves the real file as it was, and a leftover that is not valid is never swapped in", async () => {
   const dir = tempDir();
-  const store = createStore(nodeFs(dir, { write: (name) => name === "a.json.next" && (fs.writeFileSync(path.join(dir, name), "{hal"), true) }));
+  const store = createStore(nodeFs(dir, { replace: (name) => name === "a.json" }));
   await createStore(nodeFs(dir)).write("b.json", "{}");
   fs.writeFileSync(path.join(dir, "b.json.next"), "{half");
-  assert.equal(await store.read("b.json"), "{}", "the swap never started: the file is as it was");
+  assert.equal(await store.read("b.json"), "{}", "the file is whole: it is as it was");
   assert.ok(!fs.existsSync(path.join(dir, "b.json.next")));
   await assert.rejects(store.write("a.json", "{}"), /disk full/);
+  fs.writeFileSync(path.join(dir, "a.json.next"), "{hal");
   assert.equal(await store.read("a.json", (t) => t.startsWith("{}")), null, "no finished a.json, and the half one is not taken for it");
 });
 

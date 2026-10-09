@@ -37,6 +37,18 @@ test("choosing a folder copies the vault file as it is, with the Forever Opener 
   assert.ok(Math.abs(status.at - Date.now()) < 5000);
 });
 
+test("checkOpener reads the Opener in the linked folder: none linked, missing, genuine, changed and put back", (t) => {
+  const { copy, target } = setup(t);
+  assert.equal(copy.checkOpener(), "no-folder");
+  copy.choose(target);
+  assert.equal(copy.checkOpener(), "genuine");
+  fs.writeFileSync(path.join(target, OPENER_NAME), openerHtml("99.0.0"));
+  assert.equal(copy.checkOpener(), "replaced", "a page claiming a newer version is not this app's bytes");
+  assert.equal(fs.readFileSync(path.join(target, OPENER_NAME), "utf8"), openerHtml("0.1.0"));
+  fs.rmSync(path.join(target, OPENER_NAME));
+  assert.equal(copy.checkOpener(), "missing");
+});
+
 test("saves are debounced into one copy", async (t) => {
   const { copy, vaultPath, target, copied, statuses } = setup(t);
   copy.choose(target);
@@ -129,7 +141,7 @@ test("a later run reports the copy's own time", (t) => {
 });
 
 // A real vault (mock master password) with the copier asking it whether a copy is its own.
-async function realVault(t, master = "correct horse battery") {
+async function realVault(t, master = "correct horse battery orbit gazelle") {
   const vaultPath = path.join(tempDir("data"), "vault.kapevault");
   const vault = createVaultSession(vaultPath);
   assert.equal((await vault.create(master)).ok, true);
@@ -171,7 +183,7 @@ test("this vault's own copy is overwritten, also one saved under an earlier mast
   const before = fs.readFileSync(mine.vaultPath);
   mine.copy.choose(target);
   assert.ok(fs.readFileSync(copied).equals(before));
-  assert.equal((await mine.vault.changeMaster("correct horse battery", "brand new mock lantern")).ok, true);
+  assert.equal((await mine.vault.changeMaster("correct horse battery orbit gazelle", "brand new mock lantern orbit gazelle")).ok, true);
   fs.writeFileSync(copied, before); // the copy from before the change
   assert.equal(mine.copy.choose(target).error, "");
   assert.ok(fs.readFileSync(copied).equals(fs.readFileSync(mine.vaultPath)));
@@ -190,9 +202,9 @@ test("after restoring an older snapshot of the same vault, its copy under a late
   const target = tempDir("copy");
   const copied = path.join(target, COPY_NAME);
   const older = fs.readFileSync(mine.vaultPath, "utf8"); // knows only the first master password
-  assert.equal((await mine.vault.changeMaster("correct horse battery", "brand new mock lantern")).ok, true);
+  assert.equal((await mine.vault.changeMaster("correct horse battery orbit gazelle", "brand new mock lantern orbit gazelle")).ok, true);
   mine.copy.choose(target); // the copy is under the new master password
-  await restoreOver(mine.vault, older, "correct horse battery");
+  await restoreOver(mine.vault, older, "correct horse battery orbit gazelle");
   mine.copy.schedule();
   mine.copy.flush();
   assert.equal(mine.copy.status().error, "");
@@ -201,13 +213,13 @@ test("after restoring an older snapshot of the same vault, its copy under a late
 
 test("after restoring a different vault, the replaced vault's copy in the folder is never overwritten", async (t) => {
   const mine = await realVault(t);
-  const other = await realVault(t, "other mock lantern phrase");
+  const other = await realVault(t, "other mock lantern phrase orbit gazelle");
   const target = tempDir("copy");
   const copied = path.join(target, COPY_NAME);
-  assert.equal((await mine.vault.changeMaster("correct horse battery", "brand new mock lantern")).ok, true);
+  assert.equal((await mine.vault.changeMaster("correct horse battery orbit gazelle", "brand new mock lantern orbit gazelle")).ok, true);
   mine.copy.choose(target);
   const replacedCopy = fs.readFileSync(copied);
-  await restoreOver(mine.vault, fs.readFileSync(other.vaultPath, "utf8"), "other mock lantern phrase");
+  await restoreOver(mine.vault, fs.readFileSync(other.vaultPath, "utf8"), "other mock lantern phrase orbit gazelle");
   mine.copy.schedule();
   mine.copy.flush();
   assert.match(mine.copy.status().error, /holds a copy of a different vault/);
@@ -216,25 +228,25 @@ test("after restoring a different vault, the replaced vault's copy in the folder
 
 test("a lock-screen restore of an older snapshot, or a detour through another vault, keeps copying this vault", async (t) => {
   const mine = await realVault(t);
-  const other = await realVault(t, "other mock lantern phrase");
+  const other = await realVault(t, "other mock lantern phrase orbit gazelle");
   const target = tempDir("copy");
   const copied = path.join(target, COPY_NAME);
   const older = fs.readFileSync(mine.vaultPath, "utf8");
-  assert.equal((await mine.vault.changeMaster("correct horse battery", "brand new mock lantern")).ok, true);
+  assert.equal((await mine.vault.changeMaster("correct horse battery orbit gazelle", "brand new mock lantern orbit gazelle")).ok, true);
   mine.copy.choose(target); // under the new master password
   mine.vault.lock(); // the new password forgotten: restore from the lock screen
-  await restoreOver(mine.vault, older, "correct horse battery");
+  await restoreOver(mine.vault, older, "correct horse battery orbit gazelle");
   mine.copy.schedule();
   mine.copy.flush();
   assert.equal(mine.copy.status().error, "");
   assert.ok(fs.readFileSync(copied).equals(fs.readFileSync(mine.vaultPath)));
 
-  assert.equal((await mine.vault.changeMaster("correct horse battery", "third mock lantern phrase")).ok, true);
+  assert.equal((await mine.vault.changeMaster("correct horse battery orbit gazelle", "third mock lantern phrase orbit gazelle")).ok, true);
   mine.copy.schedule();
   mine.copy.flush(); // the copy is under the third password now
   assert.equal(mine.copy.status().error, "");
-  await restoreOver(mine.vault, fs.readFileSync(other.vaultPath, "utf8"), "other mock lantern phrase");
-  await restoreOver(mine.vault, older, "correct horse battery");
+  await restoreOver(mine.vault, fs.readFileSync(other.vaultPath, "utf8"), "other mock lantern phrase orbit gazelle");
+  await restoreOver(mine.vault, older, "correct horse battery orbit gazelle");
   mine.copy.schedule();
   mine.copy.flush();
   assert.equal(mine.copy.status().error, "");

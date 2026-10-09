@@ -14,6 +14,7 @@ const DEFAULTS = {
   theme: "system", // system | classic | dark | colorblind | contrast
   sessionLimitHours: 8, // one of SESSION_LIMIT_HOURS; 0 = no limit
   hideFromCapture: true, // off: screenshots, recordings and screen sharing see the windows
+  checkForUpdates: false, // opt-in: asks GitHub once a day whether a newer KAPEVault is out (updates.cjs)
 };
 
 const THEMES = ["system", "classic", "dark", "colorblind", "contrast"];
@@ -80,6 +81,23 @@ function createAppSettings(dataDir) {
     return get();
   }
 
+  // The update check's memory (updates.cjs): when it last asked, when it last got an answer, and the
+  // newest release that answer named. Written by main only, never through set(), so the page cannot
+  // make a check look due or not due, or name a release.
+  const savedCheck = saved.updateCheck && typeof saved.updateCheck === "object" ? saved.updateCheck : {};
+  const time = (v) => (Number.isFinite(v) && v > 0 ? v : null);
+  let updateCheck = {
+    attemptedAt: time(savedCheck.attemptedAt),
+    checkedAt: time(savedCheck.checkedAt),
+    latest: typeof savedCheck.latest === "string" && savedCheck.latest.length <= 40 ? savedCheck.latest : null,
+    url: typeof savedCheck.url === "string" && savedCheck.url.length <= 200 ? savedCheck.url : null,
+  };
+
+  function setUpdateCheck(next) {
+    updateCheck = { attemptedAt: time(next.attemptedAt), checkedAt: time(next.checkedAt), latest: next.latest ?? null, url: next.url ?? null };
+    write();
+  }
+
   // Last window size and place, so a resized window reopens the way it was left.
   let bounds = null;
   const win = saved.window;
@@ -123,7 +141,7 @@ function createAppSettings(dataDir) {
   // (a new install id would make this PC's older backups look like another device's).
   function write() {
     if (readOnly) return;
-    writeFileAtomic(file, JSON.stringify({ ...values, window: bounds ?? undefined, installId: installId ?? undefined, copyFolder: copyFolder || undefined }, null, 2));
+    writeFileAtomic(file, JSON.stringify({ ...values, window: bounds ?? undefined, installId: installId ?? undefined, copyFolder: copyFolder || undefined, updateCheck }, null, 2));
   }
 
   function windowBounds() {
@@ -135,7 +153,7 @@ function createAppSettings(dataDir) {
     write();
   }
 
-  return { get, set, windowBounds, saveWindowBounds, installId: getInstallId, renewInstallId, copyFolder: () => copyFolder, setCopyFolder };
+  return { get, set, windowBounds, saveWindowBounds, installId: getInstallId, renewInstallId, copyFolder: () => copyFolder, setCopyFolder, updateCheck: () => ({ ...updateCheck }), setUpdateCheck };
 }
 
 module.exports = { createAppSettings, SESSION_LIMIT_HOURS };

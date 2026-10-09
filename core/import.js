@@ -1,11 +1,12 @@
 // Bulk add from an import file: { space: "<client name>", ...entry fields, via: "<title of the login it
-// signs in through>" }. Clients are created by name; an item already in that client (same kind + title)
-// is skipped, so importing the same file twice adds nothing. All or nothing.
+// signs in through>" }. Clients are created by name; an item that is already in that client is skipped,
+// so importing the same file twice adds nothing. All or nothing.
 import { isRealDate } from "./dates.js";
 import { DEVICE_TYPES, cleanImei, cleanMac, cleanPhoto } from "./devices.js";
 import { dueToNotes } from "./due-to-note.js";
+import { payeeToNotes } from "./payee-to-note.js";
 import { cleanIdNumber, cleanIdType } from "./ids.js";
-import { GRAB, KINDS, LINK_TYPES, SIGN_IN, cleanText, upsertEntry } from "./entries.js";
+import { GRAB, KINDS, LINK_TYPES, SIGN_IN, cleanText, isTrashed, upsertEntry } from "./entries.js";
 import { parseTotp } from "./totp.js";
 /** @import { VaultData } from "./entries.js" */
 
@@ -13,12 +14,12 @@ const MAX_IMPORT_ITEMS = 5000; // far above real use; stops a crafted file freez
 
 // An import file is deleted after import, so a field that would be silently blanked (a password
 // typed as a number, kind "Login") must stop the whole import instead.
-const IMPORT_TEXT_FIELDS = ["space", "title", "username", "password", "url", "location", "notes", "via", "totp", "body", "keyId", "secret", "expires", "who", "relation", "provider", "number", "accountName", "heldFor", "room", "spot", "type", "model", "serial", "imei", "mac", "adminUrl", "adminUser", "adminPassword", "ssid", "wifiPassword", "idType", "idNumber"];
+const IMPORT_TEXT_FIELDS = ["space", "title", "username", "password", "url", "location", "notes", "via", "totp", "body", "keyId", "secret", "expires", "heldFor", "room", "spot", "type", "model", "serial", "imei", "mac", "adminUrl", "adminUser", "adminPassword", "ssid", "wifiPassword", "idType", "idNumber"];
 
 function checkImportItem(item, i, checkFolder) {
   const where = `Item ${i + 1}`;
   if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`${where} is not an entry.`);
-  if (!KINDS.includes(item.kind)) throw new Error(`${where}: kind must be "login", "link", "note", "key", "payee", "thing", "device" or "id".`);
+  if (!KINDS.includes(item.kind)) throw new Error(`${where}: kind must be "login", "link", "note", "key", "thing", "device" or "id".`);
   for (const field of IMPORT_TEXT_FIELDS) {
     if (item[field] !== undefined && typeof item[field] !== "string") throw new Error(`${where}: ${field} must be text.`);
   }
@@ -60,6 +61,27 @@ function checkImportItem(item, i, checkFolder) {
   }
 }
 
+// What makes an incoming item THE SAME item as one already in the client: its kind, its title (any case)
+// and every field below, compared as saved (a device's IMEI after cleaning). The
+// export file is deleted after an import, so a skipped item must be an exact copy of what is already
+// there - never a different account that happens to share a title. Notes count too, a skipped item's
+// notes would be lost with the file. Tags and the favorite star do not: re-tagging is not a new item.
+const NOTES = ["notes"];
+const SAME_FIELDS = {
+  login: ["username", "password", "url", "signIn", "totp", ...NOTES],
+  note: ["body", ...NOTES],
+  key: ["keyId", "secret", "url", "expires", ...NOTES],
+  link: ["linkType", "location", ...NOTES],
+  thing: ["room", "spot", "grab", "expires", ...NOTES],
+  device: ["type", "model", "serial", "imei", "mac", "adminUrl", "adminUser", "adminPassword", "ssid", "wifiPassword", "photo", ...NOTES],
+  id: ["idType", "idNumber", "photo", ...NOTES],
+};
+
+const isSameItem = (a, b) => a.kind === b.kind && a.spaceId === b.spaceId && a.title.toLowerCase() === b.title.toLowerCase() && SAME_FIELDS[a.kind].every((f) => (a[f] ?? "") === (b[f] ?? ""));
+// A closed account's tombstone and an item in the Trash are not "in the vault": the Trash empties by
+// itself after 30 days, so an import must not lean on it as the only copy.
+const isLive = (e) => e.lifecycle?.state !== "gone" && !isTrashed(e);
+
 // An ID left untitled is named after its type, as the form names it.
 function titleId(item) {
   const untitled = item?.kind === "id" && (item.title === undefined || (typeof item.title === "string" && !item.title.trim()));
@@ -78,7 +100,7 @@ function titleId(item) {
 export function importEntries(data, file, checkFolder = () => {}) {
   if (!Array.isArray(file) || file.length === 0) throw new Error("The file has no items to import.");
   if (file.length > MAX_IMPORT_ITEMS) throw new Error(`The file has ${file.length} items; KAPEVault imports up to ${MAX_IMPORT_ITEMS} at a time.`);
-  const items = dueToNotes(file).map(titleId); // dueToNotes: a file made while due dates existed
+  const items = payeeToNotes(dueToNotes(file)).map(titleId); // a file made while due dates or payees existed
   const before = { spaces: data.spaces, entries: data.entries };
   const same = (a, b) => cleanText(a).toLowerCase() === cleanText(b).toLowerCase();
   let added = 0;
@@ -93,9 +115,13 @@ export function importEntries(data, file, checkFolder = () => {}) {
         data.spaces = [...data.spaces, space];
       }
       const kind = item.kind;
-      // A closed account's tombstone never blocks signing up there again.
-      if (data.entries.some((e) => e.spaceId === space.id && e.kind === kind && same(e.title, item.title) && e.lifecycle?.state !== "gone")) return;
+      const stored = data.entries;
       const id = upsertEntry(data, { ...item, id: undefined, kind, spaceId: space.id, viaEntryId: undefined });
+      const made = data.entries[data.entries.length - 1];
+      if (stored.some((e) => isLive(e) && isSameItem(e, made))) {
+        data.entries = stored;
+        return;
+      }
       added += 1;
       if (kind === "login" && cleanText(item.via)) links.push({ id, spaceId: space.id, via: item.via });
     });

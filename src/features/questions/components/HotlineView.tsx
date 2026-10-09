@@ -66,7 +66,13 @@ export function HotlineView({ entryId, title, questions, start, onClose }: Hotli
     <div data-closing={closing || undefined} className="fixed inset-0 z-50">
       <div {...modal} role="dialog" aria-modal="true" aria-label="Phone call view" tabIndex={-1} className="sheet flex h-full flex-col bg-surface outline-none">
         <TitleBar edgeLeft edgeRight className="px-4">
-          <button autoFocus onClick={close} className={barPill}>
+          <button
+            type="button"
+            // biome-ignore lint/a11y/noAutofocus: a full-window view opens with the focus on Done
+            autoFocus
+            onClick={close}
+            className={barPill}
+          >
             <X size={13} weight="bold" />
             Done
           </button>
@@ -81,10 +87,10 @@ export function HotlineView({ entryId, title, questions, start, onClose }: Hotli
               {questions.length > 1 && (
                 <div className="flex gap-2">
                   {/* aria-disabled, not disabled: a disabled button would drop the focus at the first or last question */}
-                  <button aria-label="Previous question" title="Previous question" aria-disabled={index === 0} onClick={() => go(-1)} className={round}>
+                  <button type="button" aria-label="Previous question" title="Previous question" aria-disabled={index === 0} onClick={() => go(-1)} className={round}>
                     <CaretLeft size={16} weight="bold" />
                   </button>
-                  <button aria-label="Next question" title="Next question" aria-disabled={index === questions.length - 1} onClick={() => go(1)} className={round}>
+                  <button type="button" aria-label="Next question" title="Next question" aria-disabled={index === questions.length - 1} onClick={() => go(1)} className={round}>
                     <CaretRight size={16} weight="bold" />
                   </button>
                 </div>
@@ -101,6 +107,7 @@ export function HotlineView({ entryId, title, questions, start, onClose }: Hotli
                 </p>
                 <ol aria-label="Spelled out" className="mt-9 flex flex-wrap gap-2">
                   {spelling.map((s, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: the letters of one answer, read-only and replaced whole
                     <li key={i} aria-label={s.say} className="flex min-w-[68px] flex-col items-center rounded-[14px] bg-raised px-3 pb-2 pt-2.5 shadow-tile">
                       <span aria-hidden className={`font-mono text-[26px] font-semibold leading-none ${s.char === " " ? "text-ink-3" : "text-ink"}`}>{s.char === " " ? "␣" : s.char}</span>
                       <span aria-hidden className="mt-1.5 whitespace-nowrap text-[12px] text-ink-3">{s.hint}</span>
@@ -113,6 +120,7 @@ export function HotlineView({ entryId, title, questions, start, onClose }: Hotli
             <div className="mt-10 flex flex-wrap items-center gap-2.5">
               {answer && voice.available && (
                 <button
+                  type="button"
                   onClick={() => (voice.speaking ? voice.stop() : voice.speak(`${answer}. Spelled: ${spellingLine(answer)}.`))}
                   className={`${pill} bg-accent text-on-accent shadow-accent hover:brightness-110`}
                 >
@@ -121,7 +129,7 @@ export function HotlineView({ entryId, title, questions, start, onClose }: Hotli
                 </button>
               )}
               {answer && (
-                <button onClick={() => copy.run(() => vaultApi.copySecret(entryId, "answer", index), "Answer copied - clears in 30s")} className={quiet}>
+                <button type="button" onClick={() => copy.run(() => vaultApi.copySecret(entryId, "answer", index), "Answer copied - clears in 30s")} className={quiet}>
                   {copy.copied ? <Check size={17} weight="bold" className="swap-in" /> : <Copy size={17} weight="bold" />}
                   {copy.copied ? "Copied" : "Copy answer"}
                 </button>

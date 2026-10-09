@@ -21,8 +21,8 @@ import { R2_KEYS, fakeR2, pc, pcDevice } from "./fixtures.mjs";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..", "..", "..", "..");
 const out = path.join(root, "proof", "two-device");
-const MASTER = "Lantern-Mango-Quiet-47";
-const NEW_MASTER = "Harbor-Kettle-Violet-62";
+const MASTER = "Lantern-Mango-Quiet-47 orbit gazelle";
+const NEW_MASTER = "Harbor-Kettle-Violet-62 orbit gazelle";
 const PC_ID = "9d9d9d9d-1c1d-4e5f-8a9b-0c1d2e3f4a5b";
 const CDP_PORT = 9335;
 const results = [];
@@ -35,7 +35,7 @@ function check(name, ok, detail) {
 
 // --- adb and the page (scripts/lib/device.mjs) ---------------------------------------------------------
 
-const { sh, clearAppFiles, appFile, ...device } = kapevaultDevice("two-device");
+const { sh, clearAppFiles, appFile, ownPro, ...device } = kapevaultDevice("two-device");
 const openPage = ({ restart }) => device.openPage({ port: CDP_PORT, out, restart, answerMs: 90_000 });
 
 // The host under test, bundled the way Vite builds the app (IIFE, "@core" = ../core).
@@ -73,6 +73,7 @@ try {
   // ===== Part 1: the phone's real host over DevTools =====
   sh("logcat", "-c");
   clearAppFiles();
+  ownPro(); // sync is KAPEVault Pro's; the fresh install at the end restores without it
   page = await openPage({ restart: true });
   await page.goto("/shell.html");
   const injected = await page.evaluate(`${await bundle()}; window.__h = KVProof.proofHost(${r2.port});
@@ -138,11 +139,16 @@ try {
   // A delete, and the delete gate.
   const link0 = pcEntry("Link 0").id;
   await page.evaluate(`__h.deleteEntry(${JSON.stringify(link0)})`);
+  await page.evaluate(`__h.deleteForever(${JSON.stringify(link0)})`); // a move to the Trash never syncs as a delete
   await page.evaluate("__sync()");
   await pcSync();
   check("a delete on the phone is a delete on the PC", !pcEntry("Link 0"));
   const six = ["Link 1", "Link 2", "Link 3", "Link 4", "Link 5", "Link 6"];
-  for (const title of six) desk.vault.deleteEntry(pcEntry(title).id);
+  for (const title of six) {
+    const { id } = pcEntry(title);
+    desk.vault.deleteEntry(id);
+    desk.vault.deleteForever(id);
+  }
   await pcSync();
   const gated = await page.evaluate("__sync()");
   const kept = await page.evaluate("__titles()");
@@ -230,7 +236,10 @@ try {
   check("the Sync sheet lists This phone and DESKTOP-4F2A, and the check code the PC shows", /This phone/.test(text) && /DESKTOP-4F2A/.test(text) && text.includes(desk.sync.status().fingerprint), text.slice(0, 300));
 
   // The delete gate in the app: every item the PC has goes.
-  for (const e of desk.vault.publicView().entries) desk.vault.deleteEntry(e.id);
+  for (const e of desk.vault.publicView().entries) {
+    desk.vault.deleteEntry(e.id);
+    desk.vault.deleteForever(e.id);
+  }
   await pcSync();
   await page.click("Sync now");
   text = await page.text(/wait for you before they sync/, 30_000);

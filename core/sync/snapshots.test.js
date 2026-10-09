@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readSnapshotKey, pickSnapshots, snapshotKey, snapshotsToPrune, DEAD_AFTER_MS } from "./snapshots.js";
+import { readSnapshotKey, pickSnapshots, snapshotKey, snapshotStamp, snapshotsToPrune, DEAD_AFTER_MS, MAX_NEWCOMERS } from "./snapshots.js";
 import { MAX_VAULT_BYTES } from "../vault-format.js";
 
 const ME = "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40";
@@ -10,8 +10,10 @@ const NOW = Date.parse("2026-09-27T08:00:00Z");
 const key = (owner, time, note = "") => `kapevault/snapshots/${owner ? `${owner}/` : ""}${time.replace(/[:.]/g, "-")}${note}.kapevault`;
 
 test("a snapshot key reads back its maker, its name time and what kind it is", () => {
-  assert.deepEqual(readSnapshotKey(key(PHONE, "2026-09-25T07:15:02.123Z")), { owner: PHONE, time: Date.parse("2026-09-25T07:15:02.123Z"), beforeRestore: false, legacy: false });
+  assert.deepEqual(readSnapshotKey(key(PHONE, "2026-09-25T07:15:02.123Z")), { owner: PHONE, time: Date.parse("2026-09-25T07:15:02.123Z"), beforeRestore: false, backupOnly: false, legacy: false });
   assert.equal(readSnapshotKey(key(PHONE, "2026-09-25T07:15:02.123Z", "-before-restore")).beforeRestore, true);
+  assert.deepEqual(readSnapshotKey(key(PHONE, "2026-09-25T07:15:02.123Z", "-backup-only")), { owner: PHONE, time: Date.parse("2026-09-25T07:15:02.123Z"), beforeRestore: false, backupOnly: true, legacy: false });
+  assert.equal(readSnapshotKey(key(PHONE, "2026-09-25T07:15:02.123Z", "-backup-only-before-restore")), null);
   assert.equal(readSnapshotKey(key("", "2026-09-25T07:15:02.123Z")).owner, null);
   assert.equal(readSnapshotKey("bovault/snapshots/2026-09-25T07-15-02-123Z.bovault").legacy, true);
   for (const other of ["kapevault/snapshots/notes.txt", "kapevault/opener/kapevault-opener-1.0.0.html", "bovault/snapshots/2026-09-25T07-15-02-123Z.kapevault"]) assert.equal(readSnapshotKey(other), null, other);
@@ -30,10 +32,11 @@ test("the newest snapshot is the one R2 stored last, whatever its name says", ()
   assert.equal(phone.dead, false);
 });
 
-test("own, restore-undo, un-named, pre-rename and revoked snapshots are never read", () => {
+test("own, restore-undo, backup-only, un-named, pre-rename and revoked snapshots are never read", () => {
   const objects = [
     { key: key(ME, "2026-09-27T07:00:00.000Z"), lastModified: NOW },
     { key: key(PHONE, "2026-09-27T07:00:00.000Z", "-before-restore"), lastModified: NOW },
+    { key: key(PHONE, "2026-09-27T07:30:00.000Z", "-backup-only"), lastModified: NOW }, // a phone without Pro
     { key: key("", "2026-09-27T07:00:00.000Z"), lastModified: NOW },
     { key: `bovault/snapshots/${TABLET}/2026-09-27T07-00-00-000Z.bovault`, lastModified: NOW },
     { key: key(TABLET, "2026-09-27T07:00:00.000Z"), lastModified: NOW },
@@ -69,7 +72,8 @@ test("an object listed bigger than any vault is never picked", () => {
 test("a new snapshot's key reads back; thinning keeps the newest 20 and never touches a key named far ahead", () => {
   const at = new Date(NOW);
   assert.equal(snapshotKey(at, PHONE), `kapevault/snapshots/${PHONE}/2026-09-27T08-00-00-000Z.kapevault`);
-  assert.deepEqual(readSnapshotKey(snapshotKey(at, PHONE, "before-restore")), { owner: PHONE, time: NOW, beforeRestore: true, legacy: false });
+  assert.deepEqual(readSnapshotKey(snapshotKey(at, PHONE, "before-restore")), { owner: PHONE, time: NOW, beforeRestore: true, backupOnly: false, legacy: false });
+  assert.equal(readSnapshotKey(snapshotKey(at, PHONE, "backup-only")).backupOnly, true);
   assert.equal(readSnapshotKey(snapshotKey(at)).owner, null);
   const recent = Array.from({ length: 25 }, (_, i) => snapshotKey(new Date(NOW - i * 60_000), ME));
   const future = snapshotKey(new Date(NOW + 2 * 86_400_000), ME);
@@ -117,4 +121,32 @@ test("pruning never takes the way back from a restore: -before-restore snapshots
 
   const lastUndo = at(100 * DAY, "before-restore");
   assert.ok(!snapshotsToPrune([lastUndo, ...regularToday], now).includes(lastUndo), "the newest is kept however old");
+});
+
+test("backup-only snapshots are thinned out by the regular rules", () => {
+  const recent = Array.from({ length: 25 }, (_, i) => snapshotKey(new Date(NOW - i * 60_000), PHONE, "backup-only"));
+  assert.deepEqual(snapshotsToPrune(recent, NOW), recent.slice(20));
+});
+
+// SECURITY-AUDIT M-1: anyone with write access to the bucket can plant device folders. Each costs up to
+// three downloads a run, so only a few unknown devices are read per run; devices the vault knows never lose theirs.
+test("unknown devices are capped at the newest few per run; known devices are never dropped", () => {
+  const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const junk = Array.from({ length: 30 }, (_, n) => ({ key: key(id(n + 1), "2026-09-27T07:00:00.000Z"), lastModified: NOW - 10_000 - n }));
+  const real = { key: key(PHONE, "2026-09-20T07:00:00.000Z"), lastModified: NOW - 7 * DAY };
+  const fresh = { key: key(TABLET, "2026-09-27T07:59:00.000Z"), lastModified: NOW - 1000 };
+  const known = { [PHONE]: { name: "Mock Phone", platform: "android", addedAt: [1, 0, PHONE] } };
+  const picks = pickSnapshots([...junk, real, fresh], { installId: ME, devices: known, now: NOW });
+  assert.equal(picks.length, 1 + MAX_NEWCOMERS, "the known phone plus the newest 8 unknown");
+  assert.ok(picks.some((p) => p.device === PHONE), "an old known device stays, however many newer strangers");
+  assert.ok(picks.some((p) => p.device === TABLET), "a genuinely new device is among the newest");
+});
+
+test("a snapshot that would not open is skipped until the object changes", () => {
+  const bad = { key: key(PHONE, "2026-09-27T07:00:00.000Z"), lastModified: NOW - 1000, size: 10 };
+  const older = { key: key(PHONE, "2026-09-26T07:00:00.000Z"), lastModified: NOW - 2000, size: 10 };
+  const failed = new Set([snapshotStamp(bad)]);
+  assert.deepEqual(pickSnapshots([bad, older], { installId: ME, devices: {}, now: NOW, failed })[0].keys, [older.key], "the older one is tried instead, not counted against the three");
+  assert.deepEqual(pickSnapshots([bad], { installId: ME, devices: {}, now: NOW, failed }), []);
+  assert.deepEqual(pickSnapshots([{ ...bad, lastModified: NOW - 500 }], { installId: ME, devices: {}, now: NOW, failed })[0].keys.length, 1, "a rewritten object is tried again");
 });

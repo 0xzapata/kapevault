@@ -1,9 +1,10 @@
 // Everything the real host needs from Android, in one place: the app's private files, native HTTP, the
-// VaultKeystore, SecureClipboard, QrScanner and ScreenCapture plugins (mobile/android/.../kapevault/), and the phone's
-// browser.
+// VaultKeystore, SecureClipboard, QrScanner, ScreenCapture, Billing and DurableFile plugins (mobile/android/.../kapevault/), and
+// the phone's browser.
 import { CapacitorHttp, registerPlugin } from "@capacitor/core";
 import { Directory, Encoding, Filesystem } from "@capacitor/filesystem";
 import type { Keystore } from "./biometric";
+import type { Billing } from "./pro";
 import type { Transport } from "./r2";
 import type { HostDeps } from "./real-host";
 import type { RawFs } from "./storage";
@@ -12,6 +13,8 @@ const VaultKeystore = registerPlugin<Keystore>("VaultKeystore");
 const SecureClipboard = registerPlugin<{ copy(options: { text: string }): Promise<void>; clear(): Promise<void> }>("SecureClipboard");
 const QrScanner = registerPlugin<{ scan(options: { purpose: "setup" | "totp" }): Promise<{ text: string }> }>("QrScanner");
 const ScreenCapture = registerPlugin<{ setHidden(options: { hidden: boolean }): Promise<void> }>("ScreenCapture");
+const PlayBilling = registerPlugin<Billing>("Billing");
+const DurableFile = registerPlugin<{ replace(options: { name: string; text: string }): Promise<void> }>("DurableFile");
 
 // Directory.Data = the app's private files folder: no other app reads it, and
 // android:allowBackup="false" keeps it out of Google's cloud backup.
@@ -28,12 +31,9 @@ const fs: RawFs = {
       throw e;
     }
   },
-  async write(name, text) {
-    await Filesystem.writeFile({ ...at(name), data: text, encoding: Encoding.UTF8 });
-  },
-  async rename(from, to) {
-    await Filesystem.rename({ from, to, directory: Directory.Data, toDirectory: Directory.Data });
-  },
+  // Filesystem.writeFile never syncs to flash and Filesystem.rename deletes the target first, so saves
+  // go through DurableFile (see DurableFilePlugin.kt). Reads and deletes are Filesystem's.
+  replace: (name, text) => DurableFile.replace({ name, text }),
   async remove(name) {
     try {
       await Filesystem.deleteFile(at(name));
@@ -81,6 +81,7 @@ export function nativeDeps(): HostDeps {
     },
     scanQr: async (purpose) => (await QrScanner.scan({ purpose })).text,
     hideFromCapture: (hidden) => ScreenCapture.setHidden({ hidden }),
+    billing: PlayBilling,
     // Capacitor opens any page outside the app in the phone's browser.
     openUrl: (url) => void window.open(url, "_blank", "noopener"),
     model: phoneModel(),

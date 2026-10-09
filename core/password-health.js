@@ -1,13 +1,19 @@
 // Password health: a strength estimate, the master password rule, and the issue list (reused, weak,
 // old, expiring keys, backup codes running out). An account being closed (any lifecycle) gets no issue
 // at all, backup codes included - it is on its way out.
-// A heuristic, not zxcvbn: entropy from the character pool, minus the patterns people actually use.
+// A heuristic, not zxcvbn: entropy from the character pool, minus the patterns people actually use
+// (words cost per word, years and digit runs per digit, separators almost nothing).
+import { liveEntries } from "./trash.js";
 
 const LABELS = ["Very weak", "Weak", "Fair", "Strong", "Very strong"];
 const THRESHOLDS = [28, 36, 60, 80]; // bits needed for score 1, 2, 3, 4
 const PATTERN_FRACTION = 0.25; // a repeat/sequence/keyboard char is worth a quarter of a random one
-const WORD_BITS = Math.log2(26) * 0.75; // a letter inside a word-like run - words are far from random
-const YEAR_DIGIT_BITS = 1; // a whole year 1950-2039 is ~4 bits
+// A guesser picks a WORD, not letters: a 3-8 letter word costs ~11-14 bits, more per extra letter past 8.
+const wordBits = (len) => (len <= 8 ? 9 + 0.6 * len : 13.8 + 2.5 * (len - 8));
+const DIGIT_BITS = Math.log2(10); // a digit in a run of 2+ (dates, PINs, "88")
+const YEAR_BITS = 7; // a whole year 1950-2039
+const SEPARATOR_BITS = 2; // one symbol between two words/numbers
+const EDGE_SYMBOL_BITS = 4; // one symbol at the start or end of a word/number
 const DAY_MS = 86400000;
 const OLD_AFTER_DAYS = 365;
 const EXPIRING_WITHIN_DAYS = 30;
@@ -73,22 +79,33 @@ function estimateBits(pw) {
   const chars = Array.from(pw); // code points, so an emoji is one char
   const n = chars.length;
   const has = (re) => chars.some((c) => re.test(c));
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters count as symbols in the pool, on purpose
   const pool = (has(/[a-z]/) ? 26 : 0) + (has(/[A-Z]/) ? 26 : 0) + (has(/[0-9]/) ? 10 : 0) + (has(/[\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]/) ? 33 : 0) + (has(/[^\x00-\x7f]/) ? 100 : 0);
   const bits = new Array(n).fill(Math.log2(pool));
+  const tok = new Array(n).fill(false); // part of a word or a number: a symbol beside it is a separator
   let extra = 0;
 
-  // Letter runs of 4+ (leet undone, mostly real letters) in lower, UPPER or Title case read as words.
-  // A capital after a small letter starts a new word ("KapeVault" is Kape + Vault).
+  // Letter runs of 3+ (leet undone, mostly real letters) in lower, UPPER or Title case that can be
+  // said aloud read as words and cost per word. A random run (no vowels, long consonant strings) keeps
+  // the pool cost. A capital after a small letter starts a new word ("KapeVault" is Kape + Vault).
   const letters = chars.map((c) => (c === "1" ? "i" : LEET[c] ?? c));
   const isLetter = (i) => /[a-zA-Z]/.test(letters[i]);
   const camelBreak = (i) => /[a-z]/.test(letters[i - 1]) && /[A-Z]/.test(letters[i]);
-  eachRun(n, (i) => isLetter(i) && isLetter(i - 1) && !camelBreak(i), 4, (s, e) => {
+  eachRun(n, (i) => isLetter(i) && isLetter(i - 1) && !camelBreak(i), 3, (s, e) => {
     if (!isLetter(s)) return;
     const run = chars.slice(s, e).filter((c) => /[a-zA-Z]/.test(c)).join("");
     if (run.length * 2 <= e - s) return; // mostly digits ("xz7351") is not a word
     if (run !== run.toLowerCase() && run !== run.toUpperCase() && !/^[A-Z][a-z]*$/.test(run)) return;
-    for (let i = s; i < e; i++) bits[i] = Math.min(bits[i], WORD_BITS);
+    const vowels = (run.match(/[aeiouy]/gi) ?? []).length / run.length;
+    if (vowels < 0.2 || vowels > 0.7 || /[^aeiouy]{5}/i.test(run)) return;
+    for (let i = s; i < e; i++) { bits[i] = Math.min(bits[i], wordBits(e - s) / (e - s)); tok[i] = true; }
     if (run !== run.toLowerCase()) extra += 1; // the capitalisation choice
+  });
+
+  // Digits in a run of 2+ are digits, not pool characters ("88", "1998", a PIN).
+  eachRun(n, (i) => /[0-9]/.test(chars[i]) && /[0-9]/.test(chars[i - 1]), 2, (s, e) => {
+    if (!/[0-9]/.test(chars[s])) return;
+    for (let i = s; i < e; i++) { bits[i] = Math.min(bits[i], DIGIT_BITS); tok[i] = true; }
   });
 
   // Repeats, sequences and keyboard walks of 3+: every char after the first is mostly predictable.
@@ -126,8 +143,15 @@ function estimateBits(pw) {
 
   for (let i = 0; i + 4 <= n; i++) {
     if (!/^(19[5-9]\d|20[0-3]\d)$/.test(chars.slice(i, i + 4).join(""))) continue;
-    for (let j = i; j < i + 4; j++) bits[j] = YEAR_DIGIT_BITS;
+    for (let j = i; j < i + 4; j++) bits[j] = YEAR_BITS / 4;
     i += 3;
+  }
+
+  // One symbol between two words/numbers, or at either end of them, is a pick from a few usual ones.
+  for (let i = 0; i < n; i++) {
+    if (tok[i] || !/[\x20-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]/.test(chars[i])) continue;
+    if (tok[i - 1] && tok[i + 1]) bits[i] = Math.min(bits[i], SEPARATOR_BITS);
+    else if ((i === 0 && tok[1]) || (i === n - 1 && tok[i - 1])) bits[i] = Math.min(bits[i], EDGE_SYMBOL_BITS);
   }
   return bits.reduce((a, b) => a + b, 0) + extra;
 }
@@ -158,7 +182,7 @@ function parseDay(s) {
  */
 export function findIssues(entries, today, sha256) {
   const now = parseDay(today);
-  const list = Array.isArray(entries) ? entries : [];
+  const list = Array.isArray(entries) ? liveEntries(entries) : []; // an item in the Trash is no issue and no reuse
   const logins = list.filter((e) => e && e.kind === "login" && typeof e.password === "string" && e.password.length > 0);
   const hashes = new Map(logins.map((e) => [e, sha256(e.password)]));
   const counts = new Map();
@@ -195,6 +219,6 @@ export function findIssues(entries, today, sha256) {
 /** @returns {string | null} what is wrong with it, or null */
 export function masterProblem(master) {
   if (typeof master !== "string" || master.trim().length < MIN_MASTER_LENGTH) return `Use at least ${MIN_MASTER_LENGTH} characters.`;
-  if (ratePassword(master).score < MIN_MASTER_SCORE) return "Too easy to guess. Try three or four unrelated words.";
+  if (ratePassword(master).score < MIN_MASTER_SCORE) return "Too easy to guess. Try five unrelated words, or a long random mix.";
   return null;
 }

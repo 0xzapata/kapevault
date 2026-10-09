@@ -1,12 +1,12 @@
-import { useRef, useState, type ReactNode } from "react";
-import { Phone, SealCheck, WarningCircle } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
+import { WarningCircle } from "@phosphor-icons/react";
 import { cardPrimary, cardQuiet } from "../../components/buttons";
-import { useToast } from "../../components/Toast";
 import { useHost } from "../../host/host-context";
-import { clockTime, formatDay } from "../../lib/format";
+import { clockTime } from "../../lib/format";
 import { isSerious, linkOf } from "../../lib/entries";
 import { issueAdvice, issueLabel, worstIssue } from "../../lib/issues";
-import type { ConflictCopy, Entry, PayeeEntry } from "../../host/types";
+import { useMoveToTrash } from "../trash/use-move-to-trash";
+import type { ConflictCopy, Entry } from "../../host/types";
 
 type Tone = "danger" | "warn" | "ok";
 const TONE: Record<Tone, { box: string; ink: string }> = {
@@ -65,14 +65,10 @@ export function IssueBanner({ entry, onEdit }: { entry: Entry; onEdit: () => voi
 
 // A copy sync made because both devices changed the item.
 export function ConflictBanner({ conflict, onOpen, onDeleted }: { conflict: ConflictCopy; onOpen: (id: string) => void; onDeleted: () => void }) {
-  const host = useHost();
-  const toast = useToast();
-  const [confirming, setConfirming] = useState(false);
+  const moveToTrash = useMoveToTrash();
+  const { originalId } = conflict;
   async function remove() {
-    if (!confirming) return setConfirming(true);
-    await host.deleteEntry(conflict.id);
-    toast("Conflict copy deleted");
-    onDeleted();
+    if (await moveToTrash(conflict.id)) onDeleted();
   }
   return (
     <Banner
@@ -80,50 +76,18 @@ export function ConflictBanner({ conflict, onOpen, onDeleted }: { conflict: Conf
       title="Changed on both devices"
       actions={
         <>
-          {conflict.originalId && (
-            <button type="button" onClick={() => onOpen(conflict.originalId!)} className={`${cardPrimary} mr-1`}>
+          {originalId && (
+            <button type="button" onClick={() => onOpen(originalId)} className={`${cardPrimary} mr-1`}>
               Open the other one
             </button>
           )}
-          <button type="button" onClick={remove} className={confirming ? `${cardQuiet} bg-danger-soft text-danger` : conflict.originalId ? cardQuiet : cardPrimary}>
-            {confirming ? "Confirm delete" : "Delete this copy"}
+          <button type="button" onClick={remove} className={conflict.originalId ? cardQuiet : cardPrimary}>
+            Move this copy to Trash
           </button>
         </>
       }
     >
-      This copy is the {conflict.device} version from {clockTime(conflict.at)}. Compare it with the other one, keep what you need, then delete this copy.
-    </Banner>
-  );
-}
-
-// Whether a payee's number was confirmed by a real phone call.
-export function PayeeConfirmation({ entry }: { entry: PayeeEntry }) {
-  const host = useHost();
-  const toast = useToast();
-  const confirmedOnOpen = useRef(entry.confirmedAt);
-  if (entry.confirmedAt) {
-    // Confirmed just now, on this page: a small success, so it settles in and the seal blooms.
-    const fresh = !confirmedOnOpen.current;
-    return (
-      <div className={fresh ? "settle" : undefined}>
-        <Banner tone="ok" icon={<SealCheck size={20} weight="fill" className={fresh ? "swap-in" : undefined} />} title={`Confirmed by call on ${formatDay(entry.confirmedAt)}`}>
-          If {entry.who} sends a new number, call before you send money.
-        </Banner>
-      </div>
-    );
-  }
-  return (
-    <Banner
-      tone="warn"
-      icon={<Phone size={20} weight="fill" />}
-      title="Not confirmed yet"
-      actions={
-        <button type="button" onClick={() => host.confirmPayee(entry.id, entry.number).then(() => toast("Marked confirmed today"), () => toast("Could not mark it", "error"))} className="press hit h-8 rounded-full bg-raised px-3.5 text-[12.5px] font-semibold text-accent shadow-tile focus-ring">
-          Mark confirmed today
-        </button>
-      }
-    >
-      Call {entry.who} on a number you already know and read this one back.
+      This copy is the {conflict.device} version from {clockTime(conflict.at)}. Compare it with the other one, keep what you need, then move this copy to the Trash.
     </Banner>
   );
 }

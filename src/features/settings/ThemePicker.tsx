@@ -45,6 +45,7 @@ export function ThemePicker({ value, disabled, onChange }: { value: ThemeChoice 
       {THEMES.map((t, i) => {
         const checked = value === t.id;
         return (
+          // biome-ignore lint/a11y/useSemanticElements: a radio drawn as a button tile; a native radio input cannot be styled as this control
           <button
             key={t.id}
             {...tile(i)}

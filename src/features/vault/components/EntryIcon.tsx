@@ -1,5 +1,6 @@
-import { Code, Devices, FileText, GoogleDriveLogo, HandCoins, IdentificationCard, Key, Link, NotePencil, Package } from "@phosphor-icons/react";
+import { Code, Devices, FileText, GoogleDriveLogo, IdentificationCard, Key, Link, NotePencil, Package } from "@phosphor-icons/react";
 import { brandForEntry } from "@/features/brands/brands";
+import { BrandLogo } from "@/features/brands/BrandLogo";
 import { FolderArt } from "@/features/files/components/FolderArt";
 import { DEVICE_GLYPH } from "@/features/devices/components/DeviceIcon";
 import type { Entry, EntryKind } from "../types";
@@ -12,13 +13,12 @@ const KIND_TONE = {
   link: "from-icon-top to-icon-bottom",
   note: "from-sys-orange to-sys-orange",
   key: "from-sys-purple to-sys-indigo",
-  payee: "from-sys-green to-sys-teal",
   thing: "from-sys-brown to-sys-brown",
   device: "from-sys-cyan to-sys-blue",
   id: "from-sys-pink to-sys-pink",
 };
 
-const KIND_GLYPH = { login: Key, note: NotePencil, key: Code, payee: HandCoins, link: Link, thing: Package, device: Devices, id: IdentificationCard };
+const KIND_GLYPH = { login: Key, note: NotePencil, key: Code, link: Link, thing: Package, device: Devices, id: IdentificationCard };
 
 interface EntryIconProps {
   entry: Entry;
@@ -54,7 +54,7 @@ export function EntryIcon({ entry, size, inverted = false }: EntryIconProps) {
   if (brand) {
     return (
       <div className={`${box} border border-line bg-paper shadow-tile`}>
-        <img src={brand.logo} alt="" data-brand={brand.slug} draggable={false} className={size === "lg" ? "size-12 object-contain" : "size-[22px] object-contain"} />
+        <BrandLogo brand={brand} size={size === "lg" ? 48 : 22} marked />
       </div>
     );
   }

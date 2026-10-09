@@ -1,0 +1,22 @@
+{
+  "encrypted": false,
+  "folders": [{ "id": "f1", "name": "Mock Work" }],
+  "collections": [{ "id": "c1", "name": "Mock Team" }],
+  "items": [
+    {
+      "type": 1, "name": "Mock Mail", "folderId": "f1", "favorite": true, "notes": "recovery by phone",
+      "login": { "username": "mock.user@example.com", "password": "mock-pass-1", "totp": "otpauth://totp/Mock:mock.user?secret=JBSWY3DPEHPK3PXP&issuer=Mock", "uris": [{ "uri": "https://mail.example.com" }, { "uri": "https://mail2.example.com" }] },
+      "fields": [{ "name": "pin", "value": "4321", "type": 1 }]
+    },
+    { "type": 1, "name": "Mock Steam", "folderId": null, "login": { "username": "mock.gamer", "password": "mock-pass-2", "totp": "steam://ABCDEFGH", "uris": [] } },
+    { "type": 2, "name": "Mock Wifi note", "folderId": null, "notes": "router code 1234" },
+    { "type": 3, "name": "Mock Visa", "folderId": null, "notes": "", "card": { "cardholderName": "Mock Person", "brand": "Visa", "number": "4111111111111111", "expMonth": "04", "expYear": "2030", "code": "123" } },
+    { "type": 4, "name": "Mock Identity", "folderId": null, "identity": { "firstName": "Mock", "lastName": "Person", "email": "mock@example.com" } },
+    { "type": 1, "name": "Mock Team Tool", "folderId": null, "collectionIds": ["c1"], "login": { "username": "team", "password": "mock-pass-3", "uris": [{ "uri": "https://tool.example.com" }] } },
+    { "type": 1, "name": "Mock Old", "folderId": null, "deletedDate": "2026-01-01T00:00:00Z", "login": { "username": "gone", "password": "mock-pass-4" } },
+    { "type": 5, "name": "Mock Deploy Key", "folderId": null, "sshKey": { "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nmock-private-key-body\n-----END OPENSSH PRIVATE KEY-----\n", "publicKey": "ssh-ed25519 AAAAmockpublic", "keyFingerprint": "SHA256:mockfingerprint" } },
+    { "type": 6, "name": "Mock Bank Account", "folderId": null, "bankAccount": { "bankName": "Mock Bank", "accountNumber": "12345678", "pin": "4321" } },
+    { "type": 1, "name": "Mock Passkey Site", "folderId": null, "login": { "username": "mock.pk", "password": "mock-pass-5", "uris": [{ "uri": "https://pk.example.com" }], "fido2Credentials": [{ "credentialId": "mock-credential" }] } },
+    { "type": 9, "name": "Mock Weird", "folderId": null }
+  ]
+}

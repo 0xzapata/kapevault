@@ -1,7 +1,7 @@
 // The open vault's session: its key and data, the one change queue, every write of the vault file, and
 // lock / unlock. real-host.ts wires it; restore.ts and cloud-connect.ts act on it. The PC's
 // electron/vault-session.cjs is the model: the key lives only while unlocked.
-import { findIssues, openedVault, publicView, stamp, today, withKeySalt } from "@core";
+import { NewerVaultError, findIssues, hasExpiredTrash, isNewerVaultFile, openedVault, publicView, purgeGenerated, purgeTrash, stamp, today, withKeySalt } from "@core";
 import type { createBiometric } from "./biometric";
 import type { Backups } from "./cloud";
 import { sha256Hex } from "./sha256";
@@ -21,7 +21,8 @@ const TOO_BIG = "The vault would be too big to back up (over 64 MB), so this was
 const SESSION_CHECK_MS = 15_000;
 const HOUR_MS = 3600_000;
 
-export const isVaultText = (text: string) => parseVaultFile(text) !== null;
+// A finished vault file: one this app reads, or one a newer KAPEVault wrote (never taken for a half-made file).
+export const isVaultText = (text: string) => parseVaultFile(text) !== null || isNewerVaultFile(text);
 // scrypt runs on the page's thread: a pause now and then lets "Unlocking..." paint.
 export const pause = () => new Promise((r) => setTimeout(r, 0));
 export const message = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
@@ -56,20 +57,29 @@ export function createSession(d: SessionDeps) {
   let generation = 0; // bumped by every start() and lock, so work begun on one session never lands in another
   let revision = 0; // bumped by every start() and save: a merge read at one revision is written only at it
   let lastMasterAt: number | null = null;
+  // The last master-password unlock found the master easy to guess: only this boolean, never the password or
+  // its score. wipe() resets it, so a fingerprint unlock, a restore and a master change start it false.
+  let masterWeak = false;
   let unlockedAt: { mono: number; wall: number } | null = null;
   let timer: ReturnType<typeof setInterval> | undefined;
   let changes: Promise<unknown> = Promise.resolve(); // one change at a time, each saved before the next
 
   const stampContext = () => ({ installId: d.installId(), now: d.now(), sha256: sha256Hex });
-  const view = (data: VaultData): VaultView => publicView(data, findIssues(data.entries, today(), sha256Hex)) as VaultView;
+  const view = (data: VaultData): VaultView => ({ ...(publicView(data, findIssues(data.entries, today(), sha256Hex), d.now()) as VaultView), masterWeak });
 
   // Every session starts from a file just read or written; any previous key is wiped first. Every caller
   // proved the key belongs to the header's salt (a master password derived it, or unlockBiometric
   // checked keySalt first): openedVault (core) marks it, opens due dates as notes and reads and repairs
-  // the sync object.
+  // the sync object. A vault a newer KAPEVault saved throws NewerVaultError, and its key goes with it.
   function start(opened: OpenVault) {
     wipe();
-    const data = openedVault(opened.data, toBase64(opened.salt), stampContext()) as SessionData;
+    let data: SessionData;
+    try {
+      data = openedVault(opened.data, toBase64(opened.salt), stampContext()) as SessionData;
+    } catch (e) {
+      opened.raw.fill(0);
+      throw e;
+    }
     open = { ...opened, data };
     saved = { ...data };
     revision++;
@@ -79,6 +89,7 @@ export function createSession(d: SessionDeps) {
     open?.raw.fill(0);
     open = null;
     saved = null;
+    masterWeak = false;
     generation++;
   }
 
@@ -103,6 +114,14 @@ export function createSession(d: SessionDeps) {
     d.onState("unlocked");
     void d.backups().onUnlocked();
     d.syncer().afterUnlock();
+    sweepTrash();
+  }
+
+  // On unlock, what has been 30 days in the Trash goes now rather than at the next edit. A refused write
+  // only means it goes with the next save (persist purges too).
+  function sweepTrash() {
+    if (!open || !hasExpiredTrash(open.data, d.now())) return;
+    void change(() => {}).catch(() => {});
   }
 
   // Synchronous, so nothing can run between the decision and the wipe.
@@ -118,8 +137,11 @@ export function createSession(d: SessionDeps) {
     d.onState("locked", reason);
   }
 
+  // The vault file, or null when it is missing or not a vault. Throws NewerVaultError for one a newer KAPEVault saved.
   async function readVault() {
-    return parseVaultFile(await d.store.read(VAULT, isVaultText));
+    const text = await d.store.read(VAULT, isVaultText);
+    if (isNewerVaultFile(text)) throw new NewerVaultError();
+    return parseVaultFile(text);
   }
 
   // The one way a vault reaches the disk: encrypted, and never over MAX_VAULT_BYTES - refused, nothing
@@ -138,6 +160,10 @@ export function createSession(d: SessionDeps) {
   async function persist(backup = true, bySync = false) {
     const s = open as Open;
     try {
+      // Items 30 days in the Trash go with any save of ours, so stamp() sees the delete and sync carries it.
+      // Not on sync's own save: a merge never edits what it writes.
+      if (!bySync) purgeTrash(s.data, d.now());
+      if (!bySync) purgeGenerated(s.data, d.now()); // as the PC's persist(): nothing past 90 days is written
       if (!bySync) s.data.sync = stamp(saved as SessionData, s.data, stampContext());
       await writeVault(s, s.data);
     } catch (e) {
@@ -213,6 +239,9 @@ export function createSession(d: SessionDeps) {
     },
     set lastMasterAt(at: number | null) {
       lastMasterAt = at;
+    },
+    set masterWeak(weak: boolean) {
+      masterWeak = weak;
     },
     view,
     start,

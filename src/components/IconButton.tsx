@@ -5,6 +5,7 @@ import { useCopyAction } from "@/hooks/use-copy-action";
 export function IconButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: ReactNode }) {
   return (
     <button
+      type="button"
       aria-label={label}
       title={label}
       onClick={onClick}

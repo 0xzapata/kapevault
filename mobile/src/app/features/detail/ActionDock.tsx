@@ -21,7 +21,6 @@ function copiesFor(entry: Entry, host: VaultHost): CopyAction[] {
   if (entry.kind === "login" && entry.hasTotp) list.push({ label: "Copy code", copy: () => host.copyTotp(id), toast: "2FA code copied", totp: true });
   if (entry.kind === "key" && entry.hasSecret) list.push({ label: "Copy secret", copy: () => host.copySecret(id, "secret"), toast: "Secret copied - clears in 30s" });
   if (entry.kind === "note" && entry.hasBody) list.push({ label: "Copy note", copy: () => host.copySecret(id, "body"), toast: "Note copied - clears in 30s" });
-  if (entry.kind === "payee") list.push({ label: "Copy number", copy: () => host.copyText(entry.number, id), toast: "Number copied" });
   if (entry.kind === "thing") list.push({ label: "Copy spot", copy: () => host.copyText(entry.spot, id), toast: "Spot copied" });
   if (entry.kind === "device" && entry.hasWifiPassword) list.push({ label: "Copy Wi-Fi password", copy: () => host.copySecret(id, "wifiPassword"), toast: "Wi-Fi password copied - clears in 30s" });
   if (entry.kind === "id" && entry.hasNumber) list.push({ label: "Copy ID number", copy: () => host.copySecret(id, "idNumber"), toast: "ID number copied - clears in 30s" });

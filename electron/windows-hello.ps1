@@ -1,8 +1,13 @@
 # Windows Hello bridge for KAPEVault (Windows PowerShell 5.1, WinRT KeyCredentialManager).
-# Node prepends $Op and $Challenge, then runs this through -EncodedCommand: in the installed app the
+# Node prepends $Op and $Challenge, then runs this as command text on stdin: in the installed app the
 # file sits inside app.asar, which powershell.exe cannot read. Prints exactly ONE JSON line.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# Constrained Language Mode (AppLocker / WDAC script rules, __PSLockdownPolicy) blocks the .NET calls
+# below, [Console] included, so this is the one answer given without them. Node tells the user the PC's
+# policy blocks Hello, instead of a misleading "not set up".
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') { Write-Output '{"status":"Constrained"}'; return }
 
 function Write-Result($obj) { [Console]::Out.WriteLine(($obj | ConvertTo-Json -Compress)) }
 
@@ -27,7 +32,9 @@ try {
   $Name = 'KAPEVault'
 
   # The Hello dialog can open behind KAPEVault. A background thread brings it forward once it appears.
+  # Only a convenience: a failure (csc.exe blocked, antivirus, AppLocker DLL rules) must never fail Hello.
   function Start-FocusWatch {
+    try {
     Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -52,6 +59,7 @@ public static class KAPEVaultHelloFocus {
 "@
     [KAPEVaultHelloFocus]::AllowSetForegroundWindow(-1) | Out-Null
     [KAPEVaultHelloFocus]::Start()
+    } catch { }
   }
 
   function Sign-Challenge($credential) {

@@ -4,10 +4,12 @@ import { KindTile } from "../../components/icons";
 import { Sheet } from "../../components/Sheet";
 import { useToast } from "../../components/Toast";
 import { useHost } from "../../host/host-context";
+import { canPlaceIn } from "../../host/pro";
 import { KINDS } from "../../lib/entries";
+import { useMoveToTrash } from "../trash/use-move-to-trash";
 import { LoginFields } from "./LoginFields";
 import { More } from "./inputs";
-import { DeviceFields, DeviceTypeField, ExpiresField, KeyFields, LinkFields, NoteFields, PayeeFields, SpaceField, ThingFields, TitleField } from "./OtherFields";
+import { DeviceFields, DeviceTypeField, ExpiresField, KeyFields, LinkFields, NoteFields, SpaceField, ThingFields, TitleField } from "./OtherFields";
 import { IdFields } from "./IdFields";
 import { useItemForm } from "./use-item-form";
 import type { Entry, Space } from "../../host/types";
@@ -18,25 +20,28 @@ interface ItemSheetProps {
   spaces: Space[];
   defaultSpaceId: string;
   defaultHeldFor?: string;
+  pro: boolean; // KAPEVault Pro owned, from HomeScreen's status
   onSaved: (id: string) => void;
   onDeleted: (id: string) => void;
   onClose: () => void;
 }
 
-const TITLE_HINT = { login: "GitHub", note: "Server steps", key: "Cloudflare API", link: "Brand assets", payee: "", thing: "Passport", device: "Home Wi-Fi router", id: "" };
+const TITLE_HINT = { login: "GitHub", note: "Server steps", key: "Cloudflare API", link: "Brand assets", thing: "Passport", device: "Home Wi-Fi router", id: "" };
 
 // The PC's New item sheet, tall, with the kind tiles (3 + 3 + 2), the kind's fields, More
 // options, and Cancel / Save in its footer, bottom right. It ends above the keyboard, so Save stays visible.
-export function ItemSheet({ entry, entries, spaces, defaultSpaceId, defaultHeldFor, onSaved, onDeleted, onClose }: ItemSheetProps) {
+export function ItemSheet({ entry, entries, spaces, defaultSpaceId, defaultHeldFor, pro, onSaved, onDeleted, onClose }: ItemSheetProps) {
   const host = useHost();
   const toast = useToast();
+  const moveToTrash = useMoveToTrash();
   const { draft, set, autoTitle, problem, input, showPhoto } = useItemForm(entry, defaultSpaceId, defaultHeldFor);
   const [more, setMore] = useState(Boolean(draft.tags || draft.heldFor));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [kindPicked, setKindPicked] = useState(false);
   const kind = draft.kind;
+  // Without KAPEVault Pro, a client folder the item may not go to stays listed, greyed.
+  const choices = spaces.map((s) => ({ ...s, locked: !canPlaceIn(pro, { spaces, entries }, { id: entry?.id, spaceId: s.id }) }));
 
   async function save(close: () => void) {
     if (saving) return;
@@ -53,10 +58,7 @@ export function ItemSheet({ entry, entries, spaces, defaultSpaceId, defaultHeldF
   }
 
   async function remove(close: () => void) {
-    if (!entry) return;
-    if (!confirmDelete) return setConfirmDelete(true);
-    await host.deleteEntry(entry.id);
-    toast("Deleted");
+    if (!entry || !(await moveToTrash(entry.id))) return;
     onDeleted(entry.id);
     close();
   }
@@ -64,7 +66,7 @@ export function ItemSheet({ entry, entries, spaces, defaultSpaceId, defaultHeldF
   const titleSpace = (
     <>
       <TitleField draft={draft} set={set} placeholder={TITLE_HINT[kind]} />
-      <SpaceField draft={draft} set={set} spaces={spaces} />
+      <SpaceField draft={draft} set={set} spaces={choices} />
     </>
   );
 
@@ -77,7 +79,7 @@ export function ItemSheet({ entry, entries, spaces, defaultSpaceId, defaultHeldF
         <>
           {entry && (
             <Button variant="danger" onClick={() => remove(close)}>
-              {confirmDelete ? "Confirm delete" : "Delete"}
+              Move to Trash
             </Button>
           )}
           <span className="flex-1" />
@@ -94,6 +96,7 @@ export function ItemSheet({ entry, entries, spaces, defaultSpaceId, defaultHeldF
           className="mt-5 flex flex-col gap-4"
         >
           {!entry && (
+            // biome-ignore lint/a11y/useSemanticElements: a labelled group of tiles in a grid sized by its parent; a fieldset adds its own box and min-width rules
             <div role="group" aria-label="Kind of item" className="grid grid-cols-3 gap-1.5">
               {KINDS.map((k) => {
                 const on = k.value === kind;
@@ -119,25 +122,24 @@ export function ItemSheet({ entry, entries, spaces, defaultSpaceId, defaultHeldF
           {/* A picked kind's fields settle in rather than swap in one frame; not on open (the sheet has its own entrance). */}
           <div key={kind} className={`flex flex-col gap-4 ${kindPicked ? "settle" : ""}`}>
             {kind === "device" && <DeviceTypeField draft={draft} set={set} />}
-            {kind !== "payee" && kind !== "id" && titleSpace}
+            {kind !== "id" && titleSpace}
             {kind === "login" && <LoginFields draft={draft} set={set} entry={entry?.kind === "login" ? entry : null} entries={entries} />}
             {kind === "note" && <NoteFields draft={draft} set={set} />}
             {kind === "key" && <KeyFields draft={draft} set={set} />}
             {kind === "link" && <LinkFields draft={draft} set={set} />}
-            {kind === "payee" && <PayeeFields draft={draft} set={set} spaces={spaces} autoTitle={autoTitle} />}
             {kind === "thing" && <ThingFields draft={draft} set={set} />}
             {kind === "device" && <DeviceFields key={draft.type} draft={draft} set={set} />}
-            {kind === "id" && <IdFields draft={draft} set={set} spaces={spaces} autoTitle={autoTitle} showPhoto={showPhoto} />}
+            {kind === "id" && <IdFields draft={draft} set={set} spaces={choices} autoTitle={autoTitle} showPhoto={showPhoto} />}
           </div>
 
           {kind !== "note" && (
             <Label text="Notes">
-              <TextArea value={draft.notes} onChange={(e) => set("notes", e.target.value)} />
+              <TextArea value={draft.notes} onChange={(e) => set("notes", e.target.value)} spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="none" />
             </Label>
           )}
           <More open={more} onOpen={() => setMore(true)}>
             <Label text="Held for">
-              <TextInput value={draft.heldFor} onChange={(e) => set("heldFor", e.target.value)} placeholder="Lola" autoComplete="off" />
+              <TextInput value={draft.heldFor} onChange={(e) => set("heldFor", e.target.value)} placeholder="Sam" autoComplete="off" />
             </Label>
             <Label text="Tags">
               <TextInput value={draft.tags} onChange={(e) => set("tags", e.target.value)} placeholder="work, family" autoCapitalize="none" />

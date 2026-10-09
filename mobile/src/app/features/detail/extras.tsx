@@ -54,6 +54,7 @@ export function BackupCodesCard({ entry }: { entry: LoginEntry }) {
       {shown && set && (
         <div className="settle border-t border-line">
           {Array.from({ length: set.total }, (_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: backup codes are addressed by position (getSecret takes the index) and the count is fixed for the entry
             <SecretField key={i} label={`Code ${i + 1}`} what="code" reveal={() => host.getSecret(entry.id, "code", i)} copy={() => host.copySecret(entry.id, "code", i)} copiedToast="Backup code copied - clears in 30s" dots={10} />
           ))}
         </div>
@@ -117,6 +118,7 @@ export function PasswordHistory({ entry }: { entry: LoginEntry }) {
       {open && (
         <div className="settle border-t border-line">
           {entry.history.map((h, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: history is addressed by position (getSecret takes the index); the timestamp in the key makes a shifted list remount its rows, so a revealed password never sticks to another one
             <SecretField key={`${h.changedAt}-${i}`} label={`Replaced ${formatDay(h.changedAt)}`} what="old password" reveal={() => host.getSecret(entry.id, "history", i)} copy={() => host.copySecret(entry.id, "history", i)} copiedToast="Password copied - clears in 30s" />
           ))}
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-3 py-2">

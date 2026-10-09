@@ -1,7 +1,10 @@
 // Unlock with Touch ID on macOS - same contract as windows-hello.cjs, so main.cjs can pick one.
-// The vault key is encrypted with Electron's safeStorage (an AES key kept in the macOS Keychain that
-// only this app's code signature may read) and stored in <dataDir>/touchid.json. Touch ID then gates
-// the decrypt through systemPreferences.promptTouchID.
+// The vault key is encrypted with Electron's safeStorage (an AES key kept in the macOS Keychain) and
+// stored in <dataDir>/touchid.json. Touch ID then gates the decrypt through
+// systemPreferences.promptTouchID. The Keychain limits that item to the app's code signature, which
+// is a stable identity only for a Developer ID signed build. Today's Mac build is ad-hoc signed
+// (package.json build.mac.identity "-") and not verified on a Mac, so treat the item as bound to that
+// one exact build at best, not to a publisher.
 // Limit, stated plainly: the Keychain item is not bound to biometrics. promptTouchID is a UI gate, so
 // code running as this app (or a user who approves a Keychain prompt) can decrypt without a finger.
 // Binding the item to kSecAccessControlUserPresence needs a native module; this is the standard

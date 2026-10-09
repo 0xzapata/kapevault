@@ -45,7 +45,7 @@ class AutofillAuthActivity : Activity() {
         // A structure that names another app (a trusted browser, to borrow its trust) is not the caller's own.
         if (structure == null || screen == null || callingActivity?.packageName != screen.packageName) return answer(null)
         val form = LoginForm.parse(structure, intent.action == ACTION_AUTH_COMPAT)
-        if (form == null || !LoginForm.mayFill(this, screen)) return answer(null)
+        if (form == null || !LoginForm.mayFill(this, screen) || AppSigners.refuses(this, form.packageName)) return answer(null)
         PendingFill.start(PendingFill.Request(form, appLabel(form.packageName), TrustedBrowsers.isTrusted(packageManager, form.packageName), this))
         startActivity(Intent(this, MainActivity::class.java).setAction(ACTION_FILL))
     }
@@ -135,6 +135,7 @@ object PendingFill {
     fun end(auth: AutofillAuthActivity, dataset: Dataset?) {
         val request = current?.takeIf { it.auth === auth } ?: return
         current = null
+        if (dataset != null && !request.browser) AppSigners.remember(request.auth.applicationContext, request.form.packageName)
         request.auth.answer(dataset)
         listener?.onEnded()
     }

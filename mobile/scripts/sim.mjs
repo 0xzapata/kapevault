@@ -27,7 +27,7 @@ const DEV_URL = `http://localhost:${DEV_PORT}`;
 const vite = path.join(root, "node_modules", "vite", "bin", "vite.js");
 const capacitor = path.join(root, "node_modules", "@capacitor", "cli", "bin", "capacitor");
 const webConfig = path.join(root, "android", "app", "src", "main", "assets", "capacitor.config.json");
-const apk = path.join(root, "android", "app", "build", "outputs", "apk", "debug", "app-debug.apk");
+const apk = path.join(root, "android", "app", "build", "outputs", "apk", "play", "debug", "app-play-debug.apk");
 
 let serial = "";
 let devServer = null;
@@ -218,7 +218,7 @@ if (live) {
   const config = JSON.parse(fs.readFileSync(webConfig, "utf8"));
   fs.writeFileSync(webConfig, JSON.stringify({ ...config, server: { ...config.server, url: DEV_URL } }, null, "\t"));
 }
-run("building the debug APK", path.join(root, "scripts", "gradle.mjs"), ["assembleDebug", "--quiet"]);
+run("building the debug APK", path.join(root, "scripts", "gradle.mjs"), ["assemblePlayDebug", "--quiet"]);
 
 say(`installing on ${serial}`);
 if (!/Success/.test(adbText("-s", serial, "install", "-r", apk))) fail("adb install failed.");

@@ -29,7 +29,9 @@ export function useQuickVault() {
       vaultApi.onUnlocked((vault) => setState({ phase: "open", vault })),
       vaultApi.onChanged((vault) => setState({ phase: "open", vault })),
     ];
-    return () => offs.forEach((off) => off());
+    return () => {
+      for (const off of offs) off();
+    };
   }, [refresh]);
 
   const opened = useCallback((vault: VaultView) => setState({ phase: "open", vault }), []);

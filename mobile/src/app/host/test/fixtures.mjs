@@ -20,8 +20,15 @@ export const pc = {
 
 export const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-phone-"));
 
-// @capacitor/filesystem in Directory.Data, as the plugin behaves: rename deletes the target first.
-// crash: "rename" throws between that delete and the rename, like a process killed there.
+// A phone's folder as a KAPEVault Pro purchase leaves it (host/pro.ts): pro.json says owned, so the phone
+// syncs and makes client folders. With no Billing plugin it keeps that, as offline.
+export function withPro(dir) {
+  fs.writeFileSync(path.join(dir, "pro.json"), JSON.stringify({ owned: true, pending: false }));
+  return dir;
+}
+
+// The app's private files folder: reads as Filesystem does, saves as the DurableFile plugin does (write a
+// temp file, then one atomic rename). faults.replace(name) fails a save before it touches anything.
 export function nodeFs(dir, faults = {}) {
   const at = (name) => path.join(dir, name);
   return {
@@ -33,14 +40,10 @@ export function nodeFs(dir, faults = {}) {
         throw e;
       }
     },
-    async write(name, text) {
-      if (faults.write?.(name)) throw new Error("disk full");
-      fs.writeFileSync(at(name), text);
-    },
-    async rename(from, to) {
-      fs.rmSync(at(to), { force: true });
-      if (faults.crash?.(to)) throw new Error("killed between delete and rename");
-      fs.renameSync(at(from), at(to));
+    async replace(name, text) {
+      if (faults.replace?.(name)) throw new Error("disk full");
+      fs.writeFileSync(at(`${name}.tmp`), text);
+      fs.renameSync(at(`${name}.tmp`), at(name));
     },
     async remove(name) {
       fs.rmSync(at(name), { force: true });

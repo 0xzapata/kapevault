@@ -10,15 +10,15 @@ import path from "node:path";
 const slash = (p) => p.replaceAll("\\", "/");
 const HERE = slash(path.dirname(fileURLToPath(import.meta.url)));
 const PROJECT = slash(path.resolve(HERE, "../..")); // the checkout this script sits in, so a worktree tests itself
-const MODULES = slash(realpathSync(PROJECT + "/node_modules")); // a worktree links the main checkout's
-const req = createRequire(PROJECT + "/package.json");
+const MODULES = slash(realpathSync(`${PROJECT}/node_modules`)); // a worktree links the main checkout's
+const req = createRequire(`${PROJECT}/package.json`);
 const { createServer } = await import(pathToFileURL(req.resolve("vite")).href);
 const { chromium } = createRequire(import.meta.url)("../playwright.cjs");
 
 const server = await createServer({
-  configFile: PROJECT + "/vite.config.ts",
+  configFile: `${PROJECT}/vite.config.ts`,
   root: PROJECT,
-  cacheDir: HERE + "/.vite-cache",
+  cacheDir: `${HERE}/.vite-cache`,
   logLevel: "error",
   resolve: { dedupe: ["react", "react-dom", "@phosphor-icons/react"] },
   server: { port: 1499, strictPort: false, hmr: false, fs: { allow: [PROJECT, HERE, MODULES] } },
@@ -28,14 +28,14 @@ const base = server.resolvedUrls.local[0].replace(/\/$/, "");
 const html = `<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/@fs/${HERE}/main.tsx"></script></body></html>`;
 
 const results = [];
-const check = (name, ok, extra = "") => results.push(`${ok ? "PASS" : "FAIL"} ${name}${extra ? " - " + extra : ""}`);
+const check = (name, ok, extra = "") => results.push(`${ok ? "PASS" : "FAIL"} ${name}${extra ? ` - ${extra}` : ""}`);
 
 const browser = await chromium.launch();
 async function open(scenario, width, height, ready = (page) => page.getByRole("dialog")) {
   const page = await browser.newPage({ viewport: { width, height } });
-  page.on("pageerror", (e) => results.push("PAGEERROR " + e.message));
-  page.on("console", (m) => m.type() === "error" && results.push("CONSOLE " + m.text()));
-  await page.route(base + "/harness.html*", (r) => r.fulfill({ contentType: "text/html", body: html }));
+  page.on("pageerror", (e) => results.push(`PAGEERROR ${e.message}`));
+  page.on("console", (m) => m.type() === "error" && results.push(`CONSOLE ${m.text()}`));
+  await page.route(`${base}/harness.html*`, (r) => r.fulfill({ contentType: "text/html", body: html }));
   await page.goto(`${base}/harness.html?s=${scenario}`);
   await ready(page).waitFor({ timeout: 20000 });
   await page.waitForTimeout(300);
@@ -191,6 +191,27 @@ for (const [w, h] of [[400, 560], [1440, 900]]) {
   await pop.getByRole("button", { name: "Use password" }).click();
   check(`${w}px use fills + shows`, (await pw.inputValue()) === preview && (await pw.getAttribute("type")) === "text");
   check(`${w}px options persisted`, await page.evaluate(() => JSON.parse(localStorage.getItem("kapevault.generator")).length === 32));
+  // Recent: Use password kept the value in main; the list shows when, never the value, until one is shown
+  await dialog.getByRole("button", { name: "Generate password" }).click();
+  await pop.waitFor();
+  await pop.getByRole("button", { name: "Recent (1)" }).click();
+  await page.waitForTimeout(250);
+  check(`${w}px Recent lists the used password, masked`, (await pop.getByRole("button", { name: "Show password" }).count()) === 1 && !(await pop.innerText()).includes(preview));
+  await shot(page, `${w}-generator-recent`);
+  await pop.getByRole("button", { name: "Show password" }).click();
+  check(`${w}px Show reveals it`, (await pop.getByText(preview, { exact: true }).count()) >= 1);
+  const recentBox = await pop.boundingBox();
+  check(`${w}px popover with Recent inside window`, recentBox.x >= 0 && recentBox.y >= 0 && recentBox.x + recentBox.width <= w && recentBox.y + recentBox.height <= h, JSON.stringify(recentBox));
+  await pop.getByRole("button", { name: "Copy", exact: true }).click();
+  check(`${w}px Copy keeps a second row`, await pop.getByRole("button", { name: "Recent (2)" }).isVisible());
+  await pop.getByRole("button", { name: "Clear" }).click();
+  await pop.getByRole("button", { name: "Confirm delete" }).click();
+  await page.waitForTimeout(200);
+  check(`${w}px Clear empties Recent`, (await pop.getByRole("button", { name: /^Recent/ }).count()) === 0);
+  check(`${w}px focus stays in the popover after Clear`, await page.evaluate(() => document.activeElement?.getAttribute("aria-label") === "New password"));
+  check(`${w}px the buttons in Recent never submitted the form`, await page.evaluate(() => window.__saved.length === 0));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(100);
   await dialog.getByRole("button", { name: "Generate password" }).click();
   await dialog.getByPlaceholder("https://", { exact: true }).click();
   check(`${w}px outside click closes`, (await pop.count()) === 0);
@@ -259,24 +280,13 @@ for (const [w, h] of [[400, 560], [1440, 900]]) {
   await kindTile("Login").click();
   check("kinds: back on Login, the username is still there", (await dialog.getByText("Username or email").locator("..").locator("input").inputValue()) === "mock.user");
 
-  await kindTile("Payee").click();
-  await dialog.getByRole("button", { name: "Save" }).click();
-  check("payee: who comes first", await dialog.getByText("Add who this payee is.").isVisible());
-  await dialog.getByPlaceholder("Mama", { exact: true }).fill("Mock Tita");
-  await dialog.getByRole("button", { name: "Save" }).click();
-  check("payee: then where the money goes", await dialog.getByText("Pick where the money goes.").isVisible());
-  await dialog.getByRole("button", { name: "GCash", exact: true }).click();
-  await dialog.getByText("Account or mobile number").locator("..").locator("input").fill("09171234567");
-  let saved = await save();
-  check("payee: saved untitled as who + provider", saved.kind === "payee" && saved.title === "Mock Tita GCash" && saved.who === "Mock Tita" && saved.provider === "GCash" && saved.number === "09171234567" && saved.password === undefined, JSON.stringify(saved));
-
   await kindTile("Thing").click();
   await dialog.getByPlaceholder("Passport", { exact: true }).fill("Mock Passport");
   await dialog.getByRole("button", { name: "Save" }).click();
   check("thing: a spot is needed", await dialog.getByText("Say where it is kept.").isVisible());
   await dialog.getByPlaceholder("Blue folder, top shelf of the cabinet").fill("Mock drawer");
   await dialog.getByRole("radio", { name: "Grab first" }).click();
-  saved = await save();
+  let saved = await save();
   check("thing: room, spot and grab saved", saved.kind === "thing" && saved.spot === "Mock drawer" && saved.grab === 1 && saved.room === "", JSON.stringify(saved));
 
   await kindTile("File link").click();
@@ -335,12 +345,140 @@ for (const [w, h] of [[400, 560], [1440, 900]]) {
   await page.waitForTimeout(250);
   check("logo picker: Escape on a tile closes only the picker", (await dialog.count()) === 1 && (await dialog.getByPlaceholder("Search logos").count()) === 0 && /^Auto: /.test(await activeName(page)));
 
-  await dialog.getByRole("group", { name: "Kind of item" }).getByRole("button", { name: "Payee", exact: true }).click();
-  await dialog.getByRole("button", { name: "GCash", exact: true }).focus();
-  await page.keyboard.press("ArrowRight");
+  await page.close();
+}
+
+// A button with no type submits the form it sits in (the generator's Show and Copy once did). Every button
+// in a form says its type, the form has exactly one submit button, Enter in a field submits exactly once,
+// and clicking any other button in the form submits nothing.
+const buttonTypes = (form) =>
+  form.evaluate((f) => ({
+    typeless: [...f.querySelectorAll("button")].filter((b) => !b.hasAttribute("type")).map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim()),
+    submits: f.querySelectorAll("button[type=submit]").length,
+  }));
+const submitsOf = (page, name) => page.evaluate((n) => window.__submits[n] ?? 0, name);
+// Clicks every enabled button that is not the submit button; answers how many it clicked.
+async function clickNonSubmit(form) {
+  const buttons = form.locator("button:not([type=submit])");
+  let clicked = 0;
+  for (let i = 0; i < (await buttons.count()); i++) {
+    if (await buttons.nth(i).isEnabled()) {
+      await buttons.nth(i).click();
+      clicked++;
+      const page = form.page();
+      if (await page.getByRole("dialog").count()) {
+        await page.keyboard.press("Escape"); // a button that opens a sheet (How KAPEVault protects you): close it again
+        await page.getByRole("dialog").waitFor({ state: "detached" });
+      }
+    }
+  }
+  return clicked;
+}
+{
+  const page = await open("forms", 1440, 900, (p) => p.getByRole("region", { name: "Lock screen" }).getByLabel("Master password", { exact: true }));
+  const section = (name) => page.getByRole("region", { name });
+  const settle = () => page.waitForTimeout(300);
+
+  const creds = section("Credentials");
+  check("credentials form: every button has a type, one submit", JSON.stringify(await buttonTypes(creds.locator("form"))) === JSON.stringify({ typeless: [], submits: 1 }));
+  await creds.getByLabel("S3 API URL").fill("https://mock-id.r2.cloudflarestorage.com/mock-bucket");
+  await creds.getByLabel("Access key ID").fill("mock-key-id");
+  await creds.getByLabel("Secret access key").fill("mock-secret");
+  const credsClicked = await clickNonSubmit(creds.locator("form"));
+  check("credentials form: no other button submits it", (await submitsOf(page, "credentials")) === 0, `clicked ${credsClicked}`);
+  await creds.getByLabel("S3 API URL").press("Enter");
+  await settle();
+  check("credentials form: Enter submits once", (await submitsOf(page, "credentials")) === 1);
+
+  const master = section("Change master");
+  check("change master form: every button has a type, one submit", JSON.stringify(await buttonTypes(master.locator("form"))) === JSON.stringify({ typeless: [], submits: 1 }));
+  await master.getByLabel("Current password").fill("mock kettle harbor pass orbit gazelle");
+  await master.getByLabel("New password", { exact: true }).fill("mock lantern river quartz meadow falcon");
+  await master.getByLabel("Confirm new password").fill("mock lantern river quartz meadow falcon");
+  const masterClicked = await clickNonSubmit(master.locator("form"));
+  check("change master form: no other button submits it", (await submitsOf(page, "changeMaster")) === 0, `clicked ${masterClicked}`);
+  await master.getByLabel("Current password").press("Enter");
+  await settle();
+  check("change master form: Enter changes the password once", (await submitsOf(page, "changeMaster")) === 1);
+
+  const adopt = section("New master");
+  check("new master form: every button has a type, one submit", JSON.stringify(await buttonTypes(adopt.locator("form"))) === JSON.stringify({ typeless: [], submits: 1 }));
+  await adopt.getByLabel("Master password set on Mock laptop").fill("mock lantern river quartz meadow falcon");
+  const adoptClicked = await clickNonSubmit(adopt.locator("form"));
+  check("new master form: no other button submits it", (await submitsOf(page, "newMaster")) === 0, `clicked ${adoptClicked}`);
+  await adopt.getByLabel("Master password set on Mock laptop").press("Enter");
+  await settle();
+  check("new master form: Enter submits once", (await submitsOf(page, "newMaster")) === 1);
+
+  // Button with no type prop: the component itself says "button", so a caller that forgets it submits nothing
+  const plain = section("Plain buttons");
+  check("Button: given no type it is still not a submit button", JSON.stringify(await buttonTypes(plain.locator("form"))) === JSON.stringify({ typeless: [], submits: 1 }));
+  const plainClicked = await clickNonSubmit(plain.locator("form"));
+  check("Button: clicking it submits nothing", (await submitsOf(page, "plain")) === 0 && plainClicked === 2, `clicked ${plainClicked}`);
+  await plain.getByLabel("Mock field").press("Enter");
+  await settle();
+  check("Button: Enter in the form still submits once", (await submitsOf(page, "plain")) === 1);
+
+  // The lock screen and quick search unlock: the Hello button is the only other button, and it must not unlock
+  for (const [name, field] of [["Quick unlock", (s) => s.getByLabel("Master password", { exact: true })], ["Lock screen", (s) => s.getByLabel("Master password", { exact: true })]]) {
+    const s = section(name);
+    const before = await submitsOf(page, "unlock");
+    const bioBefore = await submitsOf(page, "biometric");
+    check(`${name}: every button has a type, one submit at most`, (await buttonTypes(s.locator("form"))).typeless.length === 0 && (await buttonTypes(s.locator("form"))).submits <= 1);
+    await field(s).fill("mock wrong pass");
+    const clicked = await clickNonSubmit(s.locator("form"));
+    await settle();
+    check(`${name}: the Hello button does not send the password`, (await submitsOf(page, "unlock")) === before && (await submitsOf(page, "biometric")) > bioBefore, `clicked ${clicked}`);
+    await field(s).fill("mock wrong pass");
+    await field(s).press("Enter");
+    await settle();
+    check(`${name}: Enter unlocks once`, (await submitsOf(page, "unlock")) === before + 1);
+  }
+  await page.close();
+}
+{
+  const page = await open("move", 1440, 900);
+  const dialog = page.getByRole("dialog");
+  check("move sheet: every button has a type, one submit", JSON.stringify(await buttonTypes(dialog.locator("form"))) === JSON.stringify({ typeless: [], submits: 1 }));
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  check("move sheet: Cancel does not move the item", (await submitsOf(page, "move")) === 0);
+  await page.close();
+}
+{
+  const page = await open("move", 1440, 900);
+  await page.getByRole("dialog").getByRole("button", { name: "Move", exact: true }).click();
+  await page.waitForTimeout(300);
+  check("move sheet: Move submits once", (await submitsOf(page, "move")) === 1);
+  await page.close();
+}
+{
+  const page = await open("new", 1440, 900);
+  const dialog = page.getByRole("dialog");
+  const form = dialog.locator("form");
+  const tiles = dialog.getByRole("group", { name: "Kind of item" }).getByRole("button");
+  const kinds = await tiles.count();
+  for (let i = 0; i < kinds; i++) {
+    await tiles.nth(i).click();
+    const types = await buttonTypes(form);
+    check(`entry form kind ${i + 1} of ${kinds}: every button has a type, Save is the only submit`, types.typeless.length === 0 && types.submits === 1, JSON.stringify(types));
+  }
+  await dialog.getByRole("group", { name: "Kind of item" }).getByRole("button", { name: "Login", exact: true }).click();
+  // The field buttons (Show password, Generate) and the kind tiles send nothing
+  const pw = dialog.getByText("Password", { exact: true }).locator("..").locator("input");
+  await pw.fill("mock-field-pass");
+  await dialog.getByRole("button", { name: "Show password" }).click();
+  await dialog.getByRole("button", { name: "Generate password" }).click();
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(250);
-  check("wallet picker: Escape on a tile closes only the picker", (await dialog.count()) === 1 && (await dialog.getByLabel("Search wallets and banks").count()) === 0);
+  await page.waitForTimeout(100);
+  check("entry form: the field buttons never send the form", await page.evaluate(() => window.__saved.length === 0));
+  // Enter in a field saves, once (a second Enter while it saves is ignored)
+  await dialog.getByPlaceholder("GitHub").fill("Mock Enter");
+  await dialog.getByPlaceholder("GitHub").press("Enter");
+  await dialog.getByPlaceholder("GitHub").press("Enter");
+  await page.waitForFunction(() => window.__saved.length >= 1);
+  await page.waitForTimeout(800);
+  const saved = await page.evaluate(() => window.__saved);
+  check("entry form: Enter in the title saves exactly once", saved.length === 1 && saved[0].title === "Mock Enter" && saved[0].password === "mock-field-pass", JSON.stringify(saved));
   await page.close();
 }
 
@@ -426,6 +564,22 @@ for (const [w, h] of [[400, 560], [1440, 900]]) {
   await page.close();
 }
 
+// A catalog brand marked "logo": false is a brand with no logo file: BRANDS keeps it, so it is offered and detected
+{
+  const page = await open("brands", 1440, 900, (p) => p.locator("#brands"));
+  const { brands, landbank } = JSON.parse(await page.locator("#brands").innerText());
+  const logoOf = new Map(brands);
+  check("brands: a brand with no logo file is still a brand", ["landbank", "remitly", "sss", "philhealth", "pag-ibig", "bir"].every((slug) => logoOf.get(slug) === false), JSON.stringify([...logoOf].filter(([, logo]) => !logo)));
+  check("brands: a brand with a logo file keeps it", logoOf.get("bpi") === true);
+  check("brands: a logo-less brand is detected from its site", landbank === "landbank", String(landbank));
+  await page.close();
+}
+
 await browser.close();
 await server.close();
 console.log(results.join("\n"));
+// A FAIL, a page error or a console error fails the run, so a script or CI that reads only the exit
+// code sees it (it used to print the FAIL and exit 0).
+const failed = results.filter((r) => !r.startsWith("PASS"));
+console.log(`\n${results.length - failed.length}/${results.length} passed`);
+process.exitCode = failed.length ? 1 : 0;

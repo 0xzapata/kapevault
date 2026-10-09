@@ -2,11 +2,10 @@ import { signInOption, usesPassword } from "./sign-in.ts";
 import { isGone } from "../../closing/lib/lifecycle.ts";
 import { deviceName, deviceSubtitle } from "../../devices/lib/devices.ts";
 import { idSubtitle } from "../../ids/lib/ids.ts";
-import { formatNumber } from "../../payee/lib/payee-check.ts";
 import { formatDay } from "../../../lib/local-date.ts";
 import type { Entry } from "../types";
 
-// A list row's second line: the username, a link's location, a payee's wallet and number.
+// A list row's second line: the username, a link's location.
 // orUrl: a password login with no username shows its website instead (quick search's rows; the
 // main list leaves the line empty).
 export function entrySubtitle(entry: Entry, { orUrl = false } = {}): string {
@@ -17,8 +16,6 @@ export function entrySubtitle(entry: Entry, { orUrl = false } = {}): string {
       return "Secure note";
     case "key":
       return entry.keyId || "API key";
-    case "payee":
-      return `${entry.provider} · ${formatNumber(entry.number)}`;
     case "thing":
       return entry.room ? `${entry.room} · ${entry.spot}` : entry.spot;
     case "device":
@@ -48,8 +45,6 @@ export function kindLabel(entry: Entry): string {
       return "API key";
     case "link":
       return LINK_LABELS[entry.linkType];
-    case "payee":
-      return "Payee";
     case "thing":
       return "Thing";
     case "device":

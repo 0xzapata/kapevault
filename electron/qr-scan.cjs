@@ -1,6 +1,6 @@
 // "Scan QR code on screen": capture every display and decode a 2FA setup QR.
 // Window handling (hiding KAPEVault during the capture) is the caller's job.
-const jsQR = require("jsqr");
+const jsQR = /** @type {typeof import("jsqr").default} */ (/** @type {unknown} */ (require("jsqr")));
 
 // Electron's NativeImage.toBitmap() is BGRA on Windows; jsQR wants RGBA.
 function bgraToRgba(bgra, width, height) {

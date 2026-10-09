@@ -52,6 +52,7 @@ export function SyncLine({ onShow }: { onShow: (id: string) => void }) {
             return result.ok ? "" : (result.error ?? "");
           }}
           onRevoke={sync.revoke}
+          onMasterChanged={sync.refresh}
           onReview={() => setReviewing(status.review)}
           onShow={onShow}
           onClose={() => setSheetOpen(false)}

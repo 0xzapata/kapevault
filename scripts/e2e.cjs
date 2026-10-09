@@ -1,14 +1,14 @@
 // End-to-end check of every button in the real Electron window, against a throwaway vault.
 // Run: npm run e2e  (the launcher and helpers live in e2e-harness.cjs)
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const http = require("http");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const http = require("node:http");
 const { createHarness, shows, gone, clip, opened, waitFor } = require("./e2e-harness.cjs");
 
 const SHOTS = os.tmpdir();
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-"));
-const { results, check, launch: launchWith } = createHarness();
+const { results, check, launch: launchWith, lockedBy, crashShot } = createHarness();
 
 // A fake R2 bucket "kapevault-e2e" on localhost that only accepts access key "e2e-key-id".
 // (The SigV4 signature itself is checked against AWS's examples in r2-client.test.cjs.)
@@ -27,8 +27,15 @@ const r2Server = http.createServer((req, res) => {
     };
     if (!/Credential=e2e-key-id\//.test(req.headers.authorization || "")) return reply(403, "<Error><Code>InvalidAccessKeyId</Code></Error>");
     if (bucket !== "kapevault-e2e") return reply(404, "<Error><Code>NoSuchBucket</Code></Error>");
-    if (req.method === "PUT") return r2.objects.set(key, Buffer.concat(chunks)), r2.modified.set(key, new Date()), reply(200);
-    if (req.method === "DELETE") return r2.objects.delete(key), reply(204);
+    if (req.method === "PUT") {
+      r2.objects.set(key, Buffer.concat(chunks));
+      r2.modified.set(key, new Date());
+      return reply(200);
+    }
+    if (req.method === "DELETE") {
+      r2.objects.delete(key);
+      return reply(204);
+    }
     if (req.method === "GET" && !key) {
       const prefix = u.searchParams.get("prefix") || "";
       const items = [...r2.objects].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => `<Contents><Key>${k}</Key><LastModified>${(r2.modified.get(k) ?? new Date()).toISOString()}</LastModified><Size>${v.length}</Size></Contents>`);
@@ -52,7 +59,7 @@ const launch = () =>
   check("window opens at 1440x900 (clamped to the screen)", Math.abs(size[0] - expected[0]) <= 16 && Math.abs(size[1] - expected[1]) <= 60, `${size.join("x")} vs ${expected.join("x")}`);
 
   // Create vault
-  await page.getByPlaceholder("Master password", { exact: true }).fill("test kettle harbor pass");
+  await page.getByPlaceholder("Master password", { exact: true }).fill("test kettle harbor pass orbit gazelle");
   await page.getByPlaceholder("Confirm master password").fill("different");
   await page.getByRole("button", { name: "Continue" }).click();
   check("mismatched confirm shows error", await shows(page.getByText("The two passwords do not match.")));
@@ -61,8 +68,8 @@ const launch = () =>
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByText("Use at least 12 characters.").waitFor();
   check("short master rejected", true);
-  await page.getByPlaceholder("Master password", { exact: true }).fill("test kettle harbor pass");
-  await page.getByPlaceholder("Confirm master password").fill("test kettle harbor pass");
+  await page.getByPlaceholder("Master password", { exact: true }).fill("test kettle harbor pass orbit gazelle");
+  await page.getByPlaceholder("Confirm master password").fill("test kettle harbor pass orbit gazelle");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByText("Nothing here yet").waitFor({ timeout: 15000 });
   check("create vault opens empty vault", true);
@@ -193,40 +200,88 @@ const launch = () =>
   await page.getByRole("dialog").getByRole("tab", { name: "Security" }).click();
   const pw = page.getByRole("dialog").locator("form", { hasText: "Change master password" }).locator('input[type="password"]');
   await pw.nth(0).fill("wrong current");
-  await pw.nth(1).fill("new kettle harbor pass");
-  await pw.nth(2).fill("new kettle harbor pass");
+  await pw.nth(1).fill("new kettle harbor pass orbit gazelle");
+  await pw.nth(2).fill("new kettle harbor pass orbit gazelle");
   await page.getByRole("button", { name: "Change password" }).click();
   await page.getByRole("alert").filter({ hasText: "Current password is wrong." }).waitFor({ timeout: 15000 }); // announced, not only shown
   check("wrong current master rejected", true);
-  await pw.nth(0).fill("test kettle harbor pass");
-  await pw.nth(1).fill("new kettle harbor pass");
-  await pw.nth(2).fill("new kettle harbor pass");
+  await pw.nth(0).fill("test kettle harbor pass orbit gazelle");
+  await pw.nth(1).fill("new kettle harbor pass orbit gazelle");
+  await pw.nth(2).fill("new kettle harbor pass orbit gazelle");
   await page.getByRole("button", { name: "Change password" }).click();
   await page.getByText("Master password changed.").waitFor({ timeout: 15000 });
   check("change master password", true);
   await page.getByRole("button", { name: "Done" }).click();
 
-  // Delete
-  await page.locator("section li", { hasText: "Client folder" }).click();
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
-  check("delete asks to confirm", await shows(page.getByRole("button", { name: "Confirm delete" })));
-  await page.getByRole("button", { name: "Confirm delete" }).click();
-  check("delete removes item", await gone(page.locator("section li", { hasText: "Client folder" })));
+  // Delete = Move to Trash: no confirm, an Undo toast, then the Trash list (Restore, Delete now, Empty Trash)
+  const itemRow = (title) => page.locator("section li", { hasText: title });
+  const sideTrash = page.locator("aside").getByRole("button", { name: /^Trash/ });
+  const trashStatus = (text) => page.getByRole("status").filter({ hasText: text });
+  const trashIt = async (title) => {
+    await itemRow(title).click();
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Move to Trash" }).click();
+    await gone(page.getByRole("dialog"));
+  };
+  await trashIt("Client folder");
+  check("delete moves the item to the Trash with no confirm step", (await gone(itemRow("Client folder"))) && (await page.getByRole("button", { name: "Confirm delete" }).count()) === 0);
+  check("the toast says Moved to Trash and has an Undo button", (await shows(trashStatus("Moved to Trash"))) && (await shows(trashStatus("Moved to Trash").getByRole("button", { name: "Undo" }))));
+  await trashStatus("Moved to Trash").getByRole("button", { name: "Undo" }).click();
+  check("Undo brings the item back and selects it", (await shows(itemRow("Client folder"))) && (await shows(page.locator("h1", { hasText: "Client folder" }))));
+  await gone(sideTrash);
+  check("with the Trash empty again its sidebar row is gone", (await sideTrash.count()) === 0);
+
+  await trashIt("Client folder");
+  await sideTrash.click();
+  check("the Trash row opens the Trash list", (await shows(page.locator("h2", { hasText: "Trash" }))) && (await shows(itemRow("Client folder"))));
+  check("a trashed row shows its days left", await shows(itemRow("Client folder").getByText("30 days left")));
+  const trashMain = page.locator("main");
+  check("a trashed item offers Restore and Delete now", (await shows(trashMain.getByRole("button", { name: "Restore", exact: true }))) && (await shows(trashMain.getByRole("button", { name: "Delete now", exact: true }))));
+  check("a trashed item has no Edit, Open or copy buttons", (await trashMain.getByRole("button", { name: /^(Edit|Open|Copy)/ }).count()) === 0);
+  await trashMain.getByRole("button", { name: "Restore", exact: true }).click();
+  check("Restore returns the item to All items and the Trash row goes", (await shows(page.locator("h2", { hasText: "All items" }))) && (await shows(itemRow("Client folder"))) && (await gone(sideTrash)));
+
+  await trashIt("Client folder");
+  await sideTrash.click();
+  await trashMain.getByRole("button", { name: "Delete now", exact: true }).click();
+  check("Delete now asks in place", await shows(trashMain.getByRole("button", { name: "Confirm delete" })));
+  await trashMain.getByRole("button", { name: "Cancel" }).click();
+  check("Cancel keeps the item in the Trash", (await shows(itemRow("Client folder"))) && (await shows(trashMain.getByRole("button", { name: "Delete now", exact: true }))));
+  await trashMain.getByRole("button", { name: "Delete now", exact: true }).click();
+  await trashMain.getByRole("button", { name: "Confirm delete" }).click();
+  check("Delete now removes it for good", (await shows(trashStatus("Deleted for good"))) && (await gone(sideTrash)) && (await gone(itemRow("Client folder"))));
+
+  await page.evaluate(async () => {
+    const b = window.kapevault;
+    const spaceId = (await b.view()).spaces[0].id;
+    for (const title of ["Mock trash probe one", "Mock trash probe two"]) {
+      const saved = await b.saveEntry({ kind: "thing", spaceId, title, room: "", spot: "mock shelf", grab: 2, tags: [], favorite: false, notes: "" });
+      await b.deleteEntry(saved.id);
+    }
+  });
+  await sideTrash.click();
+  const itemsPane = page.locator("section[aria-label='Items']");
+  check("the Trash lists both probes, each with its days left", (await shows(itemRow("Mock trash probe one"))) && (await shows(itemRow("Mock trash probe two"))) && (await itemsPane.getByText("30 days left").count()) === 2);
+  await itemsPane.getByRole("button", { name: "Empty Trash" }).click();
+  check("Empty Trash asks in place", await shows(itemsPane.getByRole("button", { name: "Confirm delete" })));
+  await itemsPane.getByRole("button", { name: "Cancel" }).click();
+  check("Cancel keeps everything in the Trash", (await shows(itemRow("Mock trash probe one"))) && (await shows(itemsPane.getByRole("button", { name: "Empty Trash" }))));
+  await itemsPane.getByRole("button", { name: "Empty Trash" }).click();
+  await itemsPane.getByRole("button", { name: "Confirm delete" }).click();
+  check("Empty Trash removes everything, the row goes and All items shows", (await shows(trashStatus("Trash emptied"))) && (await gone(sideTrash)) && (await shows(page.locator("h2", { hasText: "All items" }))));
 
   // Lock + unlock (a copied password must not survive the lock)
   await page.getByRole("button", { name: "Copy password (clears in 30s)" }).click();
   await page.waitForTimeout(200);
-  await page.getByRole("button", { name: "Lock vault" }).click();
-  await page.waitForTimeout(300);
+  await lockedBy(app, page, () => page.getByRole("button", { name: "Lock vault" }).click());
   check("lock clears a copied password from the clipboard", (await clip(app)) === "");
   await page.getByRole("button", { name: "Continue" }).waitFor();
   check("lock returns to unlock screen", true);
-  await page.getByPlaceholder("Master password").fill("test kettle harbor pass");
+  await page.getByPlaceholder("Master password").fill("test kettle harbor pass orbit gazelle");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("alert").filter({ hasText: "Wrong master password." }).waitFor({ timeout: 15000 }); // announced, not only shown
   check("old master no longer unlocks", true);
-  await page.getByPlaceholder("Master password").fill("new kettle harbor pass");
+  await page.getByPlaceholder("Master password").fill("new kettle harbor pass orbit gazelle");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.locator("h1", { hasText: "GHL agency (edited)" }).waitFor({ timeout: 15000 });
   check("new master unlocks", true);
@@ -242,7 +297,7 @@ const launch = () =>
   const raw = fs.readFileSync(path.join(dataDir, "vault.kapevault"), "utf8");
   check("vault file has no plaintext", !/Pw-123456|GHL agency|Northwind Studio|agency@example/.test(raw));
   ({ app, page, errors } = await launch());
-  await page.getByPlaceholder("Master password").fill("new kettle harbor pass");
+  await page.getByPlaceholder("Master password").fill("new kettle harbor pass orbit gazelle");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.locator("h1", { hasText: "GHL agency (edited)" }).waitFor({ timeout: 15000 });
   check("data survives restart", true);
@@ -373,7 +428,17 @@ const launch = () =>
   const md = preview.frameLocator("iframe");
   check("arrow key steps to markdown, rendered as a document", await shows(md.locator("h1", { hasText: "Launch plan" })));
   check("markdown takes its colours from the tokens (paper stays light: Classic ink)", (await md.locator("body").evaluate((b) => getComputedStyle(b).color)) === "rgb(29, 29, 31)");
-  check("markdown's relative image loads from beside the file", await md.locator("img").evaluate((i) => new Promise((ok) => (i.complete ? ok(i.naturalWidth > 0) : (i.onload = () => ok(i.naturalWidth > 0), i.onerror = () => ok(false))))));
+  check(
+    "markdown's relative image loads from beside the file",
+    await md.locator("img").evaluate(
+      (i) =>
+        new Promise((ok) => {
+          if (i.complete) return ok(i.naturalWidth > 0);
+          i.onload = () => ok(i.naturalWidth > 0);
+          i.onerror = () => ok(false);
+        }),
+    ),
+  );
   await page.keyboard.press("ArrowRight");
   check("csv renders as a table with quoted cells", await shows(preview.locator("td", { hasText: "Doe, Jan" })));
   await page.keyboard.press("ArrowRight");
@@ -429,14 +494,14 @@ const launch = () =>
   await page.screenshot({ path: path.join(SHOTS, "e2e-5-grid.png") });
 
   // The page cannot read outside linked folders
-  const escape = await page.evaluate(async (root) => {
+  const listings = await page.evaluate(async (root) => {
     const tryList = (r, rel) => window.kapevault.listFolder(r, rel).then(() => "allowed", () => "blocked");
     const readOutside = await window.kapevault.readText("C:\\Windows\\win.ini").then(() => "allowed", () => "blocked");
     return [await tryList(root, ".."), await tryList("C:\\Windows", ""), readOutside];
   }, sample);
-  check("listing above a linked folder is blocked", escape[0] === "blocked");
-  check("listing an unlinked folder is blocked", escape[1] === "blocked");
-  check("reading a file outside linked folders is blocked", escape[2] === "blocked");
+  check("listing above a linked folder is blocked", listings[0] === "blocked");
+  check("listing an unlinked folder is blocked", listings[1] === "blocked");
+  check("reading a file outside linked folders is blocked", listings[2] === "blocked");
   const protoOutside = await app.evaluate(({ net }) => net.fetch("kapevault-file://local/C%3A/Windows/win.ini").then((r) => r.status));
   check("protocol refuses files outside linked folders", protoOutside === 403, String(protoOutside));
 
@@ -452,7 +517,7 @@ const launch = () =>
   const urlResult = await page.evaluate((p) => window.kapevault.openFile(p), path.join(sample, "h-link.url"));
   check(".url shortcut is revealed, not opened", urlResult === "revealed");
 
-  await page.getByRole("button", { name: "Lock vault" }).click();
+  await lockedBy(app, page, () => page.getByRole("button", { name: "Lock vault" }).click());
   await page.getByRole("button", { name: "Continue" }).waitFor();
   const lockedUrl = `kapevault-file://local/${sample.split(/[\\/]/).map(encodeURIComponent).join("/")}/b-notes.md`;
   const lockedFetch = await app.evaluate(({ net }, u) => net.fetch(u).then((r) => r.status), lockedUrl);
@@ -466,7 +531,7 @@ const launch = () =>
   // Session 3: cloud backup to (fake) R2 - connect, back up, auto backup, restore, disconnect.
   const vaultFile = path.join(dataDir, "vault.kapevault");
   const unlock = async () => {
-    await page.getByPlaceholder("Master password").fill("new kettle harbor pass");
+    await page.getByPlaceholder("Master password").fill("new kettle harbor pass orbit gazelle");
     await page.getByRole("button", { name: "Continue" }).click();
     await page.getByRole("button", { name: "Lock vault" }).waitFor({ timeout: 15000 });
   };
@@ -523,10 +588,8 @@ const launch = () =>
   check("a change is not copied before the pause", !fs.readFileSync(copyOf(folderB)).equals(fs.readFileSync(vaultFile)));
   check("a change is copied into the folder after the pause", await waitFor(() => fs.readFileSync(copyOf(folderB)).equals(fs.readFileSync(vaultFile))));
   const copiedBefore = fs.readFileSync(copyOf(folderB));
-  await page.evaluate(async () => {
-    await window.kapevault.addSpace("Lock Probe");
-    await window.kapevault.lock(); // well inside the 400 ms pause
-  });
+  await page.evaluate(() => window.kapevault.addSpace("Lock Probe"));
+  await lockedBy(app, page, () => page.evaluate(() => window.kapevault.lock())); // well inside the 400 ms pause
   check("a lock writes the waiting copy at once", !copiedBefore.equals(fs.readFileSync(vaultFile)) && fs.readFileSync(copyOf(folderB)).equals(fs.readFileSync(vaultFile)));
   const stoppedLocked = await page.evaluate(() => window.kapevault.stopFolder());
   check("Turn off is refused while locked", stoppedLocked.ok === false && JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8")).copyFolder === folderB);
@@ -541,17 +604,19 @@ const launch = () =>
       };
     }
   });
-  const lockError = await page.evaluate(async () => {
-    await window.kapevault.addSpace("Throw Probe");
-    try {
-      await window.kapevault.lock();
-      return "";
-    } catch (e) {
-      return String(e);
-    }
-  });
+  await page.evaluate(() => window.kapevault.addSpace("Throw Probe"));
+  // The page is torn down by the lock it asked for, so an answer may never come back; a lock that
+  // threw would answer first, with the error.
+  let lockError = "";
+  await lockedBy(app, page, () =>
+    page.evaluate(() => window.kapevault.lock().then(() => "", (e) => String(e))).then((answer) => {
+      lockError = answer;
+    }),
+  );
   check("a folder copy that throws on lock still locks the vault", lockError === "" && (await shows(page.getByPlaceholder("Master password"))), lockError);
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => delete w.webContents.send));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => {
+    delete w.webContents.send;
+  }));
   await unlock();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("dialog").getByRole("tab", { name: "Backup" }).click();
@@ -642,7 +707,7 @@ const launch = () =>
   await rows.last().getByRole("button", { name: "Confirm restore" }).click();
   check("a wrong backup password is refused", await shows(sheet.getByText("Wrong master password for that backup.")));
   check("a refused restore uploads nothing and changes nothing", ![...r2.objects.keys()].some((k) => k.includes("before-restore")) && (await page.locator("aside").getByText("Restore Probe").isVisible()));
-  await backupPassword.fill("new kettle harbor pass");
+  await backupPassword.fill("new kettle harbor pass orbit gazelle");
   await rows.last().getByRole("button", { name: "Confirm restore" }).click();
   check("restore opens the restored vault straight away", await shows(sheet.getByText(/^Backup restored\. The vault it replaced is in your cloud backups/)));
   check("the current vault was backed up before the restore", [...r2.objects.keys()].some((k) => k.includes("before-restore")));
@@ -655,9 +720,9 @@ const launch = () =>
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("dialog").getByRole("tab", { name: "Security" }).click();
   const masterForm = sheet.locator("form", { hasText: "Change master password" }).locator('input[type="password"]');
-  await masterForm.nth(0).fill("new kettle harbor pass");
-  await masterForm.nth(1).fill("new kettle harbor pass");
-  await masterForm.nth(2).fill("new kettle harbor pass");
+  await masterForm.nth(0).fill("new kettle harbor pass orbit gazelle");
+  await masterForm.nth(1).fill("new kettle harbor pass orbit gazelle");
+  await masterForm.nth(2).fill("new kettle harbor pass orbit gazelle");
   await sheet.getByRole("button", { name: "Change password" }).click();
   await sheet.getByText("Master password changed.").waitFor({ timeout: 15000 });
   check("password change offers to delete older backups", await shows(sheet.getByRole("button", { name: "Delete older backups" })));
@@ -692,7 +757,7 @@ const launch = () =>
   check("lock screen lists the bucket's backups", await shows(found));
   await page.screenshot({ path: path.join(SHOTS, "e2e-7-restore.png") });
   await found.first().getByRole("button", { name: "Restore" }).click();
-  await found.first().getByLabel("Master password for this backup").fill("new kettle harbor pass");
+  await found.first().getByLabel("Master password for this backup").fill("new kettle harbor pass orbit gazelle");
   await found.first().getByRole("button", { name: "Confirm restore" }).click();
   check("restore on a new PC opens the restored vault", await shows(page.getByRole("button", { name: "Lock vault" }), 15000));
   check("nothing to back up first on a new PC", snapshotCount() === before);
@@ -713,15 +778,31 @@ const launch = () =>
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("dialog").getByRole("tab", { name: "Import" }).click();
   await page.getByRole("button", { name: "Import file..." }).click();
-  check("import adds the items", await shows(page.getByText("Added 2 items. The import file was deleted.")));
+  check("import adds the items", await shows(page.getByText("Added 2 items from KAPEVault.")));
+  check("the import file is said to be deleted, plain text named", await shows(page.getByText("The file was deleted. It held every password in plain text.")));
   check("import file is deleted afterwards", !fs.existsSync(importFile));
   fs.writeFileSync(importFile, importBody);
   await page.getByRole("button", { name: "Import file..." }).click();
-  check("importing again skips what is already there", await shows(page.getByText("Added 0 items, skipped 2 already in the vault.", { exact: false })));
+  check("importing again skips what is already there", await shows(page.getByText("2 items skipped, already in the vault.", { exact: false })));
   fs.writeFileSync(importFile, "{ not json");
   await page.getByRole("button", { name: "Import file..." }).click();
-  check("a non-import file is refused and kept", (await shows(page.getByText("That file is not a KAPEVault import file."))) && fs.existsSync(importFile));
+  check("a non-import file is refused and kept", (await shows(page.getByText("KAPEVault cannot read that file."))) && fs.existsSync(importFile));
   fs.rmSync(importFile, { force: true });
+  // Another manager's CSV (Chrome's columns): a quoted comma and a row with no site or login are handled, the file is deleted.
+  const csvFile = path.join(os.tmpdir(), `kapevault-import-e2e-${Date.now()}.csv`);
+  fs.writeFileSync(csvFile, 'name,url,username,password,note\r\nCsv Mock Site,https://csv-mock.example.com,csv@example.com,"csv,secret-7",\r\n,,,,\r\n');
+  await pickFile(csvFile);
+  await page.getByRole("button", { name: "Import file..." }).click();
+  check("a Chrome CSV imports", await shows(page.getByText("Added 1 item from Chrome / Edge / Brave (CSV).")));
+  check("the empty CSV row is reported", await shows(page.getByText("1 row skipped: No title, site or username.")));
+  check("the CSV is deleted afterwards", !fs.existsSync(csvFile));
+  // A row the importer could not read is the only copy of that row: the file stays and the page says so.
+  const keptFile = path.join(os.tmpdir(), `kapevault-import-e2e-kept-${Date.now()}.json`);
+  fs.writeFileSync(keptFile, JSON.stringify({ encrypted: false, folders: [], items: [{ type: 2, name: "Kept Mock Note", notes: "mock text" }, { type: 99, name: "Kept Mock Odd" }] }));
+  await pickFile(keptFile);
+  await page.getByRole("button", { name: "Import file..." }).click();
+  check("a file with an unreadable item is kept and says so", (await shows(page.getByText("Kept the file: 1 item could not be imported."))) && fs.existsSync(keptFile));
+  fs.rmSync(keptFile, { force: true });
   await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
   await gone(page.getByRole("dialog"));
   check("imported client shows in the sidebar", await shows(page.locator("aside").getByText("Import Client")));
@@ -738,7 +819,8 @@ const launch = () =>
   console.log(results.join("\n"));
   console.log(`\n${results.filter((r) => r.startsWith("PASS")).length}/${results.length} passed`);
   process.exitCode = results.every((r) => r.startsWith("PASS")) ? 0 : 1; // a FAIL stops `npm run e2e`, as the other suites do
-})().catch((e) => {
+})().catch(async (e) => {
+  await crashShot("e2e");
   console.log(results.join("\n"));
   console.log("CRASH:", e.message.split("\n").slice(0, 6).join("\n"));
   process.exit(1);

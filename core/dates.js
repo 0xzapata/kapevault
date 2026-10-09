@@ -18,3 +18,17 @@ export function addDays(ymd, days) {
   date.setDate(date.getDate() + days);
   return date.toLocaleDateString("en-CA");
 }
+
+// Whole calendar days from `from` to `to` (both YYYY-MM-DD): 3 = three days on, -2 = two days before.
+// Counted on UTC midnights so a daylight-saving change never makes a day 23 hours long.
+/** @param {string} from @param {string} to */
+export function daysBetween(from, to) {
+  /** @param {string} ymd */
+  const utc = (ymd) => Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10)));
+  return Math.round((utc(to) - utc(from)) / 86400000);
+}
+
+// Whole calendar days from today (local): 20 = in 20 days, -3 = 3 days ago. Null when it is not a real day.
+// `from` stands in for today, for tests.
+/** @param {string} ymd @param {string} [from] */
+export const daysFromToday = (ymd, from = today()) => (isRealDate(ymd) ? daysBetween(from, ymd) : null);

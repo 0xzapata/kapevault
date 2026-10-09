@@ -6,7 +6,7 @@ const path = require("node:path");
 const { createVaultSession } = require("./vault-session.cjs");
 const { createRestores } = require("./restore.cjs");
 
-const MASTER = "correct horse battery";
+const MASTER = "correct horse battery orbit gazelle";
 
 // A vault on disk (mock items only), a saved copy of it made before the last change, and restores
 // wired as main.cjs wires them, minus Electron. guesses: every password tried through the throttle.

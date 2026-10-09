@@ -2,6 +2,8 @@
 // secrets, old passwords, backup codes, security question answers, a device's admin and Wi-Fi passwords
 // and label photo, an ID's number and photo) never go in: the page gets hasX flags and asks for ONE
 // value through secretOf.
+import { isTrashed } from "./entries.js";
+import { liveEntries, trashDaysLeft } from "./trash.js";
 /** @import { Entry, VaultData } from "./entries.js" */
 
 // A login's backup codes: counts and paper copies, never a code.
@@ -53,8 +55,6 @@ function publicEntry(e, issues) {
       return { ...base, keyId: e.keyId ?? "", url: e.url ?? "", expires: e.expires, hasSecret: Boolean(e.secret) };
     case "link":
       return { ...base, linkType: e.linkType, location: e.location ?? "" };
-    case "payee":
-      return { ...base, who: e.who, relation: e.relation ?? "", provider: e.provider, number: e.number, accountName: e.accountName ?? "", confirmedAt: e.confirmedAt };
     case "thing":
       return { ...base, room: e.room ?? "", spot: e.spot, grab: e.grab, expires: e.expires };
     case "device":
@@ -80,11 +80,25 @@ function publicEntry(e, issues) {
 }
 
 /**
+ * `entries` holds only the items that are not in the Trash, so every list, search and count built from
+ * it leaves the Trash out without knowing about it; the Trash view reads `trash`, whose items carry their
+ * `daysLeft` (read against the vault's sync stamps, which the page never holds).
  * @param {VaultData} data
  * @param {Map<string, object[]>} issues findIssues' result
+ * @param {number} [now] ms
  */
-export function publicView(data, issues) {
-  return { spaces: data.spaces, entries: data.entries.map((e) => publicEntry(e, issues)) };
+export function publicView(data, issues, now = Date.now()) {
+  const trashed = data.entries.filter(isTrashed);
+  const trashedIds = new Set(trashed.map((e) => e.id));
+  return {
+    spaces: data.spaces,
+    // A login that signed in through an item in the Trash reads as unlinked until that item is restored.
+    entries: liveEntries(data.entries).map((e) => {
+      const view = publicEntry(e, issues);
+      return trashedIds.has(view.viaEntryId) ? { ...view, viaEntryId: undefined } : view;
+    }),
+    trash: trashed.map((e) => ({ ...publicEntry(e, issues), trashedAt: e.trashedAt, daysLeft: trashDaysLeft(e, now, data) })),
+  };
 }
 
 // field: "password" | "body" (secure note) | "secret" (API key) | "history" (old password at index)

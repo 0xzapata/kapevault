@@ -1,4 +1,4 @@
-// The real host end to end in Node: the phone's files in a temp folder (with the plugin's rename), HTTP
+// The real host end to end in Node: the phone's files in a temp folder (saved the way DurableFile saves), HTTP
 // to a fake R2 that checks every signature with the PC's signer, fake fingerprint and clipboard
 // plugins. The PC's own code reads and writes the same vault file.
 import test from "node:test";
@@ -7,9 +7,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRealHost } from "./real-host.ts";
 import { MAX_VAULT_BYTES } from "./vault-file.ts";
-import { R2_KEYS, fakeClipboard, fakeKeystore, fakeR2, fetchTransport, nodeFs, pc, pcVaultNearCap, pcVaultText, tempDir, until } from "./test/fixtures.mjs";
+import { R2_KEYS, fakeClipboard, fakeKeystore, fakeR2, fetchTransport, nodeFs, pc, pcVaultNearCap, pcVaultText, tempDir, until, withPro } from "./test/fixtures.mjs";
 
-const MASTER = "Lantern-Mango-Quiet-47";
+const MASTER = "Lantern-Mango-Quiet-47 orbit gazelle";
 const PC_ID = "9d9d9d9d-1c1d-4e5f-8a9b-0c1d2e3f4a5b";
 const PERSONAL = "5c1f7c1e-0000-4000-8000-000000000001";
 const PC_VAULT = {
@@ -18,6 +18,7 @@ const PC_VAULT = {
     { id: "e-mail", spaceId: PERSONAL, kind: "login", title: "Mail", tags: [], favorite: false, notes: "", updatedAt: "2026-09-20", username: "sam.home@example.com", password: "Mail-Pass-2291!", url: "mail.example.com", signIn: "password" },
     { id: "e-router", spaceId: PERSONAL, kind: "device", title: "Router", tags: [], favorite: false, notes: "", updatedAt: "2026-09-20", type: "router", adminUrl: "192.168.0.1", adminPassword: "Rtr!8842" },
     { id: "e-due", spaceId: PERSONAL, kind: "due", title: "Old due item", tags: [], favorite: false, notes: "", updatedAt: "2026-09-01", agency: "Water", schedule: "monthly" },
+    { id: "e-payee", spaceId: PERSONAL, kind: "payee", title: "Old payee item", tags: [], favorite: false, notes: "Rent", updatedAt: "2026-09-01", who: "Mock Tita", provider: "GCash", number: "09171234567" },
   ],
   cloud: { endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "kapevault-e2e", accessKeyId: "pc-key", secretAccessKey: "pc-secret", auto: true },
   olderBackupsPending: true,
@@ -36,7 +37,7 @@ test.beforeEach(async () => {
 });
 test.afterEach(() => r2.close());
 
-function phone(t, { dir = tempDir(), ...extra } = {}) {
+function phone(t, { dir = withPro(tempDir()), ...extra } = {}) {
   const keystore = fakeKeystore();
   const clipboard = fakeClipboard();
   const opened = [];
@@ -84,8 +85,10 @@ test("first run: list the PC's backups, restore one with its master password, an
   assert.deepEqual(await host.restore(R2_KEYS, listed.backups[0].key, MASTER), { ok: true });
   assert.deepEqual(states, ["unlocked"]);
   const view = await host.view();
-  assert.deepEqual(view.entries.map((e) => e.title).sort(), ["Mail", "Old due item", "Router"]);
+  assert.deepEqual(view.entries.map((e) => e.title).sort(), ["Mail", "Old due item", "Old payee item", "Router"]);
   assert.equal(view.entries.find((e) => e.id === "e-due").kind, "note", "a removed due item opens as a note");
+  assert.equal(view.entries.find((e) => e.id === "e-payee").kind, "note", "a removed payee item opens as a note");
+  assert.equal(await host.getSecret("e-payee", "body"), "Name: Mock Tita\nWallet or bank: GCash\nNumber: 09171234567\n\nRent", "its fields are the note's secret body");
   const mail = view.entries.find((e) => e.id === "e-mail");
   assert.equal(mail.hasPassword, true);
   assert.equal(mail.password, undefined, "the page never gets a stored secret in a view");
@@ -118,7 +121,10 @@ test("saves are stamped with this phone's id, survive a reopen, and the PC conti
   assert.equal(data.entries.find((e) => e.id === saved.id).favorite, true);
   await p.host.deleteEntry("e-router");
   data = (await p.onDisk()).data;
-  assert.ok(data.sync.gone["e-router"], "a delete is a tombstone");
+  assert.ok(data.entries.find((e) => e.id === "e-router").trashedAt, "a delete moves the item to the Trash");
+  await p.host.deleteForever("e-router");
+  data = (await p.onDisk()).data;
+  assert.ok(data.sync.gone["e-router"], "deleting it for good is a tombstone");
   assert.ok(!data.entries.some((e) => e.id === "e-router"));
   assert.deepEqual((await p.host.saveEntry({ kind: "login", spaceId: "no-such-space", title: "", tags: [], favorite: false, notes: "" })).ok, false);
   await p.host.lock();
@@ -140,6 +146,29 @@ test("saves are stamped with this phone's id, survive a reopen, and the PC conti
   assert.equal(data.sync.meta[saved.id].vv[me], 2);
 });
 
+test("without Pro: no new client folder and nothing new in one, but restored client folders stay usable", async (t) => {
+  const ACME = "sp-acme";
+  const withClients = {
+    ...PC_VAULT,
+    spaces: [...PC_VAULT.spaces, { id: ACME, name: "Acme", kind: "client" }, { id: "sp-globex", name: "Globex", kind: "client" }],
+    entries: [...PC_VAULT.entries, { id: "e-acme", spaceId: ACME, kind: "note", title: "Acme wifi", tags: [], favorite: false, notes: "", updatedAt: "2026-09-20", body: "acme-guest" }],
+  };
+  const p = phone(t, { dir: tempDir() });
+  assert.deepEqual(await p.host.restoreFile((await pcVaultText(MASTER, withClients)).text, MASTER), { ok: true }, "a restore is free");
+  assert.match((await p.host.addSpace("Initech")).error, /part of KAPEVault Pro/);
+  const note = { kind: "note", title: "New", tags: [], favorite: false, notes: "", body: "x" };
+  assert.match((await p.host.saveEntry({ ...note, spaceId: ACME })).error, /part of KAPEVault Pro/, "a new item goes to Personal");
+  assert.equal((await p.host.saveEntry({ ...note, spaceId: PERSONAL })).ok, true);
+  const edit = { id: "e-acme", kind: "note", title: "Acme wifi (new)", tags: [], favorite: false, notes: "" };
+  assert.match((await p.host.saveEntry({ ...edit, spaceId: "sp-globex" })).error, /part of KAPEVault Pro/, "never moved to another client");
+  assert.equal((await p.host.saveEntry({ ...edit, spaceId: ACME })).ok, true, "an item in a client folder stays editable");
+  const view = await p.host.view();
+  assert.deepEqual(view.spaces.map((s) => s.name), ["Personal", "Acme", "Globex"], "the restored client folders stay");
+  assert.equal(view.entries.find((e) => e.id === "e-acme").title, "Acme wifi (new)");
+  assert.equal(await p.host.getSecret("e-acme", "body"), "acme-guest");
+  assert.equal((await p.host.proStatus()).owned, false);
+});
+
 test("unlock: wrong passwords are counted in a file, the right one clears it", async (t) => {
   const p = await firstRun(t);
   await p.host.lock();
@@ -156,7 +185,7 @@ test("fingerprint: on, lock, unlock by fingerprint; a new master password turns 
   await p.host.lock();
   await assert.rejects(p.host.view(), /locked/);
   assert.deepEqual(await p.host.unlockBiometric(), { ok: true });
-  assert.equal((await p.host.view()).entries.length, 3);
+  assert.equal((await p.host.view()).entries.length, 4);
 
   assert.match((await p.host.changeMaster(MASTER, "short")).error, /./, "the rule refuses a weak one");
   assert.deepEqual(await p.host.changeMaster("not it", "Harbor-Pine-Slack-2291-Wren"), { ok: false, error: "The current password is wrong." });
@@ -167,7 +196,7 @@ test("fingerprint: on, lock, unlock by fingerprint; a new master password turns 
   const opened = await pc.crypto.openFile("Harbor-Pine-Slack-2291-Wren", file);
   assert.equal(opened.data.olderBackupsPending, true, "older R2 snapshots still open with the old password");
   assert.equal(opened.data.sync.keys.length, 2);
-  assert.equal((await p.host.view()).entries.length, 3, "still unlocked, under the new key");
+  assert.equal((await p.host.view()).entries.length, 4, "still unlocked, under the new key");
 });
 
 test("fingerprint: a wrap that no longer opens the vault is turned off with 'changed'", async (t) => {
@@ -217,7 +246,7 @@ test("Lock after: the session ends on time, by either clock, and says why", asyn
   assert.deepEqual(await p.host.setSettings({ lockAfterHours: 0, lockGrace: 7 }), { lockGrace: 30, lockAfterHours: 0, theme: "system", hideFromCapture: true }, "only known values");
   assert.deepEqual(await p.host.unlock(MASTER), { ok: true });
   clock.t += 100 * 3600_000;
-  assert.equal((await p.host.view()).entries.length, 3, "Off means no limit");
+  assert.equal((await p.host.view()).entries.length, 4, "Off means no limit");
 });
 
 test("hide from screen capture: the window follows the setting, read at start and on every change", async (t) => {
@@ -228,6 +257,92 @@ test("hide from screen capture: the window follows the setting, read at start an
   assert.equal((await p.host.setSettings({ hideFromCapture: "no" })).hideFromCapture, true, "only a boolean");
   assert.equal((await p.host.setSettings({ hideFromCapture: false })).hideFromCapture, false);
   assert.equal(calls.at(-1), false);
+});
+
+test("Trash: delete moves to the Trash, restore and Delete now work, a trashed item is out of every list and gives up nothing", async (t) => {
+  const p = await firstRun(t);
+  const me = p.installId();
+  const before = (await p.onDisk()).data.sync.meta["e-mail"] ?? { g: {}, vv: {} }; // never edited yet: no meta
+  await p.host.deleteEntry("e-mail");
+  let view = await p.host.view();
+  assert.ok(!view.entries.some((e) => e.id === "e-mail"), "out of the lists");
+  assert.deepEqual(view.trash.map((e) => e.id), ["e-mail"]);
+  assert.match(view.trash[0].trashedAt, /^\d{4}-\d\d-\d\dT/);
+  const trashed = (await p.onDisk()).data.sync.meta["e-mail"];
+  assert.ok(trashed.g.trash, "the move is stamped as a trash group change");
+  assert.deepEqual(trashed.g.core, before.g.core, "and no other group changed");
+  assert.deepEqual(trashed.vv[me], (before.vv[me] ?? 0) + 1);
+
+  // No secret, copy, code or link from the Trash (also what keeps autofill from filling a trashed login).
+  await assert.rejects(p.host.getSecret("e-mail", "password"), /in the Trash/);
+  await assert.rejects(p.host.copySecret("e-mail", "password"), /in the Trash/);
+  await assert.rejects(p.host.openEntry("e-mail"), /in the Trash/);
+  assert.equal(p.clipboard.text, "");
+  const edit = await p.host.saveEntry({ id: "e-mail", kind: "login", spaceId: PERSONAL, title: "Mail", tags: [], favorite: false, notes: "", username: "x", url: "", signIn: "password" });
+  assert.equal(edit.ok, false);
+  assert.match(edit.error, /Restore it first/);
+  await assert.rejects(p.host.deleteForever("e-router"), /not in the Trash/, "Delete now only works on a trashed item");
+
+  // It survives a lock and an unlock.
+  await p.host.lock();
+  assert.deepEqual(await p.host.unlock(MASTER), { ok: true });
+  view = await p.host.view();
+  assert.deepEqual(view.trash.map((e) => e.id), ["e-mail"]);
+
+  await p.host.restoreEntry("e-mail");
+  view = await p.host.view();
+  assert.ok(view.entries.some((e) => e.id === "e-mail"));
+  assert.deepEqual(view.trash, []);
+  assert.equal(await p.host.getSecret("e-mail", "password"), "Mail-Pass-2291!", "restored, whole");
+  await assert.rejects(p.host.restoreEntry("e-mail"), /not in the Trash/);
+
+  await p.host.deleteEntry("e-mail");
+  await p.host.deleteEntry("e-router");
+  await p.host.deleteForever("e-mail");
+  assert.deepEqual((await p.host.view()).trash.map((e) => e.id), ["e-router"]);
+  await p.host.emptyTrash();
+  view = await p.host.view();
+  assert.deepEqual(view.trash, []);
+  const data = (await p.onDisk()).data;
+  assert.ok(data.sync.gone["e-mail"] && data.sync.gone["e-router"], "both are deletes sync carries");
+  assert.ok(!data.entries.some((e) => e.id === "e-mail" || e.id === "e-router"));
+});
+
+test("Trash: 30 days later the item goes on unlock and on the next save, as a delete sync carries", async (t) => {
+  const DAY = 86_400_000;
+  let clock = Date.parse("2026-10-01T08:00:00Z");
+  const dir = withPro(tempDir());
+  const p = await firstRun(t, { dir, now: () => clock });
+  await p.host.deleteEntry("e-mail");
+  await p.host.deleteEntry("e-router");
+  clock += 29 * DAY;
+  await p.host.lock();
+  await p.host.unlock(MASTER);
+  assert.equal((await p.host.view()).trash.length, 2, "29 days in: still there");
+
+  // Save path: the clock moves on inside one session (no auto-lock), and the next edit lets go of the Trash.
+  await p.host.setSettings({ lockAfterHours: 0 });
+  clock += 2 * DAY;
+  assert.equal((await p.host.view()).trash.length, 2, "nothing purges on a view");
+  const saved = await p.host.saveEntry({ kind: "note", spaceId: PERSONAL, title: "Later", tags: [], favorite: false, notes: "", body: "x" });
+  assert.equal(saved.ok, true);
+  assert.deepEqual((await p.host.view()).trash, []);
+  let data = (await p.onDisk()).data;
+  assert.ok(data.sync.gone["e-mail"] && data.sync.gone["e-router"], "purged items are tombstoned by the save's stamp");
+
+  // Unlock path: a vault with an expired item opens and cleans itself without any edit.
+  const q = phone(t, { dir: withPro(tempDir()), now: () => clock });
+  const backup = (await q.host.listBackups(R2_KEYS)).backups.find((b) => b.key.includes(PC_ID));
+  await q.host.restore(R2_KEYS, backup.key, MASTER);
+  await q.host.setSettings({ lockAfterHours: 0 });
+  await q.host.deleteEntry("e-mail");
+  await q.host.lock();
+  clock += 31 * DAY;
+  assert.deepEqual(await q.host.unlock(MASTER), { ok: true });
+  await until(async () => (await q.onDisk()).data.sync.gone["e-mail"] !== undefined);
+  assert.deepEqual((await q.host.view()).trash, []);
+  data = (await q.onDisk()).data;
+  assert.ok(!data.entries.some((e) => e.id === "e-mail"));
 });
 
 test("copy and open: secrets go to the secure clipboard, a lock clears it, only web links open", async (t) => {
@@ -298,7 +413,7 @@ test("restore from the lock screen keeps the vault it replaces, once", async (t)
 
 test("Replace without a copy: a taken slot asks first; locked, it needs the CURRENT vault's own master password", async (t) => {
   const p = await firstRun(t);
-  const NEW = "Harbor-Kettle-Violet-62";
+  const NEW = "Harbor-Kettle-Violet-62 orbit gazelle";
   await p.host.lock();
   const backup = (await p.host.listBackups(R2_KEYS)).backups.find((b) => b.key.includes(PC_ID));
   assert.deepEqual(await p.host.restore(R2_KEYS, backup.key, MASTER), { ok: true }); // fills the slot
@@ -389,7 +504,7 @@ test("restore from a file: junk and a planted KDF are refused before any key der
   assert.deepEqual(await p.host.restoreFile(pcText, MASTER), { ok: true });
   assert.equal(await p.host.state(), "unlocked");
   assert.ok((await p.host.view()).entries.some((e) => e.id === "e-mail"));
-  assert.equal((await p.onDisk()).data.entries.length, 3, "written, and the PC's code opens it with the backup's password");
+  assert.equal((await p.onDisk()).data.entries.length, 4, "written, and the PC's code opens it with the backup's password");
   const cloud = await p.host.cloudStatus();
   assert.deepEqual([cloud.connected, cloud.url, cloud.accessKeyId], [true, "https://0123abcd.r2.cloudflarestorage.com/kapevault-e2e", "pc-key"], "the backup's R2 setup came with it");
 
@@ -405,7 +520,7 @@ test("restore from a file: junk and a planted KDF are refused before any key der
 // A 64 MB vault takes minutes through the phone's JS hashing here (and can run Node out of memory),
 // so the host gets a smaller cap (maxVaultBytes) and the same writes.
 const TOO_BIG = { ok: false, error: "The vault would be too big to back up (over 64 MB), so this was not saved. Remove some photos or long notes first." };
-const PHONE_MASTER = "Copper-Violet-Harbor-83";
+const PHONE_MASTER = "Copper-Violet-Harbor-83 orbit gazelle";
 
 test("the vault is never written over the cap: a save, a restore, a new master password, the bucket's vault", async (t) => {
   const CAP = 256 * 1024;
@@ -445,8 +560,114 @@ test("the vault is never written over the cap: a save, a restore, a new master p
   fs.writeFileSync(p.file, marked);
   assert.deepEqual(await p.host.unlock(MASTER), { ok: true });
   assert.equal(fs.readFileSync(p.file, "utf8"), marked, "an unlock of a marked vault writes nothing");
-  assert.deepEqual(await p.host.changeMaster(MASTER, "Harbor-Kettle-Violet-62"), TOO_BIG);
+  assert.deepEqual(await p.host.changeMaster(MASTER, "Harbor-Kettle-Violet-62 orbit gazelle"), TOO_BIG);
   assert.equal(fs.readFileSync(p.file, "utf8"), marked);
   await p.host.lock();
   assert.deepEqual(await p.host.unlock(MASTER), { ok: true }, "the old master password still opens it");
+});
+
+// A vault made before the master rule tightened: the PC's file, under a dictionary-style master.
+const WEAK_MASTER = "Maria Clara 1998 Cebu";
+async function weakVault(t) {
+  const p = await firstRun(t);
+  await p.host.lock();
+  fs.writeFileSync(p.file, (await pcVaultText(WEAK_MASTER, PC_VAULT)).text);
+  return p;
+}
+
+test("weak master: only a master unlock flags it, the flag rides the view, lock and a new master clear it", async (t) => {
+  const p = await weakVault(t);
+  assert.deepEqual(await p.host.unlock(WEAK_MASTER), { ok: true });
+  assert.equal((await p.host.view()).masterWeak, true);
+  await p.host.lock();
+  await assert.rejects(p.host.view(), /locked/);
+  assert.deepEqual(await p.host.unlock(WEAK_MASTER), { ok: true });
+  assert.deepEqual(await p.host.changeMaster(WEAK_MASTER, "Harbor-Pine-Slack-2291-Wren"), { ok: true, biometricOff: false });
+  assert.equal((await p.host.view()).masterWeak, false);
+  assert.equal(fs.readFileSync(p.file, "utf8").includes("masterWeak"), false, "never written");
+});
+
+test("weak master: a strong master does not flag it, and a fingerprint unlock never does", async (t) => {
+  const p = await firstRun(t);
+  await p.host.lock();
+  assert.deepEqual(await p.host.unlock(MASTER), { ok: true });
+  assert.equal((await p.host.view()).masterWeak, false);
+
+  const weak = await weakVault(t);
+  assert.deepEqual(await weak.host.unlock(WEAK_MASTER), { ok: true });
+  assert.deepEqual(await weak.host.enableBiometric(), { ok: true });
+  await weak.host.lock();
+  assert.deepEqual(await weak.host.unlockBiometric(), { ok: true });
+  assert.equal((await weak.host.view()).masterWeak, false, "the fingerprint never saw the master");
+});
+
+// Generated passwords (core/generated.js): the same list the PC keeps, this phone's own (SYNC.md 3.8).
+test("generated passwords: kept the moment they leave the generator, times only to the page, one value at a time", async (t) => {
+  const p = await firstRun(t);
+  const rows = await p.host.recordGenerated("Mock-Generated-Pass-1!");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(Object.keys(rows[0]), ["at"]);
+  assert.equal(JSON.stringify(await p.host.view()).includes("Mock-Generated"), false, "the vault view never carries it");
+  assert.equal(await p.host.getGenerated(0), "Mock-Generated-Pass-1!");
+  assert.equal(await p.host.getGenerated(1), "");
+  assert.equal((await p.onDisk()).data.genHistory[0].value, "Mock-Generated-Pass-1!", "in the encrypted file, with everything else");
+  assert.equal(fs.readFileSync(p.file, "utf8").includes("Mock-Generated"), false);
+  await p.host.copyGenerated(0);
+  assert.deepEqual([p.clipboard.text, p.clipboard.sensitive], ["Mock-Generated-Pass-1!", true], "copies go to the sensitive clipboard");
+  await assert.rejects(p.host.copyGenerated(5), /Nothing to copy/);
+});
+
+test("generated passwords survive a lock and a restart, and a recorded value is the same row when recorded again", async (t) => {
+  const p = await firstRun(t);
+  await p.host.recordGenerated("Mock-Before-Lock-Pass-1!");
+  await p.host.recordGenerated("Mock-Before-Lock-Pass-1!");
+  assert.equal((await p.host.generatedList()).length, 1);
+  await p.host.lock();
+  await assert.rejects(p.host.generatedList(), /locked/i);
+  await assert.rejects(p.host.recordGenerated("x"), /locked/i);
+  const again = phone(t, { dir: p.dir });
+  assert.deepEqual(await again.host.unlock(MASTER), { ok: true });
+  assert.equal(await again.host.getGenerated(0), "Mock-Before-Lock-Pass-1!");
+});
+
+test("generated passwords: main refuses what is not text, empty or too long; Clear empties the list and the file", async (t) => {
+  const p = await firstRun(t);
+  for (const bad of [undefined, null, 5, {}, "", "x".repeat(257)]) await assert.rejects(p.host.recordGenerated(bad), /Nothing to keep/);
+  await p.host.recordGenerated("Mock-Clear-Pass-1!");
+  assert.deepEqual(await p.host.clearGenerated(), []);
+  assert.equal("genHistory" in (await p.onDisk()).data, false);
+});
+
+test("generated passwords: 90 days and the newest 20, by this phone's clock", async (t) => {
+  let clock = Date.UTC(2026, 9, 9, 4);
+  const p = await firstRun(t, { now: () => clock });
+  await p.host.recordGenerated("Mock-Old-Pass-1!");
+  clock += 91 * 24 * 60 * 60 * 1000;
+  await p.host.lock(); // 91 days later is a new session, not the same one past its limit
+  assert.deepEqual(await p.host.unlock(MASTER), { ok: true });
+  assert.deepEqual(await p.host.generatedList(), [], "past 90 days it is not listed");
+  for (let i = 0; i < 25; i++) await p.host.recordGenerated(`Mock-Pass-${i}!`);
+  assert.equal((await p.host.generatedList()).length, 20);
+  assert.equal(await p.host.getGenerated(0), "Mock-Pass-24!");
+  assert.equal((await p.onDisk()).data.genHistory.length, 20);
+});
+
+test("generated passwords: a save lets go of what is past 90 days, and every call the page makes returns times only", async (t) => {
+  let clock = Date.UTC(2026, 9, 9, 4);
+  const p = await firstRun(t, { now: () => clock });
+  await p.host.recordGenerated("Mock-Old-Pass-2!");
+  clock += 91 * 24 * 60 * 60 * 1000;
+  await p.host.lock();
+  assert.deepEqual(await p.host.unlock(MASTER), { ok: true });
+  assert.equal((await p.onDisk()).data.genHistory.length, 1, "still in the file until something saves");
+  const personal = (await p.host.view()).spaces[0].id;
+  await p.host.saveEntry({ kind: "note", spaceId: personal, title: "Mock", tags: [], favorite: false, notes: "", body: "b" });
+  assert.equal("genHistory" in (await p.onDisk()).data, false, "gone from the file at the next save");
+
+  await p.host.recordGenerated("Mock-New-Pass-3!");
+  for (const rows of [await p.host.generatedList(), await p.host.recordGenerated("Mock-New-Pass-4!")]) {
+    assert.ok(rows.length > 0);
+    for (const row of rows) assert.deepEqual(Object.keys(row), ["at"]);
+  }
+  assert.deepEqual(await p.host.clearGenerated(), []);
 });

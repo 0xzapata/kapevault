@@ -3,16 +3,16 @@
 // answers carried through an edit, and Hotline mode (big answer, phonetic spelling, Read aloud only
 // with a local voice, next question, Escape). Part of npm run e2e. Throwaway vault, mock names only.
 // Page screenshots (light + dark) in %TEMP%\kapevault-e2e-v2.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createHarness, shows, gone, clip, waitFor } = require("./e2e-harness.cjs");
 
 const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
 fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-lies-"));
 const { check, launch, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
+const MASTER = "mock kettle harbor pass orbit gazelle";
 const TYPED = "Zanzibar Lane 12";
 const INVENTED = /^[a-z]+ [a-z]+ [1-9][0-9]$/;
 

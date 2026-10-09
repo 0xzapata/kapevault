@@ -9,7 +9,7 @@ const { createVaultSession } = require("./vault-session.cjs");
 async function freshVault() {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
   const vault = createVaultSession(file);
-  await vault.create("correct horse battery");
+  await vault.create("correct horse battery orbit gazelle");
   return { file, vault };
 }
 

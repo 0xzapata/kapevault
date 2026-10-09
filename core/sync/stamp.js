@@ -5,8 +5,9 @@
 import { splitGroups, SPACE_GROUP } from "./groups.js";
 import { tick } from "./hlc.js";
 
+/** @import { Sync } from "./shape.js" */
+
 /**
- * @typedef {import("./shape.js").Sync} Sync
  * @typedef {{ installId: string, now: number, sha256: (text: string) => string }} StampContext
  * @typedef {{ key: string, content: Record<string, any> | null, changed?: string[], clearsHistory?: boolean }} Change
  *   content: the item's groups, null when it was deleted; changed: the groups this device wrote
@@ -57,7 +58,7 @@ export function stamp(saved, current, context) {
 export function repair(data, context) {
   const { sync } = data;
   if (!context.installId) return sync;
-  const items = new Map([...data.entries.map((e) => [e.id, splitGroups(e)]), ...data.spaces.map((s) => [spaceKey(s.id), spaceGroups(s)])]);
+  const items = new Map(/** @type {[string, any][]} */ ([...data.entries.map((e) => [e.id, splitGroups(e)]), ...data.spaces.map((s) => [spaceKey(s.id), spaceGroups(s)])]));
   const changes = [];
   for (const [key, content] of items) {
     const meta = sync.meta[key];
@@ -118,7 +119,7 @@ function record(sync, changes, context) {
     const h = contentHash(content, context.sha256);
     if (changed.length) {
       const vv = bump(prev?.vv, installId);
-      const dot = [installId, vv[installId]];
+      const dot = /** @type {[string, number]} */ ([installId, vv[installId]]);
       meta[key] = { vv, g: { ...prev?.g, ...Object.fromEntries(changed.map((g) => [g, { dot, at }])) }, h };
       if (clearsHistory) histFloor[key] = at; // "Clear history": older passwords must not merge back in
       stamped = true;

@@ -10,7 +10,7 @@ const vm = require("node:vm");
 const { openVault } = require("./opener/opener-crypto.cjs");
 const { createVaultSession } = require("./vault-session.cjs");
 
-const MASTER = "mock master pass phrase";
+const MASTER = "mock master pass phrase orbit gazelle";
 const INSTALL = "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40";
 
 function element() {
@@ -67,8 +67,12 @@ test("a vault with sync metadata and tombstones reads in the Opener exactly as i
   const { id: portal } = vault.saveEntry({ kind: "login", spaceId: personal, title: "Mock Portal", username: "mock.user", password: "Mock-Pass-1", url: "https://portal.example.com" });
   vault.saveEntry({ kind: "login", spaceId: client, title: "Mock Client CRM", username: "mock.va", password: "Mock-Pass-2", signIn: "google", viaEntryId: portal });
   vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock note", body: "Mock body text" });
-  vault.saveEntry({ kind: "payee", spaceId: personal, title: "Mock Tita GCash", who: "Mock Tita", provider: "GCash", number: "09171234567" });
-  for (const title of ["Mock gone 1", "Mock gone 2"]) vault.deleteEntry(vault.saveEntry({ kind: "note", spaceId: client, title, body: "x" }).id);
+  vault.saveEntry({ kind: "thing", spaceId: personal, title: "Mock Passport", spot: "blue folder" });
+  for (const title of ["Mock gone 1", "Mock gone 2"]) {
+    const { id } = vault.saveEntry({ kind: "note", spaceId: client, title, body: "x" });
+    vault.deleteEntry(id); // to the Trash, then gone for good: the tombstone is what this test is about
+    vault.deleteForever(id);
+  }
   vault.lock();
 
   const data = await openVault(JSON.parse(fs.readFileSync(file, "utf8")), MASTER);
@@ -81,4 +85,15 @@ test("a vault with sync metadata and tombstones reads in the Opener exactly as i
   assert.equal(shown.count, "4 items");
   assert.ok(shown.rows.every((r) => r.fields.length > 0), "every row's fields were read");
   assert.ok(!JSON.stringify(shown).includes(INSTALL), "nothing from sync reaches a row");
+});
+
+// Payee Check was removed (2026-10-09) but the Opener is a saved file that outlives the app: an old vault's
+// payee still shows, by its own fields, with the number as readable as it was.
+test("the frozen current vault, payee and all, opens in the Opener with every item shown", async () => {
+  const golden = path.join(__dirname, "..", "core", "fixtures");
+  const data = await openVault(JSON.parse(fs.readFileSync(path.join(golden, "vault-v1.kapevault"), "utf8")), "mock kettle harbor pass orbit gazelle");
+  const shown = render(data);
+  assert.equal(shown.rows.length, data.entries.length, "no item disappears");
+  const payee = shown.rows.find((r) => r.id === data.entries.find((e) => e.kind === "payee").id);
+  assert.deepEqual(payee.fields.filter((f) => !f.stamp).map((f) => [f.label, f.value, f.secret]), [["Who", "Mock Person", false], ["Wallet or bank", "GCash", false], ["Account number", "09171234567", false]]);
 });

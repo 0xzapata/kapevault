@@ -23,15 +23,16 @@ data.sync = newSync(data, "AAAAAAAAAAAAAAAAAAAAAA==");
 function save(device, change) {
   const saved = { ...data };
   change();
-  data.sync = stamp(saved, data, { installId: device, now: (now += 1000), sha256 });
+  now += 1000;
+  data.sync = stamp(saved, data, { installId: device, now, sha256 });
 }
 
 function mockItem(i, spaceId) {
   const base = { id: randomUUID(), spaceId, title: `Mock item ${i}`, tags: ["mock"], favorite: false, notes: "Mock notes line.", updatedAt: "2026-09-26" };
-  const kind = ["login", "login", "login", "note", "payee", "device"][i % 6];
+  const kind = ["login", "login", "login", "note", "thing", "device"][i % 6];
   if (kind === "login") return { ...base, kind, username: `mock.user${i}@example.com`, password: `Mock-Pass-${i}-xxxxxxxx`, url: `https://mock${i}.example.com`, signIn: "password", totp: "otpauth://totp/Mock?secret=JBSWY3DPEHPK3PXP", history: [1, 2, 3].map((n) => ({ password: `Mock-Old-${i}-${n}`, changedAt: "2026-01-01" })), passwordChangedAt: "2026-09-26" };
   if (kind === "note") return { ...base, kind, body: "Mock body. ".repeat(50) };
-  if (kind === "payee") return { ...base, kind, who: "Mock Tita", provider: "GCash", number: "09171234567", confirmedAt: "2026-09-26" };
+  if (kind === "thing") return { ...base, kind, room: "Mock room", spot: "Mock drawer", grab: 2 };
   return { ...base, kind, type: "router", model: "Mock AX10", adminPassword: "mock-admin", ssid: "Mock_Home", wifiPassword: "mock-wifi" };
 }
 
@@ -59,7 +60,7 @@ for (let d = 0; d < DELETED; d++) {
 }
 
 const { sync, ...withoutSync } = data;
-const { key, kdf, salt } = await createKey("mock size check pass phrase");
+const { key, kdf, salt } = await createKey("mock size check pass phrase orbit gazelle");
 const fileBytes = (plain) => Buffer.byteLength(JSON.stringify(encryptWithKey(key, kdf, salt, plain)));
 const syncBytes = Buffer.byteLength(JSON.stringify(sync));
 const withFile = fileBytes(data);

@@ -10,7 +10,7 @@ import { parseTotp } from "./totp.js";
 /** @typedef {{ id: string, name: string, kind: string }} Space "personal" (one per vault) or "client" */
 /** @typedef {{ spaces: Space[], entries: Entry[], [field: string]: any }} VaultData */
 
-export const KINDS = ["login", "link", "note", "key", "payee", "thing", "device", "id"];
+export const KINDS = ["login", "link", "note", "key", "thing", "device", "id"];
 export const LINK_TYPES = ["web", "drive", "folder", "doc"];
 export const SIGN_IN = ["password", "google", "microsoft", "apple", "github", "facebook", "email-link", "sso"];
 export const GRAB = [1, 2, 3]; // a thing in a hurry: 1 grab first, 2 if there is time, 3 leave it
@@ -25,6 +25,12 @@ export function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+// A key secret, trimmed, but one final newline stays when it had one: OpenSSH can refuse a private key without it.
+function trimKeepingFinalNewline(text) {
+  const body = text.trim();
+  return body && /\n\s*$/.test(text) ? `${body}\n` : body;
+}
+
 // When an API key or a thing (a passport, a license) runs out: a real YYYY-MM-DD, or none. stored: the
 // saved value, let through unchanged (an older import let in days like 2026-02-31).
 function cleanExpiry(value, stored) {
@@ -37,24 +43,6 @@ function cleanExpiry(value, stored) {
 function passwordAge(entry) {
   if (entry.kind !== "login" || !entry.password) return undefined;
   return entry.passwordChangedAt ?? entry.updatedAt;
-}
-
-/**
- * A payee's number as it is saved, never refused: separators people paste ("0917 123-4567", "(02) 8123
- * 4567") go, and +63 before a mobile number becomes the 0 it is dialled with here. A bare "917..." is
- * left alone: a bank account can start with 9. The payee form compares with it to know when a confirmed
- * number really changed.
- * @param {unknown} value @returns {string}
- */
-export function cleanPayeeNumber(value) {
-  return cleanText(value).replace(/[\s().-]/g, "").replace(/^\+?63(?=9\d{9}$)/, "0");
-}
-
-// cleanPayeeNumber, refused unless it is 7 to 20 digits.
-function payeeNumber(value) {
-  const number = cleanPayeeNumber(value);
-  if (!/^\d{7,20}$/.test(number)) throw new Error("Account number must be 7 to 20 digits");
-  return number;
 }
 
 // Security questions from the form: [{ question, answer?, from? }]. An answer left undefined is the
@@ -90,9 +78,23 @@ export function findEntry(data, id) {
   return entry;
 }
 
-// A closed account's tombstone is read only: nothing about it changes except deleting it.
+// In the Trash (trash.js): `trashedAt` is a UTC timestamp. Defined here so entries.js needs nothing from trash.js.
+/** @param {Record<string, any>} entry */
+export const isTrashed = (entry) => typeof entry?.trashedAt === "string" && entry.trashedAt !== "";
+
+// An item in the Trash gives up no secret, copy, code or link (both apps read secrets through this, and
+// the phone's autofill reads a login's password that way, so a trashed login is never filled).
+export function findLiveEntry(data, id) {
+  const entry = findEntry(data, id);
+  if (isTrashed(entry)) throw new Error("This item is in the Trash. Restore it first");
+  return entry;
+}
+
+// A closed account's tombstone is read only: nothing about it changes except deleting it. An item in
+// the Trash is read only too until it is restored.
 function refuseGone(entry) {
   if (entry.lifecycle?.state === "gone") throw new Error("This account is closed and read only");
+  if (isTrashed(entry)) throw new Error("This item is in the Trash. Restore it first");
   return entry;
 }
 
@@ -106,7 +108,7 @@ export function liveLogin(data, id, notLogin) {
 
 // A login another login signs in through (an OAuth account): saved, open, not itself.
 function liveLoginId(data, id, selfId) {
-  return data.entries.some((e) => e.id === id && e.kind === "login" && e.id !== selfId && e.lifecycle?.state !== "gone") ? id : undefined;
+  return data.entries.some((e) => e.id === id && e.kind === "login" && e.id !== selfId && e.lifecycle?.state !== "gone" && !isTrashed(e)) ? id : undefined;
 }
 
 // A device's label photo or an ID's: left undefined, the stored one stays.
@@ -142,19 +144,9 @@ const KIND_FIELDS = {
     return { ...base, kind: "note", body };
   },
   key(input, same, base) {
-    const secret = typeof input.secret === "string" ? input.secret.trim() : (same?.secret ?? "");
+    // One final newline is kept: OpenSSH can refuse a pasted private key that ends without it.
+    const secret = typeof input.secret === "string" ? trimKeepingFinalNewline(input.secret) : (same?.secret ?? "");
     return { ...base, kind: "key", keyId: cleanText(input.keyId), secret, url: cleanText(input.url), expires: cleanExpiry(input.expires, same?.expires) };
-  },
-  payee(input, same, base) {
-    const who = cleanText(input.who);
-    const provider = cleanText(input.provider);
-    if (!who) throw new Error("Payee needs a name");
-    if (!provider) throw new Error("Payee needs a provider");
-    const number = payeeNumber(input.number);
-    // A call confirmed one number: a changed number starts unconfirmed.
-    const confirmedAt = same?.number === number ? same.confirmedAt : undefined;
-    // No brand: a payee's logo is always its provider's, even if an import file names another.
-    return { ...base, brand: undefined, kind: "payee", who, relation: cleanText(input.relation) || undefined, provider, number, accountName: cleanText(input.accountName) || undefined, confirmedAt };
   },
   // Where a physical thing is kept (a passport, a land title), for the day you have to leave fast.
   thing(input, same, base) {
@@ -257,22 +249,11 @@ export function moveEntry(data, id, spaceId) {
   data.entries = data.entries.map((e) => (e.id === id ? { ...e, spaceId, updatedAt: today(), passwordChangedAt: passwordAge(e) } : e));
 }
 
-// "Mark confirmed today" after a real phone call. The date comes from this device's clock, not the page.
-// number: the one on screen when the call was made. A pane left open while the number was changed
-// elsewhere must not confirm a number nobody called.
-/** @param {VaultData} data @param {string} id @param {string} number */
-export function confirmPayee(data, id, number) {
-  const entry = findEntry(data, id);
-  if (entry.kind !== "payee") throw new Error("Not a payee");
-  if (entry.number !== number) throw new Error("The number changed. Check it again before confirming");
-  data.entries = data.entries.map((e) => (e.id === id ? { ...e, confirmedAt: today() } : e));
-}
-
 // Using an item (copy, open) feeds "Recently used". False when there is nothing to note: a tombstone
 // keeps only what it was closed with (copying its username is not a use).
 /** @param {VaultData} data @param {string} id @returns {boolean} */
 export function touchEntry(data, id) {
-  if (!data.entries.some((e) => e.id === id && e.lifecycle?.state !== "gone")) return false;
+  if (!data.entries.some((e) => e.id === id && e.lifecycle?.state !== "gone" && !isTrashed(e))) return false;
   data.entries = data.entries.map((e) => (e.id === id ? { ...e, lastUsedAt: Date.now() } : e));
   return true;
 }

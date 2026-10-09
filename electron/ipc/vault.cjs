@@ -1,12 +1,11 @@
 // The vault itself: status, create / unlock / lock, items and their secrets, copying, opening an
 // item, the master password, 2FA scans, import, and Scan a label.
-const path = require("node:path");
 const { desktopCapturer, dialog, screen, shell } = require("electron");
 const { ratePassword, parseTotp, parseLabel } = require("../../core/index.js");
 const { revealTarget, isNetworkPath } = require("../file-access.cjs");
 const { scanScreens } = require("../qr-scan.cjs");
 const { readLabelText } = require("../label-ocr.cjs");
-const { readImportFile, shredFile } = require("../import-file.cjs");
+const { importPicked } = require("../import-file.cjs");
 
 const SECRET_FIELDS = ["password", "body", "secret", "history", "code", "answer", "adminPassword", "wifiPassword", "photo", "idNumber"];
 const secretArgs = (id, field, index) => {
@@ -80,9 +79,12 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
     changed(result.vault);
     return result;
   });
+  // Delete = move to the Trash (restore, delete now and empty are the Trash view's).
   handle("vault:deleteEntry", (id) => changed(vault.deleteEntry(String(id))));
+  handle("vault:restoreEntry", (id) => changed(vault.restoreEntry(String(id))));
+  handle("vault:deleteForever", (id) => changed(vault.deleteForever(String(id))));
+  handle("vault:emptyTrash", () => changed(vault.emptyTrash()));
   handle("vault:toggleFavorite", (id) => changed(vault.toggleFavorite(String(id))));
-  handle("vault:confirmPayee", (id, number) => changed(vault.confirmPayee(String(id), String(number))));
   // Backup codes: the codes come to the page only through vault:recoveryCodes (reveal) and
   // copySecret(id, "code", index); everything else sends counts.
   handle("vault:recoveryCodes", (id) => vault.getRecoveryCodes(String(id)));
@@ -102,6 +104,17 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
   handle("vault:renameSpace", (id, name) => changed(vault.renameSpace(String(id), String(name))));
   handle("vault:deleteSpace", (id, moveToId) => changed(vault.deleteSpace(String(id), moveToId ? String(moveToId) : null)));
   handle("vault:clearHistory", (id) => changed(vault.clearHistory(String(id))));
+  // Generated passwords: the page sends a value once, as it leaves the generator (main checks it), and
+  // gets the times back; one value comes out by its place in that list, like a login's old passwords.
+  handle("vault:recordGenerated", (value) => vault.recordGenerated(value));
+  handle("vault:generatedList", () => vault.generatedList());
+  handle("vault:getGenerated", (index) => vault.getGenerated(Number(index)));
+  handle("vault:copyGenerated", async (index) => {
+    const value = vault.getGenerated(Number(index));
+    if (!value) throw new Error("Nothing to copy");
+    await clip.copyWithAutoClear(value);
+  });
+  handle("vault:clearGenerated", () => vault.clearGenerated());
   handle("vault:getPassword", (id) => vault.getPassword(String(id)));
   handle("vault:copyPassword", async (id) => {
     await clip.copyWithAutoClear(vault.getPassword(String(id)));
@@ -132,7 +145,8 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
     return { score, label };
   });
   handle("vault:copyText", async (text, id) => {
-    await clip.writeClipboard(String(text));
+    // Usernames, account numbers, serials: identifiers clear like a password, so a bank number does not stay on the clipboard.
+    await clip.copyWithAutoClear(String(text));
     used(id);
   });
   handle("vault:openEntry", async (id) => {
@@ -143,7 +157,10 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
   handle("vault:changeMaster", (current, next) => sync.exclusive("master", () => changeMaster(current, next)));
   async function changeMaster(current, next) {
     const result = await throttledUnlock(() => vault.changeMaster(String(current), String(next))); // it tests the current password
-    if (result.ok) setLastMasterAt(Date.now());
+    if (result.ok) {
+      setLastMasterAt(Date.now());
+      changed(vault.publicView()); // the page drops the "master is easy to guess" issue
+    }
     if (result.ok && biometric.status().enabled) {
       await biometricKeyChanged();
       return { ...result, biometricOff: true };
@@ -176,30 +193,17 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
   });
 
   // Import: the file is picked in a native dialog (the page never names a path), added in one
-  // all-or-nothing write, then deleted - it holds passwords in plain text.
+  // all-or-nothing write, then deleted when every row is accounted for (import-file.cjs importPicked).
   handle("vault:import", async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog(windows.main(), {
       title: "Import into KAPEVault",
-      filters: [{ name: "KAPEVault import", extensions: ["json"] }],
+      filters: [{ name: "Password export or KAPEVault import", extensions: ["json", "csv"] }],
       properties: ["openFile", "dontAddToRecent"],
     });
     if (canceled || !filePaths[0]) return { ok: false, canceled: true };
-    let picked;
-    try {
-      picked = readImportFile(filePaths[0]); // import-file.cjs: real path, size cap, format and version
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-    let result;
-    try {
-      result = vault.importEntries(picked.entries);
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-    changed(result.vault);
-    // The import is saved either way; a failed delete (file open in an editor) is reported, not fatal.
-    const deleted = shredFile(picked.file);
-    return { ok: true, added: result.added, skipped: result.skipped, vault: result.vault, deleted, name: path.basename(picked.file) };
+    const result = importPicked(filePaths[0], vault);
+    if (result.ok) changed(result.vault);
+    return result;
   });
 
   // "Scan a label": Windows reads the sticker photo offline and main turns the text into suggested

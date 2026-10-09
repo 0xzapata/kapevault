@@ -4,13 +4,13 @@ export interface BrandTerms {
   match: string[];
 }
 
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // "dropbox.com" must not light up X ("x.com"), "olive.com" must not be Microsoft ("live.com").
 // Domain/path terms need a boundary before them; ".docx"-style extensions need one after;
 // plain words ("slack", "ghl") must be whole words.
 function termTest(term: string): (text: string) => boolean {
-  const t = escape(term);
+  const t = escapeRegex(term);
   let pattern: string;
   if (term.startsWith(".")) pattern = `${t}($|[^a-z0-9])`;
   else if (/[./]/.test(term)) pattern = `(^|[^a-z0-9-])${t}`;

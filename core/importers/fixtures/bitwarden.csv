@@ -1,0 +1,5 @@
+folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
+Mock Work,1,login,Mock Mail,"line one
+line two",pin: 4321,0,https://mail.example.com,mock.user@example.com,"mock,pass""1",JBSWY3DPEHPK3PXP
+,0,note,Mock Wifi note,router code 1234,,0,,,,
+,0,login,Mock Mail,,,0,https://mail.example.com,second.user@example.com,mock-pass-2,

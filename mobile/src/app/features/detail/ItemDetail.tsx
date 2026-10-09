@@ -8,9 +8,9 @@ import { useBackLayer } from "../../hooks/use-back-layer";
 import { formatDay, relativeTime } from "../../lib/format";
 import { isGone, kindLabel } from "../../lib/entries";
 import { ActionDock } from "./ActionDock";
-import { ConflictBanner, IssueBanner, PayeeConfirmation } from "./banners";
+import { ConflictBanner, IssueBanner } from "./banners";
 import { BackupCodesCard, IdPhotoCard, PasswordHistory } from "./extras";
-import { DeviceRows, IdRows, KeyRows, LinkRow, LoginRows, NoteRow, PayeeRows, ThingRows } from "./rows";
+import { DeviceRows, IdRows, KeyRows, LinkRow, LoginRows, NoteRow, ThingRows } from "./rows";
 import type { ConflictCopy, Entry, Space } from "../../host/types";
 
 interface ItemDetailProps {
@@ -99,13 +99,11 @@ function Body({ entry, entries, spaces, conflict, onEdit, onOpenItem, onBack }: 
       <div className="mt-9">
         {conflict && <ConflictBanner conflict={conflict} onOpen={onOpenItem} onDeleted={onBack} />}
         <IssueBanner entry={entry} onEdit={onEdit} />
-        {entry.kind === "payee" && <PayeeConfirmation key={entry.id} entry={entry} />}
         <Card>
           {entry.kind === "login" && <LoginRows entry={entry} entries={entries} onGoTo={onOpenItem} />}
           {entry.kind === "key" && <KeyRows entry={entry} />}
           {entry.kind === "note" && <NoteRow entry={entry} />}
           {entry.kind === "link" && <LinkRow entry={entry} />}
-          {entry.kind === "payee" && <PayeeRows entry={entry} />}
           {entry.kind === "thing" && <ThingRows entry={entry} />}
           {entry.kind === "device" && <DeviceRows entry={entry} />}
           {entry.kind === "id" && <IdRows entry={entry} />}

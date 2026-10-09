@@ -1,4 +1,4 @@
-import { plural } from "../../../lib/local-date.ts";
+import { plural } from "../../../../core/index.js";
 import type { EntryKind, Issue } from "../types";
 
 // Months or years read better than "400 days" once a password is past a year old.

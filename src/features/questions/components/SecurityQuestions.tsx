@@ -19,6 +19,7 @@ export function SecurityQuestions({ entry }: { entry: LoginEntry }) {
         <p className="px-4 pb-1 pt-3.5 text-[14px] font-medium @md:px-5">Security questions</p>
         <ol>
           {entry.questions.map((q, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: questions are addressed by position (the main process takes the index) and the list is replaced whole after an edit
             <QuestionRow key={i} entryId={entry.id} question={q} index={i} onHotline={() => setHotline(i)} />
           ))}
         </ol>

@@ -46,7 +46,13 @@ export function ConfirmDelete({ label = "Delete", password, onConfirm }: Confirm
 
   if (!confirming) {
     return (
-      <button type="button" autoFocus={asked} className={quietDanger} onClick={() => setConfirming(true)}>
+      <button
+        type="button"
+        // biome-ignore lint/a11y/noAutofocus: after Cancel the quiet Delete takes back the focus its confirm step had
+        autoFocus={asked}
+        className={quietDanger}
+        onClick={() => setConfirming(true)}
+      >
         {label}
       </button>
     );

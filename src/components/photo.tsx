@@ -43,10 +43,13 @@ export function PhotoViewer({ photo, label, onClose }: { photo: string; label: s
   };
 
   return createPortal(
+    // biome-ignore lint/a11y/noStaticElementInteractions: the scrim is a mouse shortcut for closing the photo; Escape and the Close photo button are the keyboard way out
     <div data-closing={closing || undefined} className="scrim fixed inset-0 z-[60] grid place-items-center bg-scrim px-4 pb-4 pt-[60px]" onMouseDown={close} onDragOver={swallow} onDrop={swallow}>
       <div {...modal} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} className="sheet relative outline-none">
         <img src={photo} alt={label} draggable={false} className="max-h-[calc(100dvh-84px)] max-w-[calc(100vw-32px)] rounded-[16px] bg-paper object-contain shadow-sheet" />
         <button
+          type="button"
+          // biome-ignore lint/a11y/noAutofocus: a modal opens with the focus on its Close button
           autoFocus
           onClick={close}
           aria-label="Close photo"
@@ -77,6 +80,7 @@ export function PhotoThumb({ photo, label, autoFocus }: { photo: string | null; 
     <>
       <button
         type="button"
+        // biome-ignore lint/a11y/noAutofocus: the thumbnail takes the focus when the photo has just been revealed
         autoFocus={autoFocus}
         onClick={() => setViewing(true)}
         aria-label={`Show the ${label.toLowerCase()} larger`}
@@ -198,6 +202,7 @@ export function SecretPhoto({ entry, label }: { entry: { id: string; hasPhoto: b
       <div className="mb-2 flex items-center justify-between px-1">
         <h3 className="text-[12.5px] font-semibold text-ink-3">{label}</h3>
         <button
+          type="button"
           onClick={toggle}
           aria-expanded={photo !== null}
           className="press flex h-7 items-center gap-1.5 rounded-full bg-field px-3 text-[12.5px] font-semibold text-ink transition-colors hover:bg-line focus-ring"
@@ -211,7 +216,7 @@ export function SecretPhoto({ entry, label }: { entry: { id: string; hasPhoto: b
           <ImageSquare size={28} />
         </div>
       ) : (
-        <button onClick={() => setViewing(true)} aria-label={`Show the ${label.toLowerCase()} larger`} className="press block cursor-zoom-in overflow-hidden rounded-2xl border border-line bg-paper shadow-card focus-ring">
+        <button type="button" onClick={() => setViewing(true)} aria-label={`Show the ${label.toLowerCase()} larger`} className="press block cursor-zoom-in overflow-hidden rounded-2xl border border-line bg-paper shadow-card focus-ring">
           <img src={photo} alt={label} draggable={false} className="swap-in block max-h-48 max-w-full" />
         </button>
       )}

@@ -77,3 +77,18 @@ test("the real Windows OCR script runs and answers for a blank photo", { skip: p
   const result = await readLabelText(png);
   assert.ok(result.status === "unavailable" || (result.status === "ok" && result.text === ""), JSON.stringify(result));
 });
+
+test("Constrained Language Mode: the script answers Unavailable, so the form lets the user type", { skip: process.platform !== "win32" && "Windows only" }, async () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const { execFile } = require("node:child_process");
+  const { powershellPath, psInvocation } = systemTools;
+  // 5.1 ignores __PSLockdownPolicy on one process; a session can still lower its own language mode.
+  const script = `$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'\n${fs.readFileSync(path.join(__dirname, "label-ocr.ps1"), "utf8").replace(/^﻿/, "")}`;
+  const { args, input } = psInvocation(script, "bW9jay1waG90bw=="); // a photo on stdin: the encoded form
+  const answer = await new Promise((resolve) => {
+    const child = execFile(powershellPath(), args, { windowsHide: true, timeout: 60_000, encoding: "utf8" }, (_err, stdout) => resolve(String(stdout).trim().split(/\r?\n/).filter((l) => l.startsWith("{")).pop()));
+    child.stdin.end(input);
+  });
+  assert.deepEqual(JSON.parse(answer ?? "{}"), { status: "Unavailable" });
+});

@@ -17,7 +17,6 @@ import { TitleBar } from "@/components/TitleBar";
 import { Menu, useMenu } from "@/components/Menu";
 import { barPill } from "@/components/buttons";
 import { FolderBrowser } from "@/features/files/components/FolderBrowser";
-import { PayeeConfirmation, PayeeRows } from "@/features/payee/components/PayeeDetail";
 import { ThingRows } from "@/features/things/components/ThingRows";
 import { DeviceRows, ScanPrompt } from "@/features/devices/components/DeviceDetail";
 import { SecretPhoto } from "@/components/photo";
@@ -61,6 +60,7 @@ export function EntryDetail({ entry, entries, spaces, mode, onBack, onEdit, onRe
 
   const backButton = compact && onBack && (
     <button
+      type="button"
       onClick={onBack}
       aria-label="Back to list"
       title="Back to list"
@@ -118,6 +118,7 @@ export function EntryDetail({ entry, entries, spaces, mode, onBack, onEdit, onRe
           <div className="flex-1" />
           {entry.kind === "login" && !entry.lifecycle && (
             <button
+              type="button"
               ref={moreRef}
               aria-label="More actions"
               title="More actions"
@@ -133,6 +134,7 @@ export function EntryDetail({ entry, entries, spaces, mode, onBack, onEdit, onRe
                 <Star size={18} weight={entry.favorite ? "fill" : "regular"} className={entry.favorite ? "text-sys-orange" : ""} />
               </IconButton>
               <button
+                type="button"
                 onClick={onEdit}
                 aria-label="Edit"
                 data-focus-key={`edit-${id}`} // a save remounts this pane: the closing form finds the new Edit by it
@@ -167,7 +169,6 @@ export function EntryDetail({ entry, entries, spaces, mode, onBack, onEdit, onRe
           <div className="mt-9">
             {entry.kind === "login" && <ClosingStatus entry={entry} onSheet={setCloseSheet} />}
             <IssueBanner entry={entry} onOpen={open} onEdit={onEdit} onReplaceCodes={() => setReplaceCodes((n) => n + 1)} />
-            {entry.kind === "payee" && <PayeeConfirmation entry={entry} />}
             {gone && entry.kind === "login" && <TombstoneCard entry={entry} />}
             {!gone && entry.kind === "note" && <NoteCard entry={entry} />}
             {entry.kind === "device" && <ScanPrompt entry={entry} onScan={onScan} />}
@@ -175,7 +176,6 @@ export function EntryDetail({ entry, entries, spaces, mode, onBack, onEdit, onRe
               <Card>
                 {entry.kind === "login" && <LoginRows entry={entry} entries={entries} copyText={copyText} openButton={openButton} copyLink={copyLink} onReveal={onReveal} />}
                 {entry.kind === "key" && <KeyRows entry={entry} copyText={copyText} openButton={openButton} copyLink={copyLink} />}
-                {entry.kind === "payee" && <PayeeRows entry={entry} />}
                 {entry.kind === "thing" && <ThingRows entry={entry} />}
                 {entry.kind === "device" && <DeviceRows entry={entry} openButton={openButton} copyLink={copyLink} />}
                 {entry.kind === "id" && <IdRows entry={entry} />}
@@ -201,7 +201,7 @@ export function EntryDetail({ entry, entries, spaces, mode, onBack, onEdit, onRe
           {/* A local folder opens right here as a browsable grid; web links just open in the browser. */}
           {entry.kind === "link" && entry.linkType === "folder" && isLocalPath(entry.location) &&
             (isNetworkPath(entry.location) && !showNetwork ? (
-              <button onClick={() => setShowNetwork(true)} className="press mt-5 flex h-9 items-center gap-2 rounded-full bg-raised px-4 text-[13px] font-semibold text-accent shadow-tile hover:bg-hover focus-ring">
+              <button type="button" onClick={() => setShowNetwork(true)} className="press mt-5 flex h-9 items-center gap-2 rounded-full bg-raised px-4 text-[13px] font-semibold text-accent shadow-tile hover:bg-hover focus-ring">
                 Show files from this network folder
               </button>
             ) : (

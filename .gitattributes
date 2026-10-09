@@ -1,0 +1,3 @@
+# Frozen bytes: the golden vault files are read back byte for byte, so git must never change their line endings.
+core/fixtures/*.kapevault -text
+core/fixtures/*.bovault -text

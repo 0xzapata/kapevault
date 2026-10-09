@@ -40,7 +40,11 @@ export function TrustSheet({ onClose }: { onClose: () => void }) {
           <div className="mt-6 space-y-5">
             <Point icon={<HardDrives size={17} weight="bold" />} title={`Everything stays on this ${DEVICE}`}>
               <p>Your vault is one encrypted file on this {DEVICE}. KAPEVault has no analytics, no tracking and no ads, and it never sends your data anywhere.</p>
-              <p>It only goes online when you open a link yourself, or when you switch on cloud backup to your own bucket.</p>
+              <p>It only goes online when you open a link yourself, when you switch on cloud backup to your own bucket, or when you switch on Check for updates.</p>
+              <p>
+                Check for updates (Settings, General) is off until you turn it on. Then, once a day, it asks api.github.com whether a newer KAPEVault is out. The
+                request carries only the app's name and version - nothing from your vault - and GitHub sees your internet address, as any website does.
+              </p>
             </Point>
 
             <Point icon={<LockKey size={17} weight="bold" />} title="Locked with your master password">
@@ -53,8 +57,8 @@ export function TrustSheet({ onClose }: { onClose: () => void }) {
 
             <Point icon={<EyeSlash size={17} weight="bold" />} title="Shown only when you ask">
               <p>
-                Passwords, 2FA keys, backup codes, security answers, notes, API secrets, a device's passwords and label photo, and an ID's number and photo stay hidden until you show
-                or copy one. A printout (Emergency Kit, Hand back) holds them only if you tick the box. Read aloud uses a voice on this {DEVICE}, and Scan a
+                Passwords, 2FA keys, backup codes, security answers, notes, API secrets, a device's passwords and label photo, an ID's number and photo, and the recent passwords from the generator
+                (kept 90 days, in the vault) stay hidden until you show or copy one. A printout (Emergency Kit, Hand back) holds them only if you tick the box. Read aloud uses a voice on this {DEVICE}, and Scan a
                 label reads the photo right here, offline.
               </p>
               <p>
@@ -106,8 +110,8 @@ export function TrustSheet({ onClose }: { onClose: () => void }) {
                   Windows enforces it, not just a promise. Test shows it working.
                 </p>
                 <p>
-                  Cloud backup and sync still work: a tool built into Windows carries the encrypted files up and down, never your R2 secret key. Links still
-                  open in your browser.
+                  Cloud backup and sync still work: a tool built into Windows carries the encrypted files up and down, never your R2 secret key. The update
+                  check, if you turned it on, goes the same way. Links still open in your browser.
                 </p>
               </Point>
             )}
@@ -129,7 +133,7 @@ export function TrustSheet({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="mt-7 flex justify-end">
-            <button onClick={close} className="press h-9 rounded-full bg-field px-5 text-[13.5px] font-medium text-ink hover:bg-line">
+            <button type="button" onClick={close} className="press h-9 rounded-full bg-field px-5 text-[13.5px] font-medium text-ink hover:bg-line">
               Done
             </button>
           </div>

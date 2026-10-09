@@ -16,7 +16,7 @@ test("a vault KAPEVault wrote comes back unchanged", () => {
       { id: "e3", kind: "id", spaceId: "personal", title: "Mock ID", idType: "Passport", idNumber: "P123", photo: JPEG },
       { id: "e4", kind: "thing", spaceId: "personal", title: "Mock box", spot: "Closet", grab: 1 },
     ],
-    { sync: { v: 1 }, cloud: { endpoint: "https://x.r2.cloudflarestorage.com" }, keySalt: "c2FsdA==" },
+    { sync: { v: 1 }, cloud: { endpoint: "https://x.r2.cloudflarestorage.com", bucket: "vault-backups", accessKeyId: "k", secretAccessKey: "s", auto: true }, keySalt: "c2FsdA==" },
   );
   assert.deepEqual(cleanVault(structuredClone(good)), good);
 });
@@ -109,4 +109,19 @@ test("an edit that leaves a newer version's value as it was keeps it", async () 
   for (const e of structuredClone(data.entries)) upsertEntry(data, { ...e, title: "Renamed" });
   assert.deepEqual(data.entries.map((e) => [e.signIn ?? e.linkType ?? e.grab ?? e.type]), [["passkey"], ["vault"], [4], ["printer"]]);
   assert.throws(() => upsertEntry(data, { id: "t", kind: "thing", spaceId: "personal", title: "Mock", spot: "Drawer", grab: 5 }), /Grab must be/);
+});
+
+test("a cloud block that does not point at an R2 bucket is dropped, so a hostile backup cannot redirect the uploads", () => {
+  const cloud = { endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "vault-backups", accessKeyId: "k", secretAccessKey: "s", auto: true };
+  assert.deepEqual(cleanVault(vault([], { cloud })).cloud, cloud);
+  for (const bad of [
+    { ...cloud, endpoint: "https://evil.example" },
+    { ...cloud, endpoint: "http://0123abcd.r2.cloudflarestorage.com" },
+    { ...cloud, endpoint: "https://0123abcd.r2.cloudflarestorage.com.evil.example" },
+    { ...cloud, bucket: "../x" },
+    { ...cloud, accessKeyId: 5 },
+    { ...cloud, secretAccessKey: undefined },
+    "https://evil.example",
+  ]) assert.equal("cloud" in cleanVault(vault([], { cloud: bad })), false, JSON.stringify(bad));
+  assert.equal("cloud" in cleanVault(vault([])), false, "no cloud stays no cloud");
 });

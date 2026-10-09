@@ -2,16 +2,16 @@
 // (preview first), reveal the grid, tick one used, copy one, paper copies, the Security issue with
 // its Replace action, and a new set flagging the old printout. Part of npm run e2e. Throwaway vault,
 // mock names only, made-up codes. Page screenshots (light + dark) in %TEMP%\kapevault-e2e-v2.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createHarness, shows, gone, clip, waitFor } = require("./e2e-harness.cjs");
 
 const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
 fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-codes-"));
 const { check, launch, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
+const MASTER = "mock kettle harbor pass orbit gazelle";
 const GOOGLE = ["1234 5678", "2345 6789", "3456 7890", "4567 8901", "5678 9012", "6789 0123", "7890 1234", "8901 2345", "9012 3456", "0123 4567"];
 const GOOGLE_BLOCK = ["SAVE YOUR BACKUP CODES", "mock.user@example.com", "", ...GOOGLE.map((c, i) => `${i + 1}. ${c}`), "", "* You can only use each backup code once."].join("\n");
 const GITHUB = ["a1b2c-3d4e5", "f6a7b-8c9d0", "0e1f2-a3b4c", "5d6e7-f8a9b"];

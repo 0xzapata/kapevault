@@ -1,0 +1,121 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "src/**",
+      "core/**",
+      "electron/**",
+      "scripts/**",
+      "mobile/src/**",
+      "mobile/scripts/**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/fixtures",
+      "!mobile/android",
+      "!mobile/src/app/features/autofill/public-suffixes.ts",
+      "!**/*.svg",
+      "!**/*.html",
+      "!**/*.css"
+    ]
+  },
+  // Linter only. The formatter stays off so no commit reformats the codebase.
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    // The recommended rule set is on by default. A rule that is not "error" below is off for one reason
+    // stated beside it; a single deliberate line is silenced in place with a biome-ignore that says why.
+    "rules": {
+      "a11y": {
+        // A button without a type submits the form it sits in: the bug this rule exists to catch.
+        "useButtonType": "error",
+        "noAutofocus": "error",
+        "noSvgWithoutTitle": "error",
+        "noStaticElementInteractions": "error",
+        "useKeyWithClickEvents": "error",
+        "useSemanticElements": "error",
+        "noNoninteractiveElementToInteractiveRole": "error",
+        "noNoninteractiveTabindex": "error",
+        "useFocusableInteractive": "error",
+        "useAriaPropsSupportedByRole": "error",
+        "useMediaCaption": "error",
+        "noAmbiguousAnchorText": "error",
+        "useValidAnchor": "error",
+        // The inputs the app's own form components render, so a label around one counts as bound.
+        "noLabelWithoutControl": {
+          "level": "error",
+          "options": { "inputComponents": ["TextInput", "TextArea", "Select", "Switch"] }
+        }
+      },
+      "style": {
+        "useTemplate": "error",
+        "useNodejsImportProtocol": "error",
+        "noNonNullAssertion": "error"
+      },
+      "complexity": {
+        "noCommaOperator": "error",
+        "useOptionalChain": "error"
+      },
+      "correctness": {
+        // Effect dependency lists name deliberate triggers; "fixing" them changes when effects run. 11 effects
+        // would be flagged: audit each one on its own before this goes on.
+        "useExhaustiveDependencies": "off",
+        "noConstantCondition": "error"
+      },
+      "suspicious": {
+        "noAssignInExpressions": "error",
+        "useIterableCallbackReturn": "error",
+        "noArrayIndexKey": "error",
+        "noExplicitAny": "error",
+        "noControlCharactersInRegex": "error",
+        "noShadowRestrictedNames": "error",
+        // Object.hasOwn needs lib ES2022; the desktop app compiles against ES2020, so
+        // Object.prototype.hasOwnProperty.call stays (3 sites in src/).
+        "noPrototypeBuiltins": "off",
+        // tsc strict infers `let x; try { x = await ... }` from the assignments, so the rule adds nothing here.
+        "noImplicitAnyLet": "off"
+      }
+    }
+  },
+  // Paths other agents are editing in this pre-release round keep the style rules off until it merges, so
+  // this pass does not collide with their diffs. Flip each entry off the list once its files are clean;
+  // none of these rules was ever a correctness gap, the sites are terse idioms.
+  "overrides": [
+    {
+      "includes": ["electron/**"],
+      "linter": {
+        "rules": {
+          "complexity": { "noCommaOperator": "off", "useOptionalChain": "off" },
+          "style": { "useTemplate": "off" },
+          "suspicious": { "noAssignInExpressions": "off", "useIterableCallbackReturn": "off", "noControlCharactersInRegex": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["mobile/scripts/**"],
+      "linter": {
+        "rules": {
+          "complexity": { "noCommaOperator": "off" },
+          "correctness": { "noConstantCondition": "off" },
+          "style": { "useNodejsImportProtocol": "off" },
+          "suspicious": { "noAssignInExpressions": "off", "useIterableCallbackReturn": "off", "noShadowRestrictedNames": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["mobile/src/app/host/**"],
+      "linter": {
+        "rules": {
+          "complexity": { "noCommaOperator": "off" },
+          "suspicious": { "noAssignInExpressions": "off", "useIterableCallbackReturn": "off", "noExplicitAny": "off" }
+        }
+      }
+    },
+    { "includes": ["mobile/src/app/hooks/**"], "linter": { "rules": { "complexity": { "useOptionalChain": "off" } } } },
+    { "includes": ["core/import.js", "core/importers/**"], "linter": { "rules": { "suspicious": { "useIterableCallbackReturn": "off" } } } },
+    { "includes": ["scripts/write-version.mjs"], "linter": { "rules": { "style": { "useTemplate": "off" } } } },
+    // The component harness bolts test hooks onto window and fakes a partial window.kapevault.
+    { "includes": ["scripts/component-harness/**"], "linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } } }
+  ]
+}

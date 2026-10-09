@@ -1,6 +1,6 @@
 // The Forever Opener page: pick a vault file, type its master password, read every item. Read only:
-// nothing is stored and nothing leaves the page (its CSP blocks every request). checkOpenerFile and
-// openVault come from opener-crypto.cjs, inlined just above this script by opener.cjs.
+// nothing is stored and nothing leaves the page (its CSP blocks every request). checkOpenerFile, isNewerFile and
+// openVault come from opener-crypto.cjs, inlined just above this script by opener.cjs (after core/scrypt.js).
 
 // Phosphor icons, bold for actions and fill for item tiles - the same set and weights as the app.
 const ICONS = {
@@ -23,6 +23,7 @@ const ICONS = {
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024; // = MAX_VAULT_BYTES (vault-crypto.cjs), the largest vault the app saves
 const MASK = "••••••••";
+const NEWER = "This vault was saved by a newer KAPEVault. Use a newer Opener to open it.";
 const LABELS = {
   lifecycle: "Account status",
   heldFor: "Held for",
@@ -189,6 +190,10 @@ function fieldsOf(entry) {
       entry.history.forEach((h) => add(`Old password, replaced ${/T/.test(h.changedAt) ? new Date(h.changedAt).toLocaleDateString() : h.changedAt}`, h.password, true));
       continue;
     }
+    if (key === "genHistory" && Array.isArray(entry.genHistory)) {
+      for (const g of entry.genHistory) if (typeof g?.value === "string" && g.value) add(`Generated ${/T/.test(g.at) ? new Date(g.at).toLocaleString() : (g.at ?? "")}`.trim(), g.value, true);
+      continue;
+    }
     // Backup codes: the count and paper copies read plainly, every code stays masked until shown.
     if (key === "recoveryCodes" && Array.isArray(entry.recoveryCodes?.codes)) {
       const { codes, setAt, paper } = entry.recoveryCodes;
@@ -236,6 +241,11 @@ function fieldsOf(entry) {
     if (via) add("Signs in through", via.title, false);
   }
   return out;
+}
+
+// The vault's generated passwords (genHistory, a list beside the items) read as one more item, every value masked.
+function generatedItem(data) {
+  return Array.isArray(data.genHistory) && data.genHistory.length ? { id: "generated", kind: "generated", spaceId: "", title: "Generated passwords", genHistory: data.genHistory } : null;
 }
 
 function subtitle(entry) {
@@ -385,11 +395,13 @@ function render() {
 function showVault(data) {
   vault = data;
   const spaces = [...vault.spaces].sort((a, b) => (a.kind === "personal" ? -1 : b.kind === "personal" ? 1 : a.name.localeCompare(b.name)));
+  const generated = generatedItem(vault);
+  const items = generated ? [...vault.entries, generated] : vault.entries;
   $("spaces").replaceChildren(
-    spaceButton("all", "All items", vault.entries.length),
+    spaceButton("all", "All items", items.length),
     ...spaces.map((s) => spaceButton(s.id, s.name, vault.entries.filter((e) => e.spaceId === s.id).length)),
   );
-  rows = [...vault.entries]
+  rows = [...items]
     .sort((a, b) => String(a.title).localeCompare(String(b.title)))
     .map((entry) => {
       const plain = fieldsOf(entry).filter((f) => !f.secret && !f.photo).map((f) => f.value);
@@ -441,7 +453,7 @@ async function pick(file) {
   } catch {
     parsed = null;
   }
-  if (!checkOpenerFile(parsed)) return say("That file is not a KAPEVault vault.");
+  if (!checkOpenerFile(parsed)) return say(isNewerFile(parsed) ? NEWER : "That file is not a KAPEVault vault.");
   picked = { name: file.name, file: parsed };
   $("drop").classList.add("ready");
   $("drop-title").textContent = file.name;
@@ -480,6 +492,7 @@ async function unlock(event) {
   } catch (e) {
     busy(false);
     if (e.message === "Not a KAPEVault vault file") return say("That file is not a KAPEVault vault.");
+    if (e.message === "Newer KAPEVault vault file") return say(NEWER);
     const why = e instanceof RangeError ? "This browser ran out of memory - close other tabs and try again." : "Try another browser.";
     return say(`Could not open the vault here. ${why}`);
   }

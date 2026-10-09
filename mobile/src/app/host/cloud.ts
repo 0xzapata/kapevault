@@ -2,14 +2,16 @@
 // exactly as it sits on disk goes up as a new snapshot under this install's id, a few seconds after a
 // change; each install thins out only its own snapshots. Never plaintext, never a key.
 import { MAX_VAULT_BYTES, SNAPSHOT_PREFIXES, readSnapshotKey, snapshotKey, snapshotsToPrune } from "@core";
+import { snapshotNote } from "./pro";
 import { sha256Hex } from "./sha256";
 import type { Backup } from "./types";
 import type { CloudConfig, R2Client, R2Object } from "./r2";
 import type { Store } from "./storage";
 
 // core/sync/snapshots.js names a snapshot, reads its key (who made it - null before install ids -, its
-// name time, whether it is a restore's undo copy or from before the rename; null for anything else, like
-// the Forever Opener page) and decides which to thin out, the same way on the PC.
+// name time, whether it is a restore's undo copy, a backup-only one (a phone without Pro) or from before
+// the rename; null for anything else, like the Forever Opener page) and decides which to thin out, the
+// same way on the PC.
 export { readSnapshotKey, snapshotKey, snapshotsToPrune };
 
 const PENDING = "backup-pending"; // a backup still owed, noted on disk so a killed app does not forget it
@@ -43,6 +45,7 @@ export interface BackupDeps {
   store: Store;
   installId: () => string;
   config: () => CloudConfig | null; // this phone's R2 setup, null while locked or not set up
+  pro: () => boolean; // KAPEVault Pro: without it every snapshot is backup-only (pro.ts)
   // The vault file as it is on disk, checked to open with the session key (SYNC.md 3.5: never upload a
   // file this device cannot read). Called synchronously first, so a lock right after cannot strand it.
   snapshot: () => () => Promise<string>;
@@ -50,16 +53,17 @@ export interface BackupDeps {
   delayMs: number;
   retryMs: number;
   onListed: (objects: R2Object[]) => void; // every listing, for the devices in the Sync sheet
+  onSettled: () => void; // a backup went up or failed: status() changed
 }
 
 export type Backups = ReturnType<typeof createBackups>;
 
-export function createBackups({ store, installId, config, snapshot, r2For, delayMs, retryMs, onListed }: BackupDeps) {
+export function createBackups({ store, installId, config, pro, snapshot, r2For, delayMs, retryMs, onListed, onSettled }: BackupDeps) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let queue: Promise<unknown> = Promise.resolve();
   let last: { state: "idle" | "ok" | "error"; error?: string } = { state: "idle" };
   let owed: boolean | null = null; // null: not read from disk yet
-  let lastSent = ""; // the hash of the file this run last uploaded
+  let lastSent = ""; // the note and hash of the file this run last uploaded
   let sent: Set<string> | null | undefined; // undefined: not read yet; null: none kept (an older install)
 
   async function sentKeys() {
@@ -94,14 +98,21 @@ export function createBackups({ store, installId, config, snapshot, r2For, delay
     }
   }
 
+  // The note is part of "already up": once Pro is bought, the same file goes up again as a snapshot
+  // the other devices merge.
+  const sentAs = (note: string, bytes: string) => `${note}:${sha256Hex(bytes)}`;
+
+  // The note is read once: a purchase landing during the PUT leaves lastSent naming what went up, so the
+  // next upload still sends the file again under the new name.
   async function upload(target: CloudConfig, bytes: string) {
     const r2 = r2For(target);
     const me = installId();
-    const key = snapshotKey(new Date(), me);
+    const note = snapshotNote(pro());
+    const key = snapshotKey(new Date(), me, note);
     const known = await sentKeys();
     if (known) await keepSent([...known, key]); // before the PUT: a listing meanwhile may show it
     await r2.put(key, bytes);
-    lastSent = sha256Hex(bytes);
+    lastSent = sentAs(note, bytes);
     // Thinning is housekeeping: a failed delete leaves an extra snapshot, never a missing one. Only
     // what this phone sent counts, so objects planted under its id never push real ones out.
     try {
@@ -126,15 +137,17 @@ export function createBackups({ store, installId, config, snapshot, r2For, delay
     const read = snapshot();
     const run = queue.then(async () => {
       const bytes = await read();
-      if (!ifChanged || sha256Hex(bytes) !== lastSent) await upload(target, bytes);
+      if (!ifChanged || sentAs(snapshotNote(pro()), bytes) !== lastSent) await upload(target, bytes);
     });
     const done = run.then(
       () => {
         last = { state: "ok" };
+        onSettled();
         if (queue === done && !timer) void setOwed(false);
       },
-      async (e: Error) => {
-        last = { state: "error", error: e.message };
+      async (e: unknown) => {
+        last = { state: "error", error: (e instanceof Error && e.message) || "The backup did not finish." };
+        onSettled();
         await setOwed(true);
       },
     );

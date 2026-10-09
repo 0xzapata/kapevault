@@ -1,0 +1,4 @@
+"Group","Title","Username","Password","URL","Notes","TOTP","Icon","Last Modified","Created"
+"Root/Email","Mock Mail","mock.user","mock-pass-1","https://mail.example.com","hello","otpauth://totp/Mock%20Mail:mock.user?secret=JBSWY3DPEHPK3PXP&period=30&digits=6&issuer=Mock%20Mail","0","2026-01-01T00:00:00Z","2026-01-01T00:00:00Z"
+"Root","Mock Top","mock.top","mock-pass-2","","","","0","2026-01-01T00:00:00Z","2026-01-01T00:00:00Z"
+"Root/Recycle Bin","Mock Trashed","mock.bin","mock-pass-3","","","","0","2026-01-01T00:00:00Z","2026-01-01T00:00:00Z"

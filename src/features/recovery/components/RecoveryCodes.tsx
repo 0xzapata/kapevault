@@ -85,13 +85,13 @@ export function RecoveryCodes({ entry, replaceSignal }: RecoveryCodesProps) {
             </p>
           </div>
           {set ? (
-            <button onClick={toggleReveal} aria-expanded={codes !== null} aria-controls="backup-codes" className={cardPill}>
+            <button type="button" onClick={toggleReveal} aria-expanded={codes !== null} aria-controls="backup-codes" className={cardPill}>
               {codes ? <EyeSlash size={14} /> : <Eye size={14} />}
               {codes ? "Hide codes" : "Show codes"}
             </button>
           ) : (
             mode !== "paste" && (
-              <button onClick={() => setMode("paste")} className={cardPill}>
+              <button type="button" onClick={() => setMode("paste")} className={cardPill}>
                 Add codes
               </button>
             )
@@ -101,10 +101,12 @@ export function RecoveryCodes({ entry, replaceSignal }: RecoveryCodesProps) {
         {codes && (
           <ol id="backup-codes" aria-label="Codes" className="settle grid grid-cols-1 border-t border-line px-2 py-2 @md:grid-cols-2 @md:px-3">
             {codes.map((c, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: codes and printed copies are addressed by position (the main process takes the index); the list is replaced whole after each change
               <li key={i} className="flex min-h-11 items-center gap-2 rounded-[10px] px-2">
                 <span className="w-5 shrink-0 text-right text-[12px] tabular-nums text-ink-3">{i + 1}</span>
                 <span className={`selectable min-w-0 flex-1 truncate font-mono text-[14px] ${c.used ? "text-ink-3 line-through" : ""}`}>{c.code}</span>
                 <button
+                  type="button"
                   onClick={() => toggleUsed(i)}
                   disabled={busy}
                   aria-pressed={c.used}
@@ -137,6 +139,7 @@ export function RecoveryCodes({ entry, replaceSignal }: RecoveryCodesProps) {
                 {parsed.codes.length > 0 && (
                   <ol aria-label="Codes found" className="flex flex-wrap gap-1.5">
                     {parsed.codes.map((c, i) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: codes and printed copies are addressed by position (the main process takes the index); the list is replaced whole after each change
                       <li key={`${c}-${i}`} className="rounded-[7px] bg-field px-2 py-1 font-mono text-[12.5px] text-ink-2">
                         {c}
                       </li>
@@ -161,6 +164,7 @@ export function RecoveryCodes({ entry, replaceSignal }: RecoveryCodesProps) {
         {set && set.paper.length > 0 && (
           <ul aria-label="Printed copies" className="border-t border-line">
             {set.paper.map((p, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: codes and printed copies are addressed by position (the main process takes the index); the list is replaced whole after each change
               <li key={`${p.where}-${i}`} className="flex min-h-14 items-center gap-3 border-b border-line px-4 py-2 last:border-b-0 @md:px-5">
                 <Printer size={17} className={`shrink-0 ${p.outdatedAt ? "text-warn" : "text-ink-3"}`} />
                 <div className="min-w-0 flex-1">
@@ -173,7 +177,7 @@ export function RecoveryCodes({ entry, replaceSignal }: RecoveryCodesProps) {
                   </p>
                 </div>
                 {p.outdatedAt ? (
-                  <button onClick={() => run(() => vaultApi.removePaperCopy(entry.id, i), "Printed copy removed")} disabled={busy} title="Remove it from the list" className={shredButton}>
+                  <button type="button" onClick={() => run(() => vaultApi.removePaperCopy(entry.id, i), "Printed copy removed")} disabled={busy} title="Remove it from the list" className={shredButton}>
                     Shredded
                   </button>
                 ) : (
@@ -215,10 +219,10 @@ export function RecoveryCodes({ entry, replaceSignal }: RecoveryCodesProps) {
 
         {set && mode === "view" && (
           <div className="flex flex-wrap justify-end gap-1 border-t border-line px-3 py-2">
-            <button onClick={() => setMode("paper")} className={cardQuiet}>
+            <button type="button" onClick={() => setMode("paper")} className={cardQuiet}>
               Add printed copy
             </button>
-            <button onClick={() => setMode("paste")} className={cardQuiet}>
+            <button type="button" onClick={() => setMode("paste")} className={cardQuiet}>
               Replace codes
             </button>
           </div>

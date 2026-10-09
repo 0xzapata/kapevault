@@ -1,0 +1,247 @@
+name: Release
+
+# Builds the Windows installer when a version tag (v0.1.4, ...) is pushed to the PUBLIC repository
+# brewed-ops/kapevault, optionally signs it through SignPath, proves where it came from with a build
+# attestation, and opens a DRAFT GitHub Release with the installer and its SHA-256 file. A person
+# publishes the draft by hand. Steps: RELEASING.md.
+#
+# It only runs in brewed-ops/kapevault. Build attestations (`gh attestation verify`) need a public
+# repository on a free account, so a tag pushed to the private dev repo or to a fork does nothing
+# here rather than produce a release nobody can verify.
+#
+# Three jobs, each with only the permissions it needs. The build job runs npm install scripts and
+# can only read. The attest job can only sign provenance. The release job can only write the draft
+# release. The SignPath secret is used on a tag run only, never on a manual run from a branch.
+#
+# Signing is off until the repo variable SIGNPATH_ORGANIZATION_ID is set (SignPath Foundation
+# approval). Until then the installer is unsigned and the draft release says so.
+# The Android APK is not built here: it is signed with a key that never leaves the owner's PC
+# (RELEASING.md, "Cut an Android release").
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Run by hand from a branch to test the build without making a release. Never signs.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs for one tag would fight over one draft release; never cancel one half way.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: ${{ github.repository == 'brewed-ops/kapevault' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    # Read-only. `actions: read` is what the SignPath action needs to read this run's artifact.
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      signed: ${{ steps.mark.outputs.signed }}
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # electron-builder must never look for a code-signing certificate: none is configured,
+      # and the installer is signed after the build, by SignPath.
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          # The whole history, to prove below that the tag is on main.
+          fetch-depth: 0
+          # Nothing after this needs the token, and npm install scripts run in this job.
+          persist-credentials: false
+
+      # The tag is the release name, so it must be exactly v + the version in package.json, and it
+      # must be a commit of main: a release is only ever built from code that was reviewed there.
+      # Fails in seconds, before anything is built.
+      - name: Check the tag
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ($env:REF_TYPE -ne 'tag') {
+            Write-Host "::notice::Not a tag run (manual run from a branch): builds, but makes no release and does not sign."
+            exit 0
+          }
+          $version = node -p "require('./package.json').version"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if ($env:REF_NAME -ne "v$version") {
+            Write-Host "::error::Tag $($env:REF_NAME) does not match package.json version $version (expected v$version)."
+            exit 1
+          }
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Tag $($env:REF_NAME) is not on main. Tag a commit that is on main."
+            exit 1
+          }
+
+      # Signing needs a tag AND the SignPath organization variable. One answer for every step below.
+      - name: Decide whether to sign
+        id: plan
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          SIGNPATH_ORG: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: |
+          $sign = ($env:REF_TYPE -eq 'tag') -and [bool]$env:SIGNPATH_ORG
+          "sign=$("$sign".ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if (-not $sign) { Write-Host "::notice::Not signing (needs a tag run and the SIGNPATH_ORGANIZATION_ID variable). This installer will be UNSIGNED: Windows SmartScreen shows 'unknown publisher'. See RELEASING.md." }
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Test
+        run: npm test
+
+      # `prebuild` runs scripts/check-node-pin.mjs; `build` is tsc + vite build.
+      - name: Build the app
+        run: npm run build
+
+      # Not `npm run installer`: that also runs checksums.mjs, which has to wait until after
+      # signing (signing changes the file). The output folder is package.json's own
+      # ${env.LOCALAPPDATA}/KAPEVault-build, so check-fuses.mjs and checksums.mjs work unchanged.
+      - name: Build the installer (unsigned)
+        run: npx electron-builder --win --publish never
+
+      - name: Check the fuses in the built exe
+        run: node scripts/check-fuses.mjs
+
+      - name: Stage the unsigned installer
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'KAPEVault-build'
+          "OUT_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $exe = @(Get-ChildItem -Path $dir -Filter 'KAPEVault Setup *.exe' -File)
+          if ($exe.Count -ne 1) { Write-Host "::error::Expected one installer in $dir, found $($exe.Count)."; exit 1 }
+          New-Item -ItemType Directory -Force -Path unsigned | Out-Null
+          Copy-Item -LiteralPath $exe[0].FullName -Destination unsigned/
+
+      # SignPath reads the installer from a GitHub artifact, signs it, and hands the signed file back.
+      - name: Upload the unsigned installer for SignPath
+        id: upload-unsigned
+        if: ${{ steps.plan.outputs.sign == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-unsigned
+          path: unsigned/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Sign with SignPath
+        if: ${{ steps.plan.outputs.sign == 'true' }}
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'kapevault' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          # Empty means the project's default artifact configuration.
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      # Swap the signed installer in over the unsigned one, and refuse anything that is not a
+      # valid signature (a policy that signed nothing, or a wrong file, must not ship as "signed").
+      - name: Use the signed installer
+        id: mark
+        env:
+          SIGN: ${{ steps.plan.outputs.sign }}
+        run: |
+          if ($env:SIGN -ne 'true') {
+            'signed=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+            exit 0
+          }
+          $signed = @(Get-ChildItem -Path signed -Filter 'KAPEVault Setup *.exe' -File -Recurse)
+          if ($signed.Count -ne 1) { Write-Host "::error::Expected one signed installer in signed/, found $($signed.Count)."; exit 1 }
+          $sig = Get-AuthenticodeSignature -LiteralPath $signed[0].FullName
+          if ($sig.Status -ne 'Valid') { Write-Host "::error::Signed installer signature is $($sig.Status), not Valid."; exit 1 }
+          Write-Host "Signed by: $($sig.SignerCertificate.Subject)"
+          Copy-Item -LiteralPath $signed[0].FullName -Destination (Join-Path $env:OUT_DIR $signed[0].Name) -Force
+          'signed=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # After signing, so the hash is of the file users download.
+      - name: Write the SHA-256 file
+        run: node scripts/checksums.mjs
+
+      - name: Stage the release files
+        run: |
+          New-Item -ItemType Directory -Force -Path release-files | Out-Null
+          # The .exe and its .sha256 only (the build folder also holds a blockmap and other files).
+          Copy-Item -Path (Join-Path $env:OUT_DIR 'KAPEVault Setup *.exe') -Destination release-files/
+          Copy-Item -Path (Join-Path $env:OUT_DIR 'KAPEVault Setup *.exe.sha256') -Destination release-files/
+          Get-ChildItem release-files | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-files
+          path: release-files/*
+          if-no-files-found: error
+          retention-days: 14
+
+  # Tag runs only. Signs the build provenance of the installer, for `gh attestation verify`: proof
+  # the file came from this workflow, in this public repo, on this tag. It can sign and read, and
+  # nothing else.
+  attest:
+    needs: build
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # sign the build provenance
+      attestations: write # store it
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: release-files
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-files/*.exe
+
+  # Tag runs only, and the only job that can write to the repo. Makes a DRAFT: nothing is public
+  # until the owner presses Publish. It uploads the same artifact the attest job signed.
+  release:
+    needs: [build, attest]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the draft release and attach files
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-files
+          path: release-files
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          SIGNED: ${{ needs.build.outputs.signed }}
+        run: |
+          if [ "$SIGNED" = "true" ]; then
+            signing="Windows installer signed through SignPath Foundation."
+          else
+            signing="Windows installer is UNSIGNED: Windows SmartScreen will show 'unknown publisher' (More info, then Run anyway). Check the SHA-256 and the build attestation before running it."
+          fi
+          note="$(printf '%s\n\nBuilt by the Release workflow from commit %s (tag %s).\n\nVerify: see RELEASING.md, "Verify a download". In short: compare the SHA-256 with the .sha256 file, and run: gh attestation verify <installer> --repo %s\n' "$signing" "$COMMIT" "$TAG" "$GH_REPO")"
+          gh release create "$TAG" release-files/* \
+            --draft --verify-tag \
+            --title "KAPEVault ${TAG#v}" \
+            --notes "$note"

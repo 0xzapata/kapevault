@@ -1,6 +1,7 @@
 // The top-level `sync` object (SYNC.md 3.1): everything sync knows about a vault, kept beside `spaces`
 // and `entries` so neither changes shape and every old Opener still reads the vault. A `sync` read
 // from a file may come from another device, so every part of it is checked before it is used.
+import { NewerVaultError, READER_VERSION } from "../vault-format.js";
 import { ZERO, isHlc, max, tick } from "./hlc.js";
 
 /**
@@ -37,8 +38,27 @@ export function newSync(data, salt) {
   return { v: SYNC_VERSION, vaultId, epoch: { id: vaultId, at: ZERO }, keys: [{ salt, n: 1, at: ZERO, by: "" }], clock: ZERO, meta: {}, gone: {}, histFloor: {}, devices: {} };
 }
 
-/** The vault's own sync object, checked, or a new one for a vault saved before sync (or unreadable). */
+/** Did a newer version write this vault: a `minReader` above this app's, or a `sync.v` above 1? @param {any} data */
+export const isNewerData = (data) => (Number.isInteger(data.minReader) && data.minReader > READER_VERSION) || (typeof data.sync?.v === "number" && data.sync.v > SYNC_VERSION);
+
+/**
+ * A vault a newer version wrote is refused. A host calls this on a backup it has opened, before anything
+ * is written over the vault it has.
+ * @param {any} data
+ * @throws {NewerVaultError}
+ */
+export function checkReader(data) {
+  if (isNewerData(data)) throw new NewerVaultError();
+}
+
+/**
+ * The vault's own sync object, checked, or a new one for a vault saved before sync (or unreadable).
+ * A newer version's vault (checkReader) is refused, never replaced by a new object: that would drop
+ * its tombstones, device removals and key history.
+ * @throws {NewerVaultError}
+ */
 export function readSync(data, salt) {
+  checkReader(data);
   return validSync(data.sync) ?? newSync(data, salt);
 }
 
@@ -50,7 +70,7 @@ export function readSync(data, salt) {
 export function validSync(value) {
   if (!isRecord(value) || value.v !== SYNC_VERSION || !isId(value.vaultId)) return null;
   if (!isRecord(value.epoch) || !isId(value.epoch.id) || !isHlc(value.epoch.at)) return null;
-  const sync = {
+  const sync = /** @type {Sync} */ ({
     v: SYNC_VERSION,
     vaultId: value.vaultId,
     epoch: { id: value.epoch.id, at: value.epoch.at },
@@ -60,7 +80,7 @@ export function validSync(value) {
     gone: membersOf(value.gone, validTombstone),
     histFloor: membersOf(value.histFloor, (at) => (isHlc(at) ? at : null)),
     devices: membersOf(value.devices, validDevice),
-  };
+  });
   // The clock is the highest time this vault has seen, so it is never behind a time the object holds.
   return { ...sync, clock: timesIn(sync).reduce(max, sync.clock) };
 }

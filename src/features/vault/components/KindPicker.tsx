@@ -27,6 +27,7 @@ export function KindPicker({ kinds, value, onChange }: KindPickerProps) {
   const tile = useRovingTiles(n, kinds.findIndex((k) => k.value === value), (i) => flushSync(() => choose(kinds[i].value)));
 
   return (
+    // biome-ignore lint/a11y/useSemanticElements: a labelled group of tiles in a grid sized by its parent; a fieldset adds its own box and min-width rules
     <div role="group" aria-label="Kind of item" style={columns} className="grid grid-cols-[repeat(var(--cols),minmax(0,1fr))] gap-1.5 sm:grid-cols-[repeat(var(--cols-wide),minmax(0,1fr))]">
       {kinds.map((k, i) => {
         const on = k.value === value;

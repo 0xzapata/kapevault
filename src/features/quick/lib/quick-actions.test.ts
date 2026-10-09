@@ -2,7 +2,7 @@
 // in what order, and what each one runs.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { device, fakeBridge, id, key, link, login, note, payee, thing } from "../../vault/lib/test-entries.ts";
+import { device, fakeBridge, id, key, link, login, note, thing } from "../../vault/lib/test-entries.ts";
 import type { Entry } from "../../vault/types";
 
 const calls = fakeBridge(); // before the import: vault-api reads window.kapevault when it loads
@@ -22,7 +22,6 @@ test("every other kind", () => {
   assert.deepEqual(labels(note()), ["primary:Copy note", "show:Show in KAPEVault (opens)"]);
   assert.deepEqual(labels(link()), ["primary:Open link (opens)", "open:Open link (opens)", "show:Show in KAPEVault (opens)"]);
   assert.deepEqual(labels(link({ linkType: "folder" })), ["primary:Open folder (opens)", "open:Open folder (opens)", "show:Show in KAPEVault (opens)"]);
-  assert.deepEqual(labels(payee()), ["primary:Copy number", "show:Show in KAPEVault (opens)"]);
   assert.deepEqual(labels(thing()), ["primary:Copy spot", "show:Show in KAPEVault (opens)"]);
   assert.deepEqual(labels(device()), ["primary:Copy Wi-Fi password", "secondary:Copy Wi-Fi name", "open:Open admin page (opens)", "show:Show in KAPEVault (opens)"]);
   assert.deepEqual(labels(device({ imei: "490154203237518" })), labels(device()), "no IMEI in quick search");

@@ -53,7 +53,13 @@ export function EvacuateView({ things, onClose }: EvacuateViewProps) {
     <div data-closing={closing || undefined} className="fixed inset-0 z-50">
       <div {...modal} role="dialog" aria-modal="true" aria-label="Evacuate" tabIndex={-1} className="sheet flex h-full flex-col bg-surface outline-none">
         <TitleBar edgeLeft edgeRight className="px-4">
-          <button autoFocus onClick={close} className={barPill}>
+          <button
+            type="button"
+            // biome-ignore lint/a11y/noAutofocus: a full-window view opens with the focus on Done
+            autoFocus
+            onClick={close}
+            className={barPill}
+          >
             <X size={13} weight="bold" />
             Done
           </button>
@@ -68,7 +74,7 @@ export function EvacuateView({ things, onClose }: EvacuateViewProps) {
                   {toGrab.length === 0 ? "Nothing marked to grab." : done === toGrab.length ? "Everything is packed." : `${done} of ${toGrab.length} packed`}
                 </p>
               </div>
-              <button onClick={print} disabled={printing} className="press flex h-10 items-center gap-2 rounded-full bg-raised px-4 text-[14px] font-semibold text-accent shadow-tile hover:bg-hover disabled:opacity-50 focus-ring">
+              <button type="button" onClick={print} disabled={printing} className="press flex h-10 items-center gap-2 rounded-full bg-raised px-4 text-[14px] font-semibold text-accent shadow-tile hover:bg-hover disabled:opacity-50 focus-ring">
                 <Printer size={16} weight="bold" />
                 {printing ? "Making the PDF..." : "Print grab list"}
               </button>
@@ -91,7 +97,9 @@ export function EvacuateView({ things, onClose }: EvacuateViewProps) {
                             <Spot thing={t} look="leave" />
                           </div>
                         ) : (
+                          // biome-ignore lint/a11y/useSemanticElements: a checkbox drawn as a button row; a native checkbox cannot be styled as this control
                           <button
+                            type="button"
                             role="checkbox"
                             aria-checked={packed.has(t.id)}
                             aria-label={t.title}

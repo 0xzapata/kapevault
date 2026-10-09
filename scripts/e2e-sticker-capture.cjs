@@ -4,9 +4,9 @@
 // open the admin page, the label photo hidden until shown, then large), an empty device's Scan a label, every device type,
 // search, the Devices list, and main refusing to copy a photo. Part of npm run e2e. Throwaway vault,
 // fake OCR (KAPEVAULT_OCR_FAKE), mock names only. Page screenshots (light + dark) in %TEMP%\kapevault-e2e-v2.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createHarness, shows, gone, clip, opened, waitFor } = require("./e2e-harness.cjs");
 const { renderSticker } = require("./mock-sticker.cjs");
 
@@ -14,7 +14,7 @@ const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
 fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-devices-"));
 const { check, launch, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
+const MASTER = "mock kettle harbor pass orbit gazelle";
 
 (async () => {
   const sticker = await renderSticker(path.join(dataDir, "mock-sticker.png"));

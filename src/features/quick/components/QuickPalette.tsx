@@ -4,18 +4,14 @@ import { vaultApi } from "@/lib/vault-api";
 import { modPressed } from "@/lib/platform";
 import { filterEntries } from "@/features/vault/lib/filter-entries";
 import { ipcMessage } from "@/lib/ipc-message";
-import type { Entry, PayeeEntry, VaultView } from "@/features/vault/types";
-import { checkPayee } from "@/features/payee/lib/payee-check";
-import { PayeeVerdictCard } from "@/features/payee/components/PayeeVerdictCard";
-import { footerHints, quickActions, runQuickAction, type QuickAction, type QuickActionId } from "../lib/quick-actions";
+import type { Entry, VaultView } from "@/features/vault/types";
+import { footerHints, quickActions, runQuickAction, type QuickActionId } from "../lib/quick-actions";
 import { QuickRow, ROW_HEIGHT, optionId } from "./QuickRow";
 import { QuickFooter, type Feedback } from "./QuickFooter";
 
 const MAX_RESULTS = 50;
 const CONFIRM_MS = 350; // long enough to read "Password copied", short enough to paste straight away
 const LIST_ID = "quick-results";
-const CARD_ID = "quick-payee-check";
-const SHOW_PAYEE: QuickAction = { id: "primary", label: "Show payee", opens: true };
 
 // Alt beats mod beats Shift, so a stray extra modifier never copies the wrong thing silently.
 function enterAction(e: KeyboardEvent): QuickActionId {
@@ -46,15 +42,9 @@ export function QuickPalette({ vault, shown }: QuickPaletteProps) {
     [vault, query],
   );
   const spaceNames = useMemo(() => new Map(vault.spaces.map((s) => [s.id, s.name])), [vault.spaces]);
-  const payees = useMemo(() => vault.entries.filter((e): e is PayeeEntry => e.kind === "payee"), [vault.entries]);
-  const verdict = useMemo(() => checkPayee(query, payees), [query, payees]);
-  // A verdict about a saved payee comes first and is an option itself: Enter on it shows that payee.
-  const cardPayee = verdict && verdict.kind !== "not-payee" ? verdict.payee : undefined;
-  const offset = cardPayee ? 1 : 0;
-  const active = Math.min(index, results.length + offset - 1); // -1 when nothing matches
-  const onCard = cardPayee !== undefined && active === 0;
-  const selected: Entry | undefined = onCard ? undefined : results[active - offset];
-  const actions = onCard ? [SHOW_PAYEE] : selected ? quickActions(selected) : [];
+  const active = Math.min(index, results.length - 1); // -1 when nothing matches
+  const selected: Entry | undefined = results[active];
+  const actions = selected ? quickActions(selected) : [];
 
   // Every summon: top of the list, the last query kept and selected so typing replaces it.
   useEffect(() => {
@@ -68,7 +58,7 @@ export function QuickPalette({ vault, shown }: QuickPaletteProps) {
 
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const activeId = onCard ? CARD_ID : selected ? optionId(selected.id) : undefined;
+  const activeId = selected ? optionId(selected.id) : undefined;
   useEffect(() => {
     if (activeId) document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
   }, [activeId]);
@@ -114,7 +104,7 @@ export function QuickPalette({ vault, shown }: QuickPaletteProps) {
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.nativeEvent.isComposing) return;
-    const n = results.length + offset;
+    const n = results.length;
     const page = Math.max(1, Math.floor((listRef.current?.clientHeight ?? 0) / ROW_HEIGHT) - 1);
     let to: number | null = null;
     switch (e.key) {
@@ -138,8 +128,7 @@ export function QuickPalette({ vault, shown }: QuickPaletteProps) {
         break;
       case "Enter":
         e.preventDefault();
-        if (onCard) run("show", cardPayee);
-        else run(enterAction(e));
+        run(enterAction(e));
         return;
       case "Escape":
         // A query clears first; an empty field lets Escape through to QuickSearch, which hides.
@@ -163,10 +152,11 @@ export function QuickPalette({ vault, shown }: QuickPaletteProps) {
 
   let empty: { title: string; hint: string } | null = null;
   if (vault.entries.length === 0) empty = { title: "Your vault is empty", hint: "Add items in KAPEVault and they show up here." };
-  else if (results.length === 0 && !verdict) empty = { title: `No matches for "${query.trim()}"`, hint: "Try a client name, a site, or a username." };
+  else if (results.length === 0) empty = { title: `No matches for "${query.trim()}"`, hint: "Try a client name, a site, or a username." };
 
   return (
     // Clicks anywhere keep the caret in the search field, so the keys keep working.
+    // biome-ignore lint/a11y/noStaticElementInteractions: a click anywhere keeps the caret in the search field so the keys keep working; this wrapper is not a control
     <div
       className="flex h-full flex-col"
       onMouseDown={(e) => {
@@ -179,7 +169,7 @@ export function QuickPalette({ vault, shown }: QuickPaletteProps) {
           ref={inputRef}
           role="combobox"
           aria-label="Search KAPEVault"
-          aria-expanded={results.length + offset > 0}
+          aria-expanded={results.length > 0}
           aria-controls={LIST_ID}
           aria-autocomplete="list"
           aria-activedescendant={activeId}
@@ -194,30 +184,16 @@ export function QuickPalette({ vault, shown }: QuickPaletteProps) {
       </div>
 
       <div className="settle relative min-h-0 flex-1">
+        {/* biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role listbox on a ul */}
         <ul ref={listRef} id={LIST_ID} role="listbox" aria-label="Results" className="h-full overflow-y-auto px-2 py-1.5">
-          {verdict && (
-            <li
-              id={cardPayee ? CARD_ID : undefined}
-              role={cardPayee ? "option" : "none"}
-              aria-selected={cardPayee ? onCard : undefined}
-              onClick={() => {
-                if (!cardPayee) return;
-                setIndex(0);
-                run("show", cardPayee);
-              }}
-              className="pb-1.5"
-            >
-              <PayeeVerdictCard verdict={verdict} selected={onCard} />
-            </li>
-          )}
           {results.map((entry, i) => (
             <QuickRow
               key={entry.id}
               entry={entry}
               spaceName={spaceNames.get(entry.spaceId) ?? ""}
-              selected={i + offset === active}
+              selected={i === active}
               onRun={() => {
-                setIndex(i + offset);
+                setIndex(i);
                 run("primary", entry);
               }}
             />

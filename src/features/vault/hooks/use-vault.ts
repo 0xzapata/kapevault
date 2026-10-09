@@ -2,9 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { vaultApi } from "@/lib/vault-api";
 import { filterEntries, matchesView } from "../lib/filter-entries";
 import { viewOf } from "../lib/views";
-import { checkPayee } from "@/features/payee/lib/payee-check";
 import { personKey } from "@/features/held-for/lib/held-for";
-import type { EntryInput, PayeeEntry, SortOrder, VaultView, ViewFilter } from "../types";
+import type { EntryInput, SortOrder, VaultView, ViewFilter } from "../types";
 
 const SORT_KEY = "kapevault.sort";
 const SORTS: SortOrder[] = ["recent", "title", "edited"];
@@ -28,8 +27,10 @@ export function useVault(initial: VaultView) {
   const [sort, setSortState] = useState<SortOrder>(savedSort);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // A hideWhenEmpty view (Payees, Things, Devices, IDs, Closing, Closed) shows in the sidebar only while it holds items: emptying one leaves it.
-  const emptied = viewOf(chosenView).hideWhenEmpty && !data.entries.some((e) => matchesView(e, chosenView));
+  // A hideWhenEmpty view (Things, Devices, IDs, Closing, Closed) shows in the sidebar only while it holds items: emptying one leaves it.
+  // The Trash is the one view that reads its own list (VaultView.trash); entries never holds a trashed item.
+  const pool = chosenView === "trash" ? data.trash : data.entries;
+  const emptied = viewOf(chosenView).hideWhenEmpty && !pool.some((e) => matchesView(e, chosenView));
   const view = emptied ? "all" : chosenView;
   // Same for a person: once nothing is held for them, their row and their list go.
   const heldFor = chosenPerson && data.entries.some((e) => personKey(e.heldFor) === personKey(chosenPerson)) ? chosenPerson : null;
@@ -38,17 +39,14 @@ export function useVault(initial: VaultView) {
   useEffect(() => vaultApi.onChanged(setData), []);
 
   const visible = useMemo(
-    () => filterEntries({ entries: data.entries, spaces: data.spaces, view, spaceId, heldFor, query, sort }),
+    () => filterEntries({ entries: view === "trash" ? data.trash : data.entries, spaces: data.spaces, view, spaceId, heldFor, query, sort }),
     [data, view, spaceId, heldFor, query, sort],
   );
-
-  // Payee Check: a number in the search is checked against every saved payee, whatever the view.
-  const payeeVerdict = useMemo(() => checkPayee(query, data.entries.filter((e): e is PayeeEntry => e.kind === "payee")), [data, query]);
 
   // The chosen item stays chosen even when an action takes it out of this list (unfavorited in
   // Favorites, fixed in Security) - otherwise the next row would silently take its place and the
   // next shortcut would act on the wrong item. With nothing chosen, the first row is.
-  const selected = visible.find((e) => e.id === selectedId) ?? data.entries.find((e) => e.id === selectedId) ?? visible[0] ?? null;
+  const selected = visible.find((e) => e.id === selectedId) ?? (view === "trash" ? data.trash : data.entries).find((e) => e.id === selectedId) ?? visible[0] ?? null;
 
   // A new list or a new search starts from its top row.
   function setQuery(next: string) {
@@ -112,8 +110,24 @@ export function useVault(initial: VaultView) {
     setSelectedId(result.id);
   }
 
+  // Delete moves the item to the Trash; the three below act on what is already there.
   async function deleteEntry(id: string) {
     setData(await vaultApi.deleteEntry(id));
+  }
+
+  async function restoreEntry(id: string) {
+    setData(await vaultApi.restoreEntry(id));
+    setSelectedId(null); // the next row in the Trash takes over; a caller that wants the item back calls reveal
+  }
+
+  async function deleteForever(id: string) {
+    setData(await vaultApi.deleteForever(id));
+    setSelectedId(null);
+  }
+
+  async function emptyTrash() {
+    setData(await vaultApi.emptyTrash());
+    setSelectedId(null);
   }
 
   async function toggleFavorite(id: string) {
@@ -136,12 +150,15 @@ export function useVault(initial: VaultView) {
 
   async function deleteSpace(id: string, moveToId: string | null) {
     setData(await vaultApi.deleteSpace(id, moveToId));
-    if (spaceId === id) chooseSpace(moveToId ?? data.spaces.find((s) => s.kind === "personal")!.id);
+    const landing = moveToId ?? data.spaces.find((s) => s.kind === "personal")?.id;
+    if (spaceId === id && landing) chooseSpace(landing);
   }
 
   return {
     entries: data.entries,
+    trash: data.trash,
     spaces: data.spaces,
+    masterWeak: data.masterWeak === true,
     view,
     spaceId,
     heldFor,
@@ -149,7 +166,6 @@ export function useVault(initial: VaultView) {
     sort,
     visible,
     selected,
-    payeeVerdict,
     setQuery,
     setSort,
     setSelectedId,
@@ -160,6 +176,9 @@ export function useVault(initial: VaultView) {
     step,
     saveEntry,
     deleteEntry,
+    restoreEntry,
+    deleteForever,
+    emptyTrash,
     toggleFavorite,
     moveEntry,
     addSpace,

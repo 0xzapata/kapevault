@@ -16,19 +16,21 @@ const key = (id, expires) => ({ id, kind: "key", expires });
 
 test("sanity targets land on the expected scores", () => {
   assert.equal(ratePassword("password1").score, 0);
-  assert.equal(ratePassword("Summer2024!").score, 1);
-  assert.ok(Math.abs(ratePassword("correcthorse").score - 2) <= 1, "correcthorse around 2");
+  assert.equal(ratePassword("Summer2024!").score, 0); // one word + a year + a symbol: ~25 bits, was rated 33
+  assert.ok(ratePassword("correcthorse").score <= 1, "two common words glued together are weak");
   assert.equal(ratePassword("k9#Qv2!mZr7x").score, 3);
   assert.equal(ratePassword("Hx4%nq8Lw!zT").score, 3);
   assert.equal(ratePassword(STRONG).score, 4);
-  assert.equal(ratePassword("Tr0ub4dor&3").score, 2);
+  assert.equal(ratePassword("Tr0ub4dor&3").score, 1); // the xkcd example: ~28 bits, was rated Fair
+  assert.equal(ratePassword("Kq8!xz2019").score, 2);
 });
 
 test("labels follow the score; empty is None", () => {
   assert.deepEqual(ratePassword(""), { score: 0, label: "None", bits: 0 });
   assert.equal(ratePassword("password1").label, "Very weak");
-  assert.equal(ratePassword("Summer2024!").label, "Weak");
-  assert.equal(ratePassword("Tr0ub4dor&3").label, "Fair");
+  assert.equal(ratePassword("Summer2024!").label, "Very weak");
+  assert.equal(ratePassword("Tr0ub4dor&3").label, "Weak");
+  assert.equal(ratePassword("Kq8!xz2019").label, "Fair");
   assert.equal(ratePassword("k9#Qv2!mZr7x").label, "Strong");
   assert.equal(ratePassword(STRONG).label, "Very strong");
 });
@@ -48,10 +50,10 @@ test("repeats, sequences and keyboard walks cost bits", () => {
   assert.ok(ratePassword("Zq8!87654321").bits < ratePassword("Zq8!83710592").bits);
 });
 
-test("a year inside counts as ~4 bits", () => {
+test("a year inside counts as ~7 bits, four random digits as ~13", () => {
   const withYear = ratePassword("Kq8!xz2019").bits;
   const withDigits = ratePassword("Kq8!xz7351").bits;
-  assert.ok(withDigits - withYear > 15, `${withDigits} vs ${withYear}`);
+  assert.ok(withDigits - withYear >= 5, `${withDigits} vs ${withYear}`);
 });
 
 test("unicode counts by code point and widens the pool", () => {
@@ -83,7 +85,7 @@ test("passwords are not compared across kinds", () => {
 });
 
 test("weak flags logins scoring 0 or 1, not 2", () => {
-  const issues = findIssues([login("a", "password1"), login("b", "Summer2024!"), login("c", "Tr0ub4dor&3")], TODAY, sha256);
+  const issues = findIssues([login("a", "password1"), login("b", "Summer2024!"), login("c", "Kq8!xz2019")], TODAY, sha256);
   assert.deepEqual(issues.get("a"), [{ type: "weak" }]);
   assert.deepEqual(issues.get("b"), [{ type: "weak" }]);
   assert.equal(issues.has("c"), false);
@@ -92,7 +94,7 @@ test("weak flags logins scoring 0 or 1, not 2", () => {
 test("old: 365 days is fine, 366 is old", () => {
   const issues = findIssues([
     login("fresh", STRONG, { passwordChangedAt: day(-365) }),
-    login("stale", STRONG + "x", { passwordChangedAt: day(-366) }),
+    login("stale", `${STRONG}x`, { passwordChangedAt: day(-366) }),
   ], TODAY, sha256);
   assert.equal(issues.has("fresh"), false);
   assert.deepEqual(issues.get("stale"), [{ type: "old", days: 366 }]);
@@ -101,7 +103,7 @@ test("old: 365 days is fine, 366 is old", () => {
 test("old falls back to updatedAt, and passwordChangedAt wins when present", () => {
   const issues = findIssues([
     login("fallback", STRONG, { updatedAt: day(-400) }),
-    login("changed", STRONG + "x", { updatedAt: day(-400), passwordChangedAt: day(-10) }),
+    login("changed", `${STRONG}x`, { updatedAt: day(-400), passwordChangedAt: day(-10) }),
   ], TODAY, sha256);
   assert.deepEqual(issues.get("fallback"), [{ type: "old", days: 400 }]);
   assert.equal(issues.has("changed"), false);
@@ -164,8 +166,8 @@ test("backup codes: 2 or fewer unused is an issue, all used says 0; any login, p
   const set = (total, used) => ({ codes: Array.from({ length: total }, (_, i) => ({ code: `mock-${i}`, used: i < used })), setAt: TODAY, paper: [] });
   const issues = findIssues([
     login("plenty", STRONG, { recoveryCodes: set(10, 7) }),
-    login("two", STRONG + "x", { recoveryCodes: set(10, 8) }),
-    login("none", STRONG + "y", { recoveryCodes: set(8, 8) }),
+    login("two", `${STRONG}x`, { recoveryCodes: set(10, 8) }),
+    login("none", `${STRONG}y`, { recoveryCodes: set(8, 8) }),
     { id: "oauth", kind: "login", password: "", updatedAt: TODAY, recoveryCodes: set(5, 4) },
     login("weak", "password1", { recoveryCodes: set(10, 9) }),
     { id: "note", kind: "note", recoveryCodes: set(10, 10) },
@@ -179,7 +181,7 @@ test("backup codes: 2 or fewer unused is an issue, all used says 0; any login, p
 });
 
 test("a master password needs 12 characters after trimming and a Strong rating", () => {
-  assert.equal(masterProblem("correct horse battery"), null);
+  assert.equal(masterProblem("glacier quartz marble fjord lantern"), null);
   assert.equal(masterProblem("   short    "), "Use at least 12 characters.");
   assert.equal(masterProblem(undefined), "Use at least 12 characters.");
   assert.match(masterProblem("Summer2024!!"), /Too easy to guess/);
@@ -191,7 +193,33 @@ test("the master rule refuses repeats, inner common words and the app's own name
   for (const pw of ["Aa1!Aa1!Aa1!", "password password", "Dragon!Dragon!1", "KapeVault2026!", "MyVault-Vault-1"]) {
     assert.match(masterProblem(pw) ?? "", /Too easy to guess/, pw);
   }
-  for (const pw of ["correct horse battery", "Lantern-Mango-Quiet-47", "Harbor-Pine-Slack-2291-kv", "xK9#mQ2$vL7!"]) {
+  for (const pw of ["glacier quartz marble fjord lantern", "Harbor-Pine-Slack-2291-kv", "xK9#mQ2$vL7!"]) {
     assert.equal(masterProblem(pw), null, pw);
   }
+});
+
+// SECURITY-AUDIT M-3: the meter priced every letter of a word at ~3.5 bits, so names, places, years and
+// three-word phrases passed. A word costs ~11-14 bits, a year ~7, a digit ~3.3, a separator ~2.
+test("the master rule refuses name/year/place and short word phrases", () => {
+  const before = { "Maria Clara 1998 Cebu": 76, "correct horse battery": 79, "Jollibee#Burger88": 71 };
+  for (const [pw, was] of Object.entries(before)) {
+    const { bits } = ratePassword(pw);
+    assert.ok(bits < 60 && bits < was - 15, `${pw}: ${bits} bits (was ${was})`);
+    assert.match(masterProblem(pw) ?? "", /Too easy to guess/, pw);
+  }
+  assert.match(masterProblem("Lantern-Mango-Quiet-47") ?? "", /Too easy to guess/, "three words + two digits");
+  assert.match(masterProblem("glacier-quartz-marble-fjord") ?? "", /Too easy to guess/, "four words is ~51 bits");
+});
+
+test("the master rule still accepts five random words and a long random mix", () => {
+  for (const pw of ["tundra-velvet-copper-orbit-gazelle", "tundra velvet copper orbit gazelle", "k9#Qv2!mZr7xHn4%", "p7$Kq!xW2#nV9z&mR4tB"]) {
+    assert.equal(masterProblem(pw), null, pw);
+  }
+});
+
+test("a word costs per word, not per letter; a random letter run keeps the pool cost", () => {
+  const word = ratePassword("tundra").bits;
+  assert.ok(word >= 10 && word <= 15, `one 6-letter word: ${word}`);
+  assert.ok(ratePassword("hxmbrkpd").bits > 30, "no vowels: not a word");
+  assert.ok(ratePassword("tundra-velvet").bits - word >= 10, "a second word adds a word, separator included");
 });

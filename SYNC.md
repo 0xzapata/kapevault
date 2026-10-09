@@ -1,77 +1,37 @@
-# Premortem - KAPEVault PC <-> phone sync design
+# KAPEVault sync: how the PC and the phone stay in step
 
-Written before sync was built, as a premortem: it assumes sync already failed and works back to why. It reviewed FORMAT.md, `electron/vault-session.cjs`, `electron/cloud-backup.cjs`, `electron/r2-client.cjs`, `electron/due-to-note.cjs`, `electron/opener/opener-page.js`.
+Backup and sync between KAPEVault devices, as the code does it. The code is the authority: the merge
+and its rules in `core/sync/` (shared by both apps), the sync loop in `electron/sync.cjs` (PC) and
+`mobile/src/app/host/sync.ts` (phone), the R2 upload, listing and pruning in `electron/cloud-backup.cjs`
+and `mobile/src/app/host/cloud.ts`. The vault file itself is in [FORMAT.md](FORMAT.md). What an attacker
+holding the bucket or a device can and cannot do is in [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
 
-"Task N" and "success criterion N" refer to the steps of the original build plan (task 1 = the on-disk data shape, task 7 = the first real-phone install). Section 3 is what shipped (code in core/sync/).
+## 1. Overview
 
-**The plan as written:** every entry and space gets `rev: { at: wall-clock ms, by: installId }`; deletes become tombstones `{ id, deleted: true, rev }` inside `entries`, dropped after 180 days once every known device has synced past them; a `devices: [{ id, name, lastSyncAt }]` list is added. Sync runs on unlock, after a save and on "Sync now": list the other devices' newest R2 snapshot, download, "decrypt with the master password", merge per item (newer `rev` wins; a login's losing password goes to history; other kinds get a "conflict copy"), save, upload. No server.
+There is no server. Each device uploads its own encrypted vault file to the user's Cloudflare R2 bucket
+as a snapshot, under its own install id. To sync, a device lists the bucket, downloads the newest
+snapshot of every other device, decrypts it with the key it already holds, merges it into its own
+vault, saves, and uploads the result. Sync runs after unlock, 3 seconds after a user save, on resume
+(phone) and on Sync now. On Android, merging another device's snapshot needs KAPEVault Pro; without it
+the phone uploads backup-only snapshots that any device can restore but none merges.
 
-**Intake gaps (they are causes of death too):** no timeline or milestone dates for tasks 0-8; nobody named for the two-real-device test (task 7 says an emulator + fake R2, and a real phone only at "install the APK"); success criterion 1 ("nothing a user typed is ever silently dropped") has no measurement, so nobody can tell it failed.
+## 2. Goals
 
----
+- Nothing a user typed is silently dropped. A value that loses a real conflict is kept: as the winner, in
+  a login's password history, or in a conflict copy.
+- Device clocks may be wrong. A wrong clock can change which of two truly concurrent values is shown
+  first. It can never make an edit lose to one that did not see it.
+- Any snapshot in the bucket may be stale, foreign, damaged or planted. The merge knows what kind of state
+  it is reading before it merges it.
+- Two devices that have both synced agree byte for byte on the shared state, and can check it (3.9).
 
-## 1. Autopsy - it is March 2027, sync is off on both devices and the owner no longer trusts the vault
-
-Ranked by likelihood x damage.
-
-### 1. Item-level "newer rev wins" drops data and spawns conflict-copy storms
-- **What killed it:** the merge could not tell "the phone edited after seeing the PC's edit" from "both edited at once", so it either made conflict copies on ordinary edits or silently threw away half of a real conflict.
-- **How it unfolded:** Week 1: PC sets `lifecycle: deletion-requested` on a login (`setLifecycle`), the phone changes the same login's password before syncing. Phone's rev is newer, the phone's whole item wins, its old password goes to history - and the PC's lifecycle, TOTP or security answers typed that day vanish, because the plan only preserves a login's *password*. Week 2: a note is edited on the PC, synced, then edited again on the phone; revs differ, so the rule "other kinds get a conflict copy" fires on a plain sequential edit. Both devices resolve the same conflict in the same minute with `crypto.randomUUID()` copies, so there are two copies; next sync each device sees the other's copy as new; copies of copies follow. Month 2: 40 "(conflict copy)" items, the owner deletes them by hand, deleting one real item with them.
-- **Assumption that allowed it:** a single timestamp per item carries enough history to merge. It carries no causality. And `upsert()` rebuilds the whole entry from the form on every save, so "the item" is the wrong unit: a password change, a code marked used (`markRecoveryCode`), a lifecycle change and a favorite toggle are separate user acts that land on one rev.
-- **First warning sign:** the first conflict copy created in a week where the owner never edited the same item on both devices. It shows in the item list, nowhere else - there is no sync log.
-
-### 2. Bookkeeping writes turn sync into an upload loop that eats the backups
-- **What killed it:** writes that are not user edits bumped revs and uploaded snapshots, and each device's sync triggered the other's.
-- **How it unfolded:** Day 1: `touch()` (every copy/open) writes `lastUsedAt` with `persist({ backup: false })`. Task 1 says "`rev` on every write", so copying a password on the phone makes the phone's version of that login "newer" than a real edit made on the PC an hour earlier - the PC edit loses. Day 2: sync saves `devices[].lastSyncAt`; that save is "a save", which the plan says triggers sync; the upload changes the phone's newest snapshot; the phone's unlock sync writes its own `lastSyncAt` and uploads. Each device's retention (`KEEP_RECENT = 20` in `cloud-backup.cjs`) fills with near-identical snapshots within a day, and the per-day history that restores rely on is pushed out of the newest-20 window faster than planned. Month 1: the 16 MB photo budget means the phone uploads tens of MB a day on mobile data.
-- **Assumption that allowed it:** every write is a user change, and a merge always changes something.
-- **First warning sign:** snapshot count per install id per day in R2 (the list call Settings already makes) above ~20 on a day the owner made two edits.
-
-### 3. Wall-clock revs and client-named snapshots let one wrong clock freeze sync
-- **What killed it:** the phone's clock was wrong for a while, and two separate parts of the design trusted it.
-- **How it unfolded:** Month 1: the phone boots with no network after a battery drain and sits at 2030-01-01 for an hour (or the owner changes the date to cheat a game). Every edit in that hour gets `rev.at` in 2030 and wins every future conflict, forever - later PC edits of those items lose silently to stale values. Worse, `snapshotKey()` names the object from `new Date()` on the uploading device, and "the other device's newest snapshot" is chosen by that name (`snapshotTime`). The 2030-named snapshots stay "newest" for that install id for years, so the PC keeps merging a snapshot frozen at that hour and never sees the phone's later edits. The PC shows "Synced with Pixel 8" the whole time. Retention does not help: `snapshotsToPrune` keeps the top 20 by name, and a future `at` always passes `now - at < KEEP_DAYS`.
-- **Assumption that allowed it:** device clocks are right, and the name of an object is when it was written.
-- **First warning sign:** a snapshot key whose name time is ahead of its R2 `LastModified` by more than a few minutes. `r2-client.cjs` `list()` parses only `<Key>` and `<Size>` today, so this is invisible.
-
-### 4. Restore - the disaster-recovery path - is quietly undone by sync
-- **What killed it:** a restore is a reset, and the merge treated it as one more stale peer.
-- **How it unfolded:** Month 3: a bad import or a mistaken bulk delete on the phone; the owner restores yesterday's snapshot on the PC (the existing `cloud:restore` flow, `-before-restore` kept, all correct). The restored vault's items carry yesterday's revs; the phone's snapshot carries today's tombstones and edits, all newer. The next sync on unlock deletes everything again. The owner restores again; same result. If task 1 instead re-stamps revs on write, the restored vault's first save makes every restored item "newest" and overwrites the phone's genuine edits since yesterday. Separately: `restore:fromFile` accepts any vault file, including someone else's or an old pre-sync vault with a different history; sync then merges two unrelated vaults into one.
-- **Assumption that allowed it:** every snapshot in the bucket is a peer's current intent. The bucket also holds restores, `-before-restore` copies, un-named pre-install-id snapshots, dead devices and old-password snapshots.
-- **First warning sign:** item count on the PC drops back within one sync after a restore.
-
-### 5. A master password change strands the phone, and the plan's "decrypt with the master password" does not exist after a biometric unlock
-- **What killed it:** keys, not passwords, are what the devices hold, and a password change forks the key.
-- **How it unfolded:** Month 2: the owner changes the master password on the PC (`changeMaster`: new salt, new key, `olderBackupsPending`). The phone unlocks by fingerprint - it holds the old key, not a password - and cannot open the PC's new snapshots. Its own snapshots stay under the old key, which the PC cannot open either. Each side keeps editing; nothing flows; the phone shows no error because "download failed" looks like offline. When the owner finally types the new password on the phone, the implementation derives a key per sync with scrypt N=2^17 (seconds on a phone, blowing the 3 s unlock target), or keeps the master password in memory to re-derive, which breaks the "only the key lives in memory" rule. "Delete older backups" on the PC (`forgetOlder`) deletes only its own and un-named snapshots, so the phone's old-password snapshots - the reason for the change, if the old password leaked - stay in R2 indefinitely. `olderBackupsPending` then syncs to the phone and offers a delete that means something different there.
-- **Assumption that allowed it:** one master password opens every snapshot at all times.
-- **First warning sign:** a sync that downloaded a snapshot whose header `kdf.salt` differs from the local one. Nothing records it today.
-
-### 6. Tombstones inside `entries` break every reader, and 180-day GC resurrects deletes
-- **What killed it:** a new kind of row in `entries` that every existing loop had to learn to skip, plus a GC rule that is unsafe with snapshots that never die.
-- **How it unfolded:** Task 1 ships. `publicView`, `findIssues`, password health, `handBack`, `linkedFolders`, `followUpsDue`, `importEntries`' duplicate check and `removeEntries` all iterate `entries`; one of them misses the `deleted` check (a tombstone has no `kind`, `title` or `spaceId`, so the page gets a blank item, or password health and Hand back count it). The Forever Opener was supposed to be "checked, not changed", but `opener-page.js` renders `rows = [...vault.entries]` and shows every unknown field masked, so every opener already written beside saved copies and in R2 (`kapevault/opener/...-<version>.html`, byte-pinned) shows blank-title rows with a masked "Rev". An old installed PC build (no `rev` support) opens the synced vault, deletes an item by removing it (`removeEntries`) - no tombstone - and edits another without a rev; the next sync brings the deleted one back and loses the edit. Month 7: GC drops a 180-day tombstone after "every known device synced past it", then the old phone the owner factory-reset without revoking (its install id's snapshots are never pruned - only the owner prunes) is still "another device's newest snapshot" and resurrects the item, secrets included.
-- **Assumption that allowed it:** tombstones are rows, and "every known device" is a closed, live set.
-- **First warning sign:** an item the owner deleted reappears after a sync; or any blank row in the Opener.
-
-### 7. Syncing `cloud` and the other top-level fields lets one device break the other's backup, and a stolen phone reaches the PC
-- **What killed it:** device-local state rode along in the synced document.
-- **How it unfolded:** Month 4: the owner rotates the R2 token on the PC (`setCloud`). If `cloud` syncs, the phone gets the new keys only by downloading from R2 - with the revoked keys it can no longer use. If the phone saved anything with its stale config at a newer rev, the PC's new keys are overwritten with revoked ones and every PC backup fails quietly into `backup-pending`. A "Disconnect" on one device turns off backup on both. Month 5: the phone is stolen unlocked (or the thief knows the PIN and the biometric prompt allows device credential). The thief deletes 300 items; tombstones sync to the PC on its next unlock; the PC's Personal space empties. The owner restores (cause 4), sync deletes them again.
-- **Assumption that allowed it:** the vault is one document whose every field is shared content. `commitRestore` already knows better ("R2 keys are this device's setup, not vault content").
-- **First warning sign:** a backup error on one device within a day of a Settings > Cloud change on the other; or a merge that tombstones more than a handful of items.
-
----
-
-## 2. Verdict
-
-- **MOST LIKELY:** cause 1 (item-level LWW). It fires on the first week of normal use with two devices, needs no rare event, and `upsert()` rebuilding whole entries guarantees the wrong unit of merge.
-- **MOST DANGEROUS:** cause 4 + the thief half of cause 7 together: a mass delete propagates, and the recovery path (restore) is undone by the next sync. Every other failure leaves the data somewhere; this one makes the backup system fight the user. It differs from most likely because it needs a trigger (a mistake or a theft), but when it fires there is no working way back except turning sync off.
-- **Biggest hidden assumption:** that every snapshot in the bucket is a peer's current intent, so "newest wins" equals "what the owner wants". The bucket actually holds restores, `-before-restore` copies, un-named legacy snapshots, dead-device snapshots, old-key snapshots and, after a theft, attacker-written ones. The merge needs to know what KIND of state it is reading before it may merge it.
-- **Fatal flaw:** no, this plan does not have a fatal flaw - serverless state-based sync over R2 snapshots is sound for 2-3 devices of one user. But as specified (one wall-clock `rev` per item, whole-item LWW, tombstones in `entries`, 180-day GC, "decrypt with the master password") it cannot meet its own success criteria 1 and 2. The rebuild below is required before task 1 ships, because task 1 fixes the on-disk shape.
-
----
-
-## 3. The rebuild
+## 3. Design
 
 ### 3.1 Data (inside the encrypted JSON; header unchanged, still `version: 1`)
 
-`spaces` and `entries` keep their exact current shape. **No sync field goes into an entry, and no tombstone goes into `entries`.** All sync metadata lives in one new top-level object, which every existing reader and every old Opener ignores (the Opener reads only `spaces`/`entries`; `start()` and `persist()` already carry unknown top-level fields through).
+`spaces` and `entries` keep their exact shape. **No sync field goes into an entry, and no tombstone goes
+into `entries`.** All sync metadata lives in one top-level object, which readers that do not sync (and
+every Forever Opener) ignore; the app carries unknown top-level fields through every save.
 
 ```
 sync: {
@@ -87,21 +47,54 @@ sync: {
   histFloor: { "<id>": HLC },                  // "Clear history" watermark
   devices: { "<installId>": { name, platform, addedAt, revokedAt? } }
 }
-cloud: { ... }, olderBackupsPending: true  // device-local top-level fields, unchanged, never merged
+cloud: { ... }, olderBackupsPending: true  // device-local top-level fields, never merged
 ```
 
-Device-local state stays where it is: `cloud` and `olderBackupsPending` remain top-level fields, and core defines `SHARED_FIELDS = ["spaces", "entries", "sync"]` - every other top-level field is device-local and never merged (decided in task 1; no move means no migration risk for old app versions). `syncLog` is a top-level device-local field too: this device's last 50 results, `[{ at, with: [installId], added, changed, deleted, copies, review?, error? }]`. `HLC = [ms, counter, installId]`, compared in that order. `vaultId` is the Personal space's id (made once with the vault, never deleted), so two devices that migrate the same pre-sync vault agree on it. A new or migrated vault starts with `epoch: { id: vaultId, at: [0,0,""] }`, `keys: [{ salt, n: 1, at: [0,0,""], by: "" }]`, empty `meta`/`gone`/`histFloor`/`devices`. `h` = SHA-256 of `canonical(splitGroups(entry))` (a space: `canonical({ core: space minus id })`). A group with no entry in `g` has not been written since migration.
+Core defines `SHARED_FIELDS = ["spaces", "entries", "sync"]` (`core/sync/shape.js`). Every other top-level
+field is device-local and never merged: `cloud`, `olderBackupsPending`, `genHistory` (the password
+generator's recent values, FORMAT.md; a device's own, so a password generated on the PC is not copied to the
+phone's vault by sync), and `syncLog`, this device's last 50 results, `[{ at, with: [installId], added, changed, deleted, copies, review?, error? }]`.
+
+`HLC = [ms, counter, installId]`, compared in that order. `vaultId` is the Personal space's id (made once
+with the vault, never deleted), so two devices that migrate the same pre-sync vault agree on it. A new
+or migrated vault starts with `epoch: { id: vaultId, at: [0,0,""] }`, `keys: [{ salt, n: 1, at: [0,0,""],
+by: "" }]`, and empty `meta`, `gone`, `histFloor` and `devices`. `h` = SHA-256 of
+`canonical(splitGroups(entry))` (a space: `canonical({ core: space minus id })`). A group with no entry in
+`g` has not been written since migration.
 
 ### 3.2 Stamping - one place, derived, not per write path
-- `persist()` already holds `saved` (a shallow copy) and every change REPLACES objects. Stamping = diff `saved` vs `session.data` by object identity, then by group value: for each changed group, bump this device's counter in `vv`, set that group's `dot` and `at`, update `h`. No write path can forget to stamp.
+
+- Every save goes through `persist()`, and every change replaces objects rather than editing them.
+  Stamping diffs the previous saved state against the new one, by object identity and then by group
+  value: for each changed group, it bumps this device's counter in `vv`, sets that group's `dot` and
+  `at`, and updates `h`. No write path can forget to stamp (`core/sync/stamp.js`).
+- **A newer sync object is never reset.** `sync.v` above 1, or a vault `minReader` above this app's reader
+  version (FORMAT.md), makes `readSync` throw `NewerVaultError` instead of returning a new object: an older
+  app that replaced it would drop the tombstones, device removals and key history. Locally the vault is
+  refused and nothing is written. A remote snapshot like that is skipped by `mergeRemotes` (its device is
+  named in `problems`: "<device> runs a newer KAPEVault. Update this app."), and a remote whose file header
+  version is above 1 is skipped the same way by each host's download. A missing or malformed `sync.v` keeps
+  the old behaviour: a new sync object.
 - `lastUsedAt` is outside every group: merged by max, never bumps `vv`, never causes a conflict.
-- A delete (`removeEntries`, `deleteSpace`, `confirmGone` is NOT a delete) writes `gone[id] = { vv: meta.vv + own tick, at }` and removes `meta[id]`. The `viaEntryId` cascade in `removeEntries` is NOT stamped on the other entries; a `viaEntryId` pointing at a gone or missing id is treated as unset at read time.
-- **Repair on open (old writers):** an entry whose content hash differs from `meta.h` was edited by a non-sync build - stamp it as a local edit. An id in `meta` with no entry and no `gone` was deleted by a non-sync build - write a tombstone. This makes an old installed PC build safe.
-- Migration never stamps: an entry with no `meta` is `vv: {}` (the plan's `at: 0`). Two devices holding the same legacy entry with the same content never conflict.
-- Merge itself never stamps, never calls `today()`, `Date.now()` or `randomUUID()`. It is a pure function of its two inputs.
-- Stamping sets `histFloor[id]` when a login's `history` group goes from present to absent. A change with no group written (lastUsedAt, a dead sign-in link dropped) only refreshes `h`. Repair cannot know which group an old build changed, so it stamps every group the item has or had. With no installId (settings.json unreadable) nothing is stamped that run.
+- A delete (`removeEntries`, `deleteSpace`, a Trash purge) writes `gone[id] = { vv: meta.vv + own tick, at }`
+  and removes `meta[id]`. Closing an account (`confirmGone`) is not a delete. The `viaEntryId` cascade in
+  `removeEntries` is not stamped on the other entries; a `viaEntryId` pointing at a gone or missing id
+  is treated as unset at read time.
+- **Repair on open (older app versions):** an entry whose content hash differs from `meta.h` was edited
+  by a version without sync, and is stamped as a local edit. An id in `meta` with no entry and no `gone`
+  was deleted by such a version, and gets a tombstone (`repair`, run by `core/opened-vault.js`). Repair
+  cannot know which group an old version changed, so it stamps every group the item has or had.
+- Migration never stamps: an entry with no `meta` has `vv: {}`. Two devices holding the same legacy
+  entry with the same content never conflict.
+- The merge itself never stamps and never reads the clock or makes random ids. It is a pure function of
+  its two inputs.
+- Stamping sets `histFloor[id]` when a login's `history` group goes from present to absent. A change that
+  writes no group (`lastUsedAt`, a dead sign-in link dropped) only refreshes `h`. With no install id
+  (settings unreadable this run) nothing is stamped; the next open's repair catches up.
 
 ### 3.3 Field groups and their merge rules
+
+Groups are defined in `core/sync/groups.js`, the rules in `core/sync/merge.js`.
 
 | Class | Groups | Rule |
 |---|---|---|
@@ -110,144 +103,222 @@ Device-local state stays where it is: `cloud` and `olderBackupsPending` remain t
 | History | login `history` | union, dedupe by password, drop entries at or below `histFloor[id]` (compared at day granularity: the UTC day of a row's `changedAt`; rows from before 2026-09-28 carry only a local date), sort by (changedAt, password) desc, cap 10 |
 | Other secrets | `totp`, `qa` (questions), key `secret`, note `body`, device `dpw`, `wifi`, ID `idnum` (idNumber), `photo` (a device's label photo or an ID's) | causal LWW; loser -> conflict copy |
 | Recovery codes | `codes` | same set (hash of the code list) on both sides: `used` = OR per code, `paper` = causal LWW; different sets: causal LWW on the `codes` group's HLC (not `setAt`, a plain display date), loser -> conflict copy |
-| Payee money fields | `pay` = number + provider + accountName + confirmedAt, one group | never split: `confirmedAt` only ever travels with the number it confirmed. A payee conflict copy ALWAYS drops `confirmedAt` and gets "(check this number)" |
 | Lifecycle | `life` | causal LWW; a losing `life` write is dropped with no conflict copy (nobody types it, so there is nothing to preserve) - except `gone`, which is absorbing: a gone login stays the tombstone shape from `confirmGone`; any concurrent secret-group change goes to a conflict copy titled "changed after closing" |
+| Trash | `trash` = `trashedAt` (a UTC ISO timestamp; missing = not in the Trash) | causal LWW; a losing `trash` write is dropped with no conflict copy (a trash, a restore and a trash on another device are not typed content). A trash on one device shows as trashed on the other, a restore restores it, and a trash beside an edit of the same item keeps both (the edit is in the Trash). The 30 days start at the later of `trashedAt` and the time of the `trash` group's sync stamp (`core/trash.js`): `trashedAt` is the trashing device's wall clock, and a phone months behind would otherwise purge a fresh trash on every device; its hybrid clock never trails what it had last synced. A local clock set ahead cannot be told from 30 quiet days, so it can delete only on that device: its purge is stamped with the same clock, and every other device refuses a snapshot whose clock is over a day ahead (3.4). A purge (30 days, "Delete now", "Empty Trash") is an ordinary delete: a tombstone, so a restore made without seeing the purge keeps the item as that version alone, like any edit that a delete never saw |
 | Bookkeeping | `lastUsedAt` | max; not versioned |
 | Spaces | `s:<id>` core (name) | causal LWW; a deleted space is a tombstone; entries whose space is gone show in Personal at read time (no stamp) |
 
-**A new kind needs every syncing device to know it.** `groupOf` puts a field of a kind a build does not know into `core`, so a build without the ID kind folds an ID's `idNumber` and `photo` into `core`: its stamps and a concurrent change on a device that has the kind no longer meet in the same group, and one of the two changes can be lost. Every device that syncs a vault must run a build with the ID kind before IDs are created there - ship the phone APK with the ID kind together with the PC build. The same holds for any later kind with its own groups.
+**A new kind needs every syncing device to know it.** `groupOf` puts a field of a kind a build does not
+know into `core`, so a build without the ID kind folds an ID's `idNumber` and `photo` into `core`: its
+stamps and a concurrent change on a device that has the kind no longer meet in the same group, and one
+of the two changes can be lost. Every device that syncs a vault must run a build that knows a kind
+before items of that kind are created there. The same holds for any later kind with its own groups.
 
-**Causal LWW per group** (dotted version vectors): for group `g`, side A's value was written by `A.g.dot = [d, n]`. If `B.vv[d] >= n`, B has seen that write, so B's value is the same or a successor - take B. Symmetric for A. Same dot - identical. Neither has seen the other's dot - a real conflict: winner = higher `at` (HLC, then installId), loser preserved per the table. Result `vv` = element-wise max. Clock skew can therefore only pick which of two TRULY concurrent values is shown first; it can never make an edit lose to one that did not see it.
+**Causal LWW per group** (dotted version vectors): for group `g`, side A's value was written by
+`A.g.dot = [d, n]`. If `B.vv[d] >= n`, B has seen that write, so B's value is the same or a successor -
+take B. Symmetric for A. Same dot - identical. Neither has seen the other's dot - a real conflict:
+winner = higher `at` (HLC, then installId), loser preserved per the table. Result `vv` = element-wise
+max. Clock skew can therefore only pick which of two truly concurrent values is shown first; it can
+never make an edit lose to one that did not see it.
 
-**Conflict copy:** id = a v8 UUID derived from `sha256(canonical([id, loser dot, copy content]))` (deterministic, never `randomUUID()` - two devices resolving the same conflict independently produce the same bytes, so a second sync is a no-op), content = the loser side's whole item, title + " (conflict copy, <device name>, <UTC day of loser HLC>)", meta = `vv: { [dot.dev]: dot.n }`, every group's dot = the loser dot. The title date is the UTC calendar day of the HLC's ms, never a local date. A dropped password's `history` `changedAt` is the loser HLC's ms as a UTC ISO timestamp, as a device writes its own history rows.
+**Conflict copy:** id = a v8 UUID derived from `sha256(canonical([id, loser dot, copy content]))`
+(deterministic: two devices resolving the same conflict independently produce the same bytes, so a
+second sync is a no-op), content = the loser side's whole item, title + " (conflict copy, <device name>,
+<UTC day of loser HLC>)", meta = `vv: { [dot.dev]: dot.n }`, every group's dot = the loser dot. The title
+date is the UTC calendar day of the HLC's ms, never a local date. A dropped password's `history`
+`changedAt` is the loser HLC's ms as a UTC ISO timestamp, as a device writes its own history rows.
 
-**Delete vs edit:** `gone[id].vv >= item vv` - deleted. Item has events the tombstone never saw (edited concurrently or after) - the item stays alive (edit wins), the tombstone stays for the record, and the syncLog notes "deleted on PC, kept because Pixel edited it". Absence of an id in a snapshot never deletes anything.
+**Delete vs edit:** `gone[id].vv >= item vv` - deleted. Item has events the tombstone never saw (edited
+concurrently or after) - the item stays alive (edit wins), the tombstone stays for the record, and the
+syncLog notes it. Absence of an id in a snapshot never deletes anything.
 
-**Commutative, idempotent and convergent, but not associative for kept losers:** three devices merging in a different order always agree on which values are alive, but can disagree on which loser a conflict copy or a `history` row preserves - the order two states meet in decides which one is called the loser. Accepted and documented, not fixed: the live data always converges, only the shape of the record of what lost does not.
+**Commutative, idempotent and convergent, but not associative for kept losers:** three devices merging
+in a different order always agree on which values are alive, but can disagree on which loser a conflict
+copy or a `history` row preserves - the order two states meet in decides which one is called the loser.
+This is accepted: the live data always converges, only the shape of the record of what lost does not.
 
 ### 3.4 Clock rule
-- Local stamp: `ms = max(Date.now(), clock.ms)`; if equal to `clock.ms`, `counter = clock.counter + 1`, else 0. `clock` = the stamp.
-- On merge: `clock = max(clock, remote.clock)` ONLY if `remote.clock.ms <= Date.now() + 24h`. Otherwise the snapshot is not merged: sync pauses for that device with "Pixel 8's clock is N days ahead. Fix its date, then Sync now." Same check per group `at`.
-- HLC never feeds the Windows Hello / Touch ID `masterAt` / `highWater` seal or the 14-day rule; those stay on this device's clock.
-- `updatedAt`, `passwordChangedAt`, `confirmedAt`, `setAt` stay local YYYY-MM-DD display dates (from the winning side), never used for ordering.
+
+- Local stamp: `ms = max(Date.now(), clock.ms)`; if equal to `clock.ms`, `counter = clock.counter + 1`,
+  else 0. `clock` = the stamp (`core/sync/hlc.js`).
+- On merge: `clock = max(clock, remote.clock)` only if `remote.clock.ms <= Date.now() + 24h`. Otherwise
+  the snapshot is not merged and sync pauses for that device: "<device>'s clock is N days ahead. Fix its
+  date, then Sync now." (`core/sync/run.js`). A read sync object's `clock` is raised to the highest time
+  it holds (`validSync`, `core/sync/shape.js`), so this one check covers every group's `at`.
+- The HLC never feeds the Windows Hello / Touch ID / fingerprint 14-day dates; those stay on this
+  device's clock.
+- `updatedAt`, `passwordChangedAt` and `setAt` stay local YYYY-MM-DD display dates (from
+  the winning side), never used for ordering.
 
 ### 3.5 Which snapshot to read
-- Add `LastModified` to `r2-client.cjs` `list()` (and the e2e fake R2). "Newest for device X" = max server `LastModified` among keys owned by X, never the name time.
-- Skipped: own install id; `-before-restore`; un-named (pre-install-id) and `bovault/` legacy keys; revoked devices; devices whose newest object is older than 180 days (listed as "not seen since", merged only by an explicit Sync now).
-- Before merging: `checkVaultFile`, then decrypt with the SESSION KEY when header `kdf` + salt equal the local ones (no scrypt, no stored password). Decrypt fails or JSON invalid: try that device's next-newest (state-based merge makes any older snapshot a safe subset), and record it; three consecutive failures for a device = visible error.
-- `vaultId` differs: never merge; show "This bucket holds a different vault from <device>".
+
+Snapshot names are in [FORMAT.md](FORMAT.md) (Cloud backup names). Selection is `pickSnapshots` in
+`core/sync/snapshots.js`.
+
+- "Newest for device X" = the highest R2 `LastModified` among the keys in X's folder, never the time in
+  the name.
+- Skipped: this install's own folder; `-before-restore`; `-backup-only` (a phone without KAPEVault Pro:
+  listed and restorable, never merged); snapshots with no install id folder and pre-rename `bovault/`
+  keys; revoked devices; objects larger than a vault can be (`MAX_VAULT_BYTES`, never downloaded);
+  devices whose newest object is older than 180 days (listed as "not seen since", merged only by an
+  explicit Sync now).
+- Devices the vault does not know yet are read only up to 8 per run, newest first (`MAX_NEWCOMERS`):
+  anyone with write access to the bucket can plant device folders.
+- Before merging: `checkVaultFile`, then decrypt with the **session key** when the header `kdf` and salt
+  equal the local ones (no scrypt, no stored password). If the newest will not open, the next-newest of
+  that device is tried (an older snapshot is a safe subset of a newer one, never read as an empty vault);
+  three that will not open = a visible error for that device. An object that would not open is
+  remembered and not downloaded again until it changes.
+- `vaultId` differs: never merged; the device shows that the bucket holds a different vault.
 - `epoch` differs: see 3.7.
-- Before upload: the bytes read from disk must decrypt with the session key (GCM tag check) - a device never uploads a file it cannot read.
-- Duplicate install id (a copied `%APPDATA%\KAPEVault` on a second PC): an object under my own install id that is not in my last-uploaded list means two installs share an id; regenerate `installId` and log it. Sync refuses to run while `installId()` is "" (settings unreadable this run).
+- Before upload: the bytes read from disk must decrypt with the session key (GCM tag check). A device
+  never uploads a file it cannot read.
+- Duplicate install id (a copied app data folder on a second PC): an object under this install's own id
+  that it never uploaded (`sent-snapshots.json`) means two installs share an id; the install id is
+  regenerated and logged. Sync refuses to run while the install id cannot be read.
+- Downloads come back on the courier's stdout (PC) or in memory (phone) and are never written to disk.
 
 ### 3.6 Master password change
-- `changeMaster` appends `{ salt, n: prev.n + 1, at, by }` to `sync.keys`. The new salt is the ONE salt every device adopts - devices share `kdf`+salt so one key opens all current snapshots, exactly as today.
-- Remote header salt is in my `sync.keys` but not the newest: that device is behind. Skip it silently, show "Pixel 8 still uses the old master password - unlock it there".
-- Remote salt unknown to me: a newer (or forked) change. Prompt once for "the master password set on <device>", through `throttledUnlock`. It opens the snapshot: merge my local plaintext into it, write my file under the REMOTE kdf/salt/key, adopt its `sync.keys`, turn Windows Hello / Touch ID / phone biometric OFF (the key changed - same path as restore), set my own `olderBackupsPending` (a top-level device-local field).
-- Fork (both `n` equal, different salts): higher HLC wins; both adopt it; the loser device shows "the master password from <device> is now the one for all devices".
-- "Delete older backups" stays per device and manual (never automatic). The PC's Settings adds: "Pixel 8 still has N backups under the old password" - counted by header salt, which is plaintext.
+
+- `changeMaster` appends `{ salt, n: prev.n + 1, at, by }` to `sync.keys`. The new salt is the one salt
+  every device adopts: devices share `kdf` and salt, so one key opens all current snapshots.
+- A remote header salt that is in this device's `sync.keys` but not the newest: that device is behind.
+  It is skipped, with "<device> still uses the old master password - unlock it there".
+- A remote salt unknown to this device, from a known device: a newer (or forked) change. The user is asked
+  once for "the master password set on <device>", through the unlock throttle. If it opens the snapshot,
+  this device merges its local state into it, re-encrypts its file under the remote salt and key, adopts
+  its `sync.keys`, turns Windows Hello / Touch ID / fingerprint unlock off (the key changed) and sets its
+  own `olderBackupsPending`. Adopting a key always goes through the review (3.9).
+- An unknown-salt snapshot does not hide that device's other snapshots: anyone holding the bucket keys can
+  plant one without the vault key. The next snapshot of that device that opens is still merged, and the
+  prompt is shown beside it. From a device the vault does not know, an unknown-salt snapshot counts as
+  one that will not open.
+- Fork (both `n` equal, different salts): the higher HLC wins and both devices adopt it.
+- "Delete older backups" stays per device and manual. It uploads a fresh snapshot under the new
+  password, then deletes this install's older snapshots and those from before install ids; other
+  devices' snapshots are left alone. A bucket lock rule may refuse some deletes; the rest go ahead and
+  the notice says how many are still locked (`electron/cloud-backup.cjs` `forgetOlder`).
 
 ### 3.7 Restore
+
 - Any restore on a device with sync on pauses sync on that device and asks one question:
-  - **"Make this the vault on all devices"**: new `epoch` (`id`, HLC). Other devices, on seeing a newer epoch whose `vaultId` matches, REPLACE their shared state with it; their local changes not in the epoch's parent state become conflict copies (never lost). Restores the thief-deleted items and keeps them restored.
-  - **"Merge it in"**: plain merge. Deleted items stay deleted (tombstones win over the older restored state); only missing-but-never-deleted items come back. Said in the confirm.
-- A restored vault with a different `vaultId` (someone else's file, an unrelated vault) can only be the first choice or "sync off".
-- Two concurrent epochs: higher HLC wins; the loser device's state was already kept as its `-before-restore` snapshot.
+  - **"Make this the vault on all devices"**: a new `epoch` (`id`, HLC). Other devices, on seeing a newer
+    epoch whose `vaultId` matches, replace their shared state with it; their local changes not in the
+    epoch's parent state become conflict copies (never lost). This is how a mass delete is undone and
+    stays undone.
+  - **"Merge it in"**: a plain merge. Deleted items stay deleted (tombstones win over the older restored
+    state); only missing-but-never-deleted items come back. The confirm says so.
+- A restored vault with a different `vaultId` (someone else's file, an unrelated vault) can only be the
+  first choice or sync off.
+- Two concurrent epochs: the higher HLC wins; the losing device's state was already kept as its
+  `-before-restore` snapshot.
+- Restore never resets the unlock throttle with a backup's password: only a success on the local vault
+  clears the miss count.
 
 ### 3.8 What syncs and what never syncs
 
 | Syncs (merged) | Never syncs (device-local top-level field, or outside the vault) |
 |---|---|
-| `spaces`, `entries`, `sync.meta`, `sync.gone`, `sync.histFloor`, `sync.keys`, `sync.epoch`, `sync.devices` (a device record has no rename clock: the record added later - by `addedAt` - wins whole; the earliest `revokedAt` stands; a `nameAt` would be needed if renames arrive) | `cloud` (endpoint, bucket, keys, `auto`), `olderBackupsPending`, `syncLog`, `lastSyncAt` (shown from R2 `LastModified`), Hello / Keystore records, `settings.json`, `installId` |
+| `spaces`, `entries`, `sync.meta`, `sync.gone`, `sync.histFloor`, `sync.keys`, `sync.epoch`, `sync.devices` (a device record has no rename clock: the record added later - by `addedAt` - wins whole; the earliest `revokedAt` stands) | `cloud` (endpoint, bucket, keys, `auto`), `olderBackupsPending`, `genHistory`, `syncLog`, the last sync time (shown from R2 `LastModified`), Hello / Keystore records, `settings.json`, the install id |
 
-R2 key rotation = each device types its new keys; a 401/403 on a device prompts "Your R2 keys changed. Type the new ones." Recommend one R2 API token per device, so revoking a lost phone's token does not touch the PC.
+**Generated passwords (`genHistory`) stay on the device that made them.** The list is a safety net for one
+moment on one device (a lock before a pasted password is saved), not account state: it has no item to
+version, nothing to conflict with, and merging it would copy every candidate password to every other
+device and into every snapshot those devices upload. So it is outside `SHARED_FIELDS`, merge and
+`adoptEpoch` return this device's own list untouched, and stamping never sees it (recording one bumps no
+`vv`, so it starts no sync). It does ride in every snapshot this device uploads, encrypted with the rest, so
+a restore of that snapshot brings it back; a restore replaces the list with the backup's own (the vault it
+replaced is kept with its own list). `core/sync/merge.test.js` holds the rule.
+
+R2 key rotation = each device types its new keys; a 401/403 on a device asks for them. One R2 API token
+per device is advised, so revoking a lost device's token does not touch the others. The PC's Add a phone
+QR carries the PC's own token; to give the phone its own, create a second token and type it on the phone
+instead of scanning. R2 tokens are per bucket, not per folder: any token can write every device's
+snapshots.
 
 ### 3.9 Sync loop rules
-- One sync at a time, mutually exclusive with `restores.restore` and `changeMaster`.
-- Download and decrypt happen off the session; the COMMIT is synchronous: re-check the session is the same one (a generation counter bumped by `start()`), merge the remote into the CURRENT `session.data` (not the copy taken before the download), `persist()`. Session changed or locked: discard and retry later. A save during a download is never lost.
-- Sync's own save never triggers sync. A merge whose canonical shared-state hash equals the pre-merge hash writes nothing and uploads nothing.
-- Unlock never waits on sync; sync runs after `unlocked()`.
-- **Mass-change gate:** a merge that would tombstone more than 5 items, or more than 10% of entries when that is 3 or more, replace an epoch, adopt a new key, or change secret groups on more than 20 items shows a review ("Pixel 8 wants to delete 143 items") before it commits.
-- Revoke device (PC Settings): `devices[id].revokedAt`; its snapshots are never merged again. The phone's biometric prompt uses BIOMETRIC_STRONG with a CryptoObject, no device-credential fallback.
-- Settings shows a short fingerprint of the canonical shared state (first 8 hex of its SHA-256) on both devices. After "Sync now" on both, they must match.
-- The trust page (TrustSheet) gains the sentence that the app now downloads its own snapshots automatically - in the same commit as the behaviour, including under Air Wall (the courier's curl carries downloads as it carries uploads; downloads come back on curl's stdout and are never written to disk).
-- PC: `electron/sync.cjs` runs the loop (after unlock, 3 s after a user save, Sync now); a restore pauses it until Sync now (persisted until the restore question is answered). The fingerprint is the "Check code" in the Sync sheet.
 
-### 3.10 What changed and why
+- One sync at a time, mutually exclusive with a restore and a master password change.
+- Download and decrypt happen off the session; the commit is synchronous: it re-checks that the session
+  is the same one (a generation counter bumped on every open, restore and re-key), merges the remote
+  into the current vault (not the copy taken before the download) and saves. Session changed or locked:
+  the result is discarded and the next unlock syncs. A save during a download is never lost.
+- Sync's own save never triggers sync. A merge whose canonical shared-state hash equals the pre-merge
+  hash writes nothing and uploads nothing.
+- Unlock never waits on sync; sync runs after unlock.
+- **Mass-change gate** (`core/sync/review.js`): a merge that would delete more than 5 items, or more than
+  10% of entries when that is 3 or more, change secret groups on more than 20 items, replace the vault
+  with a restored epoch, or adopt a new key shows a review ("<device> wants to delete 143 items") before
+  it commits. The gate judges one merge at a time. It catches a bug or a mistake that would empty a
+  vault. It is not a defence against a device that holds the vault key: such a device can stay under
+  the limits on every sync.
+- **Remove from sync** (PC, Sync sheet): sets `devices[id].revokedAt`; snapshots in that device's folder
+  are never merged again. That is all it does. It is not a lock-out: a lost device that still holds the
+  vault key (the master password is unchanged) and the R2 token can write a snapshot under a new install
+  id, and it opens and merges like any unknown device's. What locks it out is two steps, which the Sync
+  sheet walks the user through straight after the removal: (1) change the master password (a new key;
+  the Change master password form is shown in the card), and (2) replace the R2 API token (the old one
+  can still write to the bucket; Cloudflare, then Settings > Backup > Cloud backup > Disconnect and
+  Connect). The status carries `lockOut`: every removed device with no key in `sync.keys` newer than its
+  `revokedAt`. The Sync sheet shows a "Finish locking out <device>" card and the sync line shows the same
+  words until the master password has changed after the removal. The R2 token step cannot be seen from
+  the vault, so the card only states it. The phone has no remove-device screen. The phone's biometric
+  prompt uses `BIOMETRIC_STRONG` with a CryptoObject, no device-credential fallback.
+- The Sync sheet shows a check code on every device: the first 8 hex of the SHA-256 of the canonical
+  shared state. After Sync now on each device, the codes match.
+- The trust page says that the app downloads its own snapshots automatically, including under Air Wall
+  (the courier's curl carries downloads as it carries uploads).
 
-| Change | Closes |
+### 3.10 Why the design looks like this
+
+| Choice | What goes wrong without it |
 |---|---|
-| Per-group dotted version vectors instead of one `rev` per item; groups from the table | 1 |
-| Deterministic conflict-copy ids + pure merge (no `today()`/`Date.now()`/`randomUUID()`) | 1, 2 |
-| Stamping by diff in `persist()`; `lastUsedAt` unversioned; no-op merge writes nothing; sync save never triggers sync | 2 |
-| HLC + 24h future cap; server `LastModified` picks the newest snapshot | 3 |
-| Restore pauses sync and asks: new epoch vs merge; `vaultId` lineage | 4 |
-| Decrypt with the session key; `sync.keys` history; adopt-remote-salt flow; biometric off on adoption; per-device old-key count | 5 |
-| Metadata and tombstones outside `entries`; tombstones kept forever; repair-on-open for old writers; skip dead devices | 6 |
-| `cloud`, `olderBackupsPending`, `lastSyncAt` device-local; mass-change gate; revoke device; per-device R2 token; BIOMETRIC_STRONG only | 7 |
-| Payee `pay` group + conflict copy unconfirmed; `histFloor`; codes OR; `gone` absorbing | 1 (field classes the plan never listed) |
-| Commit re-merges into current session under a generation check; mutual exclusion with restore/changeMaster | 1 (lost update inside one device) |
+| Per-group dotted version vectors instead of one timestamp per item | One edit per item carries no causality: a sequential edit on two devices looks like a conflict, and a real conflict drops half of what was typed (a password change wipes a same-day 2FA change). |
+| Deterministic conflict-copy ids, a pure merge | Two devices resolving the same conflict make two different copies, then copies of copies. |
+| Stamping by diff in one place; `lastUsedAt` unversioned; a no-op merge writes nothing | Copying a password would make a stale item "newer" than a real edit elsewhere, and devices would trigger each other's uploads in a loop that pushes real history out of retention. |
+| HLC with a 24-hour future cap; R2 `LastModified` picks the newest | A phone whose clock says 2030 would win every later conflict and keep its frozen snapshot "newest" for years. |
+| Restore pauses sync and asks; `vaultId` lineage; epochs | The next sync would undo a restore (the peer's newer deletes win again), and an unrelated vault could be merged in. |
+| Session-key decrypt, `sync.keys` history, adopt-remote-salt flow | After a master password change, a device unlocked by fingerprint holds a key, not a password, and could open nothing. |
+| Metadata and tombstones outside `entries`; tombstones kept; repair on open | Every reader that lists entries would have to skip tombstone rows, and an older app version would delete without a tombstone, bringing items back. |
+| `cloud` and `olderBackupsPending` device-local | Rotating the R2 token on one device would overwrite the other's working keys, and Disconnect on one would turn backup off on both. |
+| Removed kinds (`due`, `payee`) become notes on every read, local and remote | A device still on an older version can sync one back. Every reader converts it the same way, so the note is the same item everywhere. |
 
-### 3.11 Pre-launch checklist (before task 1 writes anything to the installed PC vault)
-1. **Opener survives the new shape.** Load a vault with `sync` + `local` + conflict copies into every Opener version already in R2 and in a saved-copy folder. Walk away (change the data layout, not the Opener) if any row, count or field changes versus the same vault without `sync`.
-2. **Metadata size.** Generate the owner's real item count x 3 devices x 2,000 deletes of metadata and measure the vault. Walk away from "tombstones forever" (design a checked GC instead) if `sync` exceeds 2 MB or pushes a real vault within 25% of `MAX_VAULT_BYTES`.
-3. **scrypt on the target phone.** One N=2^17 derive in the WebView on the owner's actual phone. Above 3 s, the native scrypt plugin goes in before the phone app; above 10 s even native, walk away from the WebView core for crypto.
-4. **R2 `LastModified` and token scope.** One list call on the real bucket returns `LastModified` per key, and a second token can be created. Walk away from "server clock picks newest" if `LastModified` is missing (fall back to a per-device sequence number in the object name, which then needs the snapshot regex changed).
-5. **Merge properties green** (test list below, 10,000 random runs) before any UI. If commutativity or idempotence cannot be made to hold for 3-device conflicts, walk away from conflict copies and use "loser goes to a per-item `conflicts[]` field" instead.
+### 3.11 Checks behind the design
 
-### 3.12 Tests that prove each rule
-Property tests (`node --test`, a seeded generator in the repo - no new dependency; flag it if fast-check is wanted), over random vaults of 3 devices with random edits, deletes, moves, code marks, lifecycle changes, clears, merges and skewed clocks:
-- **Commutative:** `canon(merge(a,b)) === canon(merge(b,a))`.
-- **Associative outside kept losers:** `merge(merge(a,b),c) === merge(a,merge(b,c))` once conflict copies, `history` rows and tombstone-only removals are set aside - the order three states meet in can still choose which loser is kept as a copy or a history row, but never which values survive as the live item.
-- **Idempotent:** `merge(a,a) === a`; `merge(merge(a,b),b) === merge(a,b)` - including zero new conflict copies.
-- **Convergence:** any order of pairwise syncs until quiescent gives identical `canon` on all devices.
-- **No silent loss:** every value any device typed into any group is, in the result, the winner, a `history` entry, or inside a conflict copy - unless a causally later write on the same group replaced it, or it was below a `histFloor`, or it was deleted by a tombstone that saw it.
-- **Causality beats clocks:** a device at wall clock -1 year that edits after seeing a remote change still wins that group.
+- **The Forever Opener reads a vault with `sync`** exactly as it reads the same vault without it
+  (`electron/opener-sync.test.cjs`).
+- **Metadata size:** `scripts/sync-size-check.mjs` builds a busy vault through the real stamping and
+  reports how much `sync` adds. Tombstones are kept forever in v1.
+- **scrypt on a phone:** one N = 2^17 derivation in the WebView, measured at 533-656 ms in the emulator
+  (`mobile/README.md`, Prove it). No native plugin.
+- **R2 `LastModified`** comes back per key in a listing (`core/r2.js`, used by both apps).
+- **Merge properties** hold over 10,000 random 3-device histories with skewed clocks (`core/sync/merge.test.js`).
 
-Example tests:
-- Sequential edits on two devices produce no conflict copy.
-- Disjoint concurrent edits (PC lifecycle, phone password) keep both, with no conflict copy.
-- The same concurrent conflict resolved on both devices gives one conflict copy with the same id.
-- `touch()` after a real edit elsewhere does not win.
-- Ten alternating no-change syncs make 0 PUTs on the fake R2.
-- Stale snapshot after a delete: no resurrection. Concurrent delete + edit: item kept.
-- Old-writer repair: an edit and a removal made by the pre-sync build are stamped and tombstoned on open.
-- Clock: a remote HLC +5 years pauses that device; a snapshot named 2030 with an older `LastModified` is not picked.
-- Master change on the PC: phone biometric unlock, then sync prompts once, adopts the salt, turns biometric off, and the next PC sync opens phone snapshots with no prompt. The lagging device is skipped with no prompt. Fork tie-break.
-- Restore "everywhere": the other device replaces, and its unsynced edit becomes a conflict copy. Restore "merge": deletes stay deleted. Foreign `vaultId`: refused.
-- Corrupted newest snapshot (one byte flipped, and a truncated body): falls back to the next, logs, and never treats it as empty.
-- `cloud` rotated on the PC: the phone keeps its own; a 403 prompts. Disconnect on one device leaves the other on.
-- Payee conflict copy has no `confirmedAt`. Cleared history does not come back. Codes marked used on both devices stay used. A gone login stays gone and the concurrent password goes to a copy.
-- A save during a sync download survives. Sync is refused during a restore or a master password change.
-- Mass-change gate fires at 6 tombstones. A revoked device is never merged.
-- Duplicate `installId` is detected and regenerated.
-- Two-device e2e: PC e2e + emulator against the fake R2 for all of the above; the fingerprint matches after Sync now on both.
+### 3.12 Tests
 
----
+- `core/sync/merge.test.js`: property tests, seeded and replayable (`MERGE_SEED`, `MERGE_RUNS`): merge is
+  commutative and idempotent; associative outside kept losers and record-less removals; devices converge
+  after pairwise syncs in any order. Plus example tests per rule in the table above.
+- `core/sync/*.test.js`: stamping and repair, the clock, snapshot selection and pruning, the review gate,
+  the sync run. `core/sync/hlc-groups.test.js` covers the clock and the field groups both apps share.
+- `electron/sync.test.cjs` and `mobile/src/app/host/sync.test.mjs`: the PC and phone sync loops,
+  including planted snapshots, key adoption, revoke and lock-out. The phone's test runs the PC's real
+  session, backup and sync code as the other device.
+- `scripts/e2e-sync.cjs` (PC window against a fake R2) and `mobile/src/app/host/test/two-device.mjs`
+  (the PC code against the headless emulator).
 
-## 4. The adversary
+## Protect the bucket
 
-The person who gains from this failing is whoever holds the owner's phone, or any of their R2 tokens.
+Anyone holding a write key can delete or flood objects in the bucket. The snapshots are encrypted, so
+this is about availability and integrity, not secrecy.
 
-- **Where I would attack:** the merge's trust in anything that decrypts. With the phone unlocked, or the PIN plus a prompt that allows device credential, I hold the vault key, so every snapshot I write is "authentic". I do not need to steal anything off the PC - sync carries my changes there.
-- **The week of launch:** delete everything in Personal and Clients on the phone, and edit every payee's `number` to mine with a fresh `confirmedAt` - item-level LWW carries `confirmedAt` along, so the PC shows my GCash number as "confirmed by call". Set the phone date to 2030 first, so my values beat every later PC edit (plan as written). Then let the phone sync once.
-- **The move you would never see coming:** do nothing destructive. Keep the phone, and use its R2 token (inside the vault I can open) from a laptop to delete the PC's install-id folder slowly - one snapshot a day, which looks like retention - until the only surviving backups are ones I wrote. Tokens are per bucket, not per prefix, so the phone's token can do this. When the owner restores, they restore my version. The defences are the mass-change gate, `pay` conflict copies being unconfirmed, the 24h clock cap, per-device tokens revoked on loss, BIOMETRIC_STRONG only, and, if R2 supports it on this bucket, a bucket lock / retention rule on `kapevault/snapshots/` (still open: whether R2 offers one for this bucket, and how it would meet `snapshotsToPrune`'s deletes).
-
----
-
-## 5. Tripwires
-
-The timeline has no dates, so "Week N" counts from the day the phone app is first installed on the owner's real phone (task 7). The rows need the `syncLog` counts and the state fingerprint from 3.9.
-
-| # | Failure mode | Signal (measurable) | Check when | Threshold = act |
-|---|---|---|---|---|
-| 1 | LWW data loss / copy storm | conflict copies created (syncLog) vs same-item edits on both devices | end of week 1, then weekly for 4 weeks | any conflict copy without a matching real concurrent edit, or any copy of a copy = pause sync on both, reproduce as a property-test case |
-| 2 | Upload loop | snapshots per install id per day (R2 list) | day 1, day 3 | more than 20 on a day with 5 or fewer edits = pause auto sync, find the write that stamps |
-| 3 | Clock | max(name time - `LastModified`) per device; syncLog "clock ahead" pauses | week 1, then after any phone reboot with no network | any gap over 10 min, or any merged HLC over now + 1 min = investigate that device's clock path |
-| 4 | Restore undone | item count before a restore vs after the first sync following it | first real or drilled restore (drill it in week 2 on a copy) | count drops back = restore flow is broken, sync off until fixed |
-| 5 | Master change strands | snapshots under a non-newest salt, per device, 7 days after a change | 7 days after any master password change (drill one in week 3) | any left after both devices were unlocked = adoption flow failed |
-| 6 | Tombstones / old writers | Opener blank rows; a deleted id present again; `sync` size in bytes | week 1 (Opener), monthly (size) | any resurrection = stop sync; `sync` over 2 MB = revisit GC with a checked design |
-| 7 | Device-local leak / theft path | backup errors on device B within 24h of a Settings > Cloud change on A; mass-change gate fires | every Cloud settings change; any gate firing | any cross-device backup error = the `local` split leaked; any unexpected gate = treat the phone as lost (revoke, rotate token, change master) |
-| all | Divergence | state fingerprint on PC vs phone after Sync now on both | after every sync in weeks 1-2, then weekly | any mismatch = sync off on both, capture both vaults' `sync` blocks |
-
-**Check first:** the day-1 check of row 2 (snapshots per install id per day). It fires first, it is a single R2 list call, and it is the one failure that silently eats the restore history the other fixes depend on.
+- **Scope the token:** create the R2 API token with **Object Read & Write** and select this one bucket
+  (not Admin, not all buckets). Use one token per device.
+- **Lock the snapshots:** in the bucket's Settings, under **Bucket lock rules**, add a rule on the prefix
+  `kapevault/snapshots/` with a retention of 30 days. Locked objects cannot be deleted or overwritten
+  until then, so a stolen key cannot wipe recent snapshots. The app's routine thinning of old snapshots
+  is refused inside that window; the backup still goes up and the extra snapshots stay. "Delete older
+  backups" after a master password change deletes what it can and says how many old-password snapshots
+  stay until their lock runs out.
+- **Keep the folder copy:** the copy folder on your own disk is the offline fallback if the bucket is ever
+  emptied or the account is lost.

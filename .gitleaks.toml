@@ -2,3 +2,12 @@
 # marked inline with a `gitleaks:allow` comment on the flagged line, so no whole file is exempt.
 [extend]
 useDefault = true
+
+# The one exception that cannot carry an inline comment: the frozen golden vaults' expected JSON
+# (core/fixtures, never regenerated) is JSON, and its "keySalt" - a vault's public KDF salt, not a
+# secret - reads as a key to the generic-api-key rule. Only a line that is exactly a keySalt field is
+# allowed; a path rule was tried and exempted whole files (a planted token in a fixture went unseen).
+[[allowlists]]
+description = "a vault's keySalt field (public KDF salt)"
+regexTarget = "line"
+regexes = ['''^\s*"keySalt": "[A-Za-z0-9+/]{22}==",?\s*$''']

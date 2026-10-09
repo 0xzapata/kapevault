@@ -6,7 +6,6 @@ import { SignInMark } from "../../components/icons";
 import { useHost } from "../../host/host-context";
 import { signInLabel } from "../../lib/entries";
 import { SIGN_IN_OPTIONS } from "../../lib/sign-in";
-import { DEFAULT_GENERATOR, generatePassword } from "../../lib/generate-password";
 import { SecretInput, StrengthMeter } from "./inputs";
 import { LogoField } from "./pickers";
 import type { Draft, SetDraft } from "./use-item-form";
@@ -24,6 +23,7 @@ export function LoginFields({ draft, set, entry, entries }: { draft: Draft; set:
           {SIGN_IN_OPTIONS.map((o) => {
             const on = draft.signIn === o.value;
             return (
+              // biome-ignore lint/a11y/useSemanticElements: a radio drawn as a button tile; a native radio input cannot be styled as this control
               <button
                 key={o.value}
                 type="button"
@@ -57,7 +57,7 @@ export function LoginFields({ draft, set, entry, entries }: { draft: Draft; set:
       )}
       {(password || draft.password) && (
         <div>
-          <SecretInput label={password ? "Password" : "Password (optional)"} value={draft.password} onChange={(v) => set("password", v)} generate={() => generatePassword(DEFAULT_GENERATOR)} />
+          <SecretInput label={password ? "Password" : "Password (optional)"} value={draft.password} onChange={(v) => set("password", v)} generator />
           <StrengthMeter password={draft.password ?? ""} />
         </div>
       )}
@@ -98,6 +98,7 @@ function TotpInput({ value, hasTotp, onChange }: { value: string | undefined; ha
           placeholder={removed ? "Removed when you save" : hasTotp ? "Saved - paste a new key to replace it" : "Paste the key"}
           spellCheck={false}
           autoComplete="off"
+          autoCorrect="off"
           autoCapitalize="none"
           className="font-mono"
         />

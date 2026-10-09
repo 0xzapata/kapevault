@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { MagnifyingGlass, Prohibit, Sparkle } from "@phosphor-icons/react";
 import { useRovingTiles } from "@/hooks/use-roving-tiles";
+import { BrandLogo } from "./BrandLogo";
 import { BRANDS, NO_BRAND, brandBySlug, detectBrand } from "./brands";
 
 interface LogoPickerProps {
@@ -20,7 +21,7 @@ export function LogoPicker({ value, link, title, onChange }: LogoPickerProps) {
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = BRANDS.filter((b) => !q || b.name.toLowerCase().includes(q));
+    const list = BRANDS.filter((b) => b.logo && (!q || b.name.toLowerCase().includes(q))); // the picker is of logos: a name-only brand has none to show
     return [...new Set(list.map((b) => b.group))].map((g) => ({ group: g, brands: list.filter((b) => b.group === g) }));
   }, [query]);
   // The choices in order, for the arrow keys: Auto-detect, No logo, then every logo shown.
@@ -55,13 +56,14 @@ export function LogoPicker({ value, link, title, onChange }: LogoPickerProps) {
         className="press flex h-10 w-full items-center gap-2.5 rounded-[10px] border border-line bg-raised px-3 text-left text-[14px] hover:bg-hover focus-ring"
       >
         <span className="grid size-6 place-items-center">
-          {shown ? <img src={shown.logo} alt="" className="size-5 object-contain" /> : <Prohibit size={16} className="text-ink-3" />}
+          {shown ? <BrandLogo brand={shown} size={20} /> : <Prohibit size={16} className="text-ink-3" />}
         </span>
         <span className="flex-1 truncate">{label}</span>
         <span className="text-[12.5px] text-accent">{open ? "Close" : "Change"}</span>
       </button>
 
       {open && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: Escape handler for the picker as a whole; every control inside it is a real input or button
         <div
           className="drop mt-2 rounded-[12px] border border-line bg-surface p-3"
           onKeyDown={(e) => {
@@ -74,6 +76,7 @@ export function LogoPicker({ value, link, title, onChange }: LogoPickerProps) {
           <label className="flex h-9 items-center gap-2 rounded-[8px] bg-raised px-2.5">
             <MagnifyingGlass size={14} className="text-ink-3" />
             <input
+              // biome-ignore lint/a11y/noAutofocus: the picker is opened to search, so the search box is where typing goes
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -98,7 +101,7 @@ export function LogoPicker({ value, link, title, onChange }: LogoPickerProps) {
                 <div className="grid grid-cols-8 gap-1.5">
                   {brands.map((b) => (
                     <button key={b.slug} {...tileKeys(choices.indexOf(b.slug))} type="button" title={b.name} aria-label={b.name} onClick={() => pick(b.slug)} className={tile(value === b.slug)}>
-                      <img src={b.logo} alt="" draggable={false} className="size-6 object-contain" />
+                      <BrandLogo brand={b} size={24} />
                     </button>
                   ))}
                 </div>

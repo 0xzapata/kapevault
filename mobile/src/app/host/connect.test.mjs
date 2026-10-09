@@ -5,10 +5,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createRealHost } from "./real-host.ts";
-import { R2_KEYS, fakeClipboard, fakeKeystore, fakeR2, fetchTransport, nodeFs, pc, tempDir, until } from "./test/fixtures.mjs";
+import { R2_KEYS, fakeClipboard, fakeKeystore, fakeR2, fetchTransport, nodeFs, pc, tempDir, until, withPro } from "./test/fixtures.mjs";
 
-const PHONE_MASTER = "Copper-Violet-Harbor-83";
-const PC_MASTER = "Lantern-Mango-Quiet-47";
+const PHONE_MASTER = "Copper-Violet-Harbor-83 orbit gazelle";
+const PC_MASTER = "Lantern-Mango-Quiet-47 orbit gazelle";
 const PC_ID = "9d9d9d9d-1c1d-4e5f-8a9b-0c1d2e3f4a5b";
 const PC_PERSONAL = "5c1f7c1e-0000-4000-8000-000000000001";
 const PC_VAULT = {
@@ -22,7 +22,7 @@ async function bucket(t) {
   return r2;
 }
 
-function phone(t, r2, dir = tempDir()) {
+function phone(t, r2, dir = withPro(tempDir())) {
   const host = createRealHost({ fs: nodeFs(dir), transport: fetchTransport(r2), keystore: fakeKeystore(), clipboard: fakeClipboard(), scanQr: async () => "", openUrl: () => {}, model: "Pixel 8", backupDelayMs: 30, retryMs: 50 });
   t.after(() => host.lock());
   const read = (name) => fs.readFileSync(path.join(dir, name), "utf8");

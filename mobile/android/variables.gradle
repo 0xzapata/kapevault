@@ -13,4 +13,6 @@ ext {
     cordovaAndroidVersion = '14.0.1'
     androidxCameraVersion = '1.5.3'
     zxingCoreVersion = '3.5.4'
+    junitVersion = '4.13.2'
+    billingVersion = '9.1.0' // needs targetSdk 35+
 }

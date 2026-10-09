@@ -117,11 +117,37 @@ class LoginForm private constructor(
             return debuggable && screen.className == "${context.packageName}.LoginTestActivity"
         }
 
-        private enum class Kind { PASSWORD, USERNAME, EXPLICIT_USERNAME, TEXT, OTHER }
+        internal enum class Kind { PASSWORD, USERNAME, EXPLICIT_USERNAME, TEXT, OTHER }
 
-        private fun kindOf(node: ViewNode): Kind {
-            val hints = node.autofillHints.orEmpty().map { it.lowercase() }
+        // What kindOf looks at in one view, read off the node so the decision itself needs no Android view.
+        // hints and html (attribute names and values) are lower case; names: the id entry, the hint, and the
+        // html name and id, whichever the view has.
+        internal class FieldFacts(
+            val hints: List<String>,
+            val html: Map<String, String>,
+            val htmlTag: String?,
+            val inputType: Int,
+            val names: List<String>,
+            val className: String?,
+        )
+
+        private fun factsOf(node: ViewNode): FieldFacts {
             val html = node.htmlInfo?.attributes.orEmpty().associate { (it.first ?: "").lowercase() to (it.second ?: "").lowercase() }
+            return FieldFacts(
+                hints = node.autofillHints.orEmpty().map { it.lowercase() },
+                html = html,
+                htmlTag = node.htmlInfo?.tag,
+                inputType = node.inputType,
+                names = listOfNotNull(node.idEntry, node.hint, html["name"], html["id"]),
+                className = node.className?.toString(),
+            )
+        }
+
+        internal fun kindOf(node: ViewNode) = kindOf(factsOf(node))
+
+        internal fun kindOf(field: FieldFacts): Kind {
+            val hints = field.hints
+            val html = field.html
             val type = html["type"]
             val autocomplete = html["autocomplete"].orEmpty()
             // A new password (sign up, change password) is not the saved one.
@@ -131,7 +157,7 @@ class LoginForm private constructor(
             if (hints.any { it == "username" } || "username" in autocomplete) return Kind.EXPLICIT_USERNAME
             if (hints.any { "email" in it } || type == "email" || "email" in autocomplete) return Kind.USERNAME
 
-            val input = node.inputType
+            val input = field.inputType
             if (input and InputType.TYPE_MASK_CLASS == InputType.TYPE_CLASS_TEXT) {
                 when (input and InputType.TYPE_MASK_VARIATION) {
                     InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD -> return Kind.PASSWORD
@@ -139,10 +165,10 @@ class LoginForm private constructor(
                 }
             }
             // Screens that mark nothing: go by the field's own name.
-            val names = listOfNotNull(node.idEntry, node.hint, html["name"], html["id"]).joinToString(" ").lowercase()
+            val names = field.names.joinToString(" ").lowercase()
             if (PASSWORD_WORDS.any { it in names }) return Kind.PASSWORD
             if (USERNAME_WORDS.any { it in names }) return Kind.USERNAME
-            val editable = node.className?.endsWith("EditText") == true || (node.htmlInfo?.tag == "input" && (type == null || type == "text"))
+            val editable = field.className?.endsWith("EditText") == true || (field.htmlTag == "input" && (type == null || type == "text"))
             return if (editable) Kind.TEXT else Kind.OTHER
         }
 

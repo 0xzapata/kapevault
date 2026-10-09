@@ -2,9 +2,9 @@
 // e2e and the design shots.
 // Run directly to see what the REAL Windows OCR reads off it: `node scripts/mock-sticker.cjs`.
 const { chromium } = require("./playwright.cjs");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const STICKER = `<body style="margin:0;background:#bdbdbd">
 <div id="s" style="width:560px;padding:22px 26px;background:#f4f4f0;border-radius:10px;font:15px Arial;color:#222;line-height:1.5">

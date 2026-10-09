@@ -3,14 +3,21 @@ import { createPortal } from "react-dom";
 import { CheckCircle, WarningCircle } from "@phosphor-icons/react";
 
 type Tone = "ok" | "error";
+// A button in the toast (Undo): it runs once, then the toast leaves.
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
 interface ToastState {
   id: number;
   text: string;
   tone: Tone;
   lift: number;
+  action?: ToastAction;
 }
 
-const ToastContext = createContext<(text: string, tone?: Tone) => void>(() => {});
+const ToastContext = createContext<(text: string, tone?: Tone, action?: ToastAction) => void>(() => {});
+const ACTION_HOLD_MS = 5000; // long enough to read the message and reach for Undo
 
 // Bottom chrome on screen (tab bar, action dock), so the toast rises above it.
 function chromeHeight() {
@@ -25,13 +32,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const nextId = useRef(0);
 
-  const show = useCallback((text: string, tone: Tone = "ok") => {
+  const dismiss = useCallback((after: number) => {
     timers.current.forEach(clearTimeout);
-    setLeaving(false);
-    setToast({ id: ++nextId.current, text, tone, lift: chromeHeight() });
-    const hold = Math.max(tone === "error" ? 3600 : 1900, text.length * 50);
-    timers.current = [setTimeout(() => setLeaving(true), hold), setTimeout(() => setToast(null), hold + 200)];
+    timers.current = [setTimeout(() => setLeaving(true), after), setTimeout(() => setToast(null), after + 200)];
   }, []);
+
+  const show = useCallback(
+    (text: string, tone: Tone = "ok", action?: ToastAction) => {
+      setLeaving(false);
+      setToast({ id: ++nextId.current, text, tone, lift: chromeHeight(), action });
+      dismiss(Math.max(tone === "error" ? 3600 : 1900, text.length * 50, action ? ACTION_HOLD_MS : 0));
+    },
+    [dismiss],
+  );
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
@@ -41,6 +54,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         <div key={toast.id} role="status" data-leaving={leaving || undefined} className="toast flex max-w-[330px] items-center gap-2 rounded-full bg-toast px-4 py-2.5 text-[13.5px] font-medium text-on-accent shadow-sheet">
           {toast.tone === "ok" ? <CheckCircle size={17} weight="fill" className="shrink-0 text-ok-on-dark" /> : <WarningCircle size={17} weight="fill" className="shrink-0 text-danger-on-dark" />}
           <span className="line-clamp-2">{toast.text}</span>
+          {toast.action && (
+            <button
+              type="button"
+              disabled={leaving}
+              onClick={() => {
+                toast.action?.run();
+                dismiss(0);
+              }}
+              className="press hit pointer-events-auto -mr-2 ml-1 h-8 shrink-0 rounded-full px-3 text-[13.5px] font-semibold text-on-accent underline underline-offset-4 focus-ring"
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
     </div>

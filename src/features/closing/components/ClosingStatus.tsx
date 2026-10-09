@@ -44,29 +44,29 @@ export function ClosingStatus({ entry, onSheet }: ClosingStatusProps) {
         <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{text}</p>
         <div className="-ml-1 mt-3 flex flex-wrap items-center gap-1">
           {requested ? (
-            <button onClick={() => onSheet("gone")} className={`${cardPrimary} mr-1`}>
+            <button type="button" onClick={() => onSheet("gone")} className={`${cardPrimary} mr-1`}>
               Confirm it's gone
             </button>
           ) : (
-            <button onClick={() => onSheet("email")} className={`${cardPrimary} mr-1`}>
+            <button type="button" onClick={() => onSheet("email")} className={`${cardPrimary} mr-1`}>
               Ask to delete
             </button>
           )}
           {due && (
-            <button onClick={() => run(() => vaultApi.setLifecycle(entry.id, "deletion-requested"), "Sent again - follow up in 30 days")} className={cardQuiet}>
+            <button type="button" onClick={() => run(() => vaultApi.setLifecycle(entry.id, "deletion-requested"), "Sent again - follow up in 30 days")} className={cardQuiet}>
               I sent it again
             </button>
           )}
           {requested ? (
-            <button onClick={() => onSheet("email")} className={cardQuiet}>
+            <button type="button" onClick={() => onSheet("email")} className={cardQuiet}>
               Show email
             </button>
           ) : (
-            <button onClick={() => onSheet("gone")} className={cardQuiet}>
+            <button type="button" onClick={() => onSheet("gone")} className={cardQuiet}>
               Confirm it's gone
             </button>
           )}
-          <button onClick={() => run(() => vaultApi.setLifecycle(entry.id, null), "Back in use")} className={cardQuiet}>
+          <button type="button" onClick={() => run(() => vaultApi.setLifecycle(entry.id, null), "Back in use")} className={cardQuiet}>
             Back in use
           </button>
         </div>

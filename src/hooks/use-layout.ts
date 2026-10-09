@@ -24,8 +24,10 @@ export function useLayoutMode(): LayoutMode {
   useEffect(() => {
     const lists = QUERIES.map(([, q]) => window.matchMedia(q));
     const update = () => setMode(current());
-    lists.forEach((l) => l.addEventListener("change", update));
-    return () => lists.forEach((l) => l.removeEventListener("change", update));
+    for (const l of lists) l.addEventListener("change", update);
+    return () => {
+      for (const l of lists) l.removeEventListener("change", update);
+    };
   }, []);
   return mode;
 }

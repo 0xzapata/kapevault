@@ -4,15 +4,14 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const nodeCrypto = require("node:crypto");
-const { checkOpenerFile, scrypt, openVault } = require("./opener/opener-crypto.cjs");
-const { openerHtml, openerKey, openerSha256, writeOpenerBeside, compareVersions, OPENER_NAME } = require("./opener.cjs");
+const vm = require("node:vm");
+const { checkOpenerFile, isNewerFile, openVault } = require("./opener/opener-crypto.cjs");
+const { scryptSource, openerHtml, openerKey, openerSha256, writeOpenerBeside, checkOpenerBeside, OPENER_NAME } = require("./opener.cjs");
 const { checkVaultFile } = require("./vault-crypto.cjs");
 const { snapshotTime } = require("./cloud-backup.cjs");
 const { createVaultSession } = require("./vault-session.cjs");
 
-const bytes = (s) => new TextEncoder().encode(s);
-const hex = (b) => Buffer.from(b).toString("hex");
-const MASTER = "mock master pass phrase";
+const MASTER = "mock master pass phrase orbit gazelle";
 
 async function realVault() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-opener-"));
@@ -26,26 +25,15 @@ async function realVault() {
   return { dir, file: JSON.parse(fs.readFileSync(file, "utf8")) };
 }
 
-// RFC 7914 section 12. The last vector (N = 2^20) needs 1 GB and is left out; N = 2^14 covers ROMix at size.
-test("scrypt matches the RFC 7914 test vectors", async () => {
-  const vectors = [
-    ["", "", 16, 1, 1, "77d6576238657b203b19ca42c18a0497f16b4844e3074ae8dfdffa3fede21442fcd0069ded0948f8326a753a0fc81f17e8d3e0fb2e0d3628cf35e20c38d18906"],
-    ["password", "NaCl", 1024, 8, 16, "fdbabe1c9d3472007856e7190d01e9fe7c6ad7cbc8237830e77376634b3731622eaf30d92e22a3886ff109279d9830dac727afb94a83ee6d8360cbdfa2cc0640"],
-    ["pleaseletmein", "SodiumChloride", 16384, 8, 1, "7023bdcb3afd7348461c06cd81fd38ebfda8fbba904f8e3ea9b543f6545da1f2d5432955613f0fcf62d49705242a9af9e61e85dc0d651e40dfcf017b45575887"],
-  ];
-  for (const [password, salt, N, r, p, expected] of vectors) {
-    assert.equal(hex(await scrypt(bytes(password), bytes(salt), { N, r, p }, 64)), expected, `N=${N} r=${r} p=${p}`);
-  }
-});
-
-test("scrypt matches Node's crypto.scrypt on random inputs", async () => {
-  for (let i = 0; i < 6; i++) {
-    const password = nodeCrypto.randomBytes(1 + (i * 7) % 40);
-    const salt = nodeCrypto.randomBytes(16);
-    const params = { N: 2 ** (4 + i), r: 1 + (i % 3) * 4, p: 1 + (i % 2) };
-    const expected = nodeCrypto.scryptSync(password, salt, 32, { ...params, maxmem: 256 * 1024 * 1024 });
-    assert.equal(hex(await scrypt(password, salt, params, 32)), hex(expected), JSON.stringify(params));
-  }
+// The page has no require: it gets core/scrypt.js inlined above opener-crypto.cjs. Run those two sources
+// as the page does (no module, no require) and open a real vault with the result.
+test("the inlined page source opens a vault with no module system", async () => {
+  const { file } = await realVault();
+  const pageSource = `(() => {\n${scryptSource()}\n${fs.readFileSync(path.join(__dirname, "opener", "opener-crypto.cjs"), "utf8")}\nreturn openVault;\n})()`;
+  assert.ok(!/^export /m.test(pageSource), "the export keyword is gone");
+  const openVaultInPage = vm.runInNewContext(pageSource, { crypto: nodeCrypto.webcrypto, TextEncoder, TextDecoder, atob, btoa, Uint8Array });
+  const data = await openVaultInPage(file, MASTER);
+  assert.equal(data.entries.find((e) => e.kind === "login").password, "Mock-Pass-1");
 });
 
 test("opens a real vault file with its master password, NFC-normalised like the app", async () => {
@@ -90,6 +78,18 @@ test("a wrong password or an altered file gives null, never garbage", async () =
 test("a vault saved before the rename (bovault header) opens", async () => {
   const { file } = await realVault();
   assert.equal((await openVault({ ...file, format: "bovault" }, MASTER)).entries.length, 2);
+});
+
+test("a vault a newer KAPEVault saved is refused as newer, not as 'not a vault', and the page says so", async () => {
+  const { file } = await realVault();
+  for (const newer of [{ ...file, version: 2 }, { ...file, version: 1.5 }, { ...file, format: "bovault", version: 3 }, { ...file, version: 2, kdf: { ...file.kdf, N: 2 ** 20 } }]) {
+    assert.equal(checkOpenerFile(newer), false, "still refused");
+    assert.equal(isNewerFile(newer), true);
+    await assert.rejects(openVault(newer, MASTER), /Newer KAPEVault vault file/);
+  }
+  for (const other of [file, { ...file, version: "2" }, { ...file, format: "other", version: 2 }, null, "text"]) assert.equal(isNewerFile(other), false, JSON.stringify(other)?.slice(0, 60));
+  await assert.rejects(openVault({ ...file, format: "other", version: 2 }, MASTER), /Not a KAPEVault vault file/);
+  assert.ok(openerHtml("1.0.0").includes("This vault was saved by a newer KAPEVault. Use a newer Opener to open it."));
 });
 
 test("the header check matches the app's checkVaultFile and runs before any work", async () => {
@@ -138,6 +138,13 @@ test("the header check matches the app's checkVaultFile and runs before any work
     }
     assert.equal(checkOpenerFile(c), app, JSON.stringify(c)?.slice(0, 80));
   }
+  // The body is held to the same canonical base64. The Opener refuses it in openVault (before any KDF
+  // work), so its verdict is compared there, not in checkOpenerFile.
+  const looseData = [`${file.data}\n`, ` ${file.data}`, `${file.data}A`, file.data.slice(0, -4) + "-_-_", file.data.slice(0, -1)];
+  for (const data of looseData) {
+    assert.throws(() => checkVaultFile({ ...file, data }), /Not a KAPEVault file/, data.slice(-12));
+    await assert.rejects(openVault({ ...file, data }, MASTER), /Not a KAPEVault vault file/, data.slice(-12));
+  }
   // p = 2^20 would run for hours, and a body that is not base64 is not worth a KDF: refused at once.
   await assert.rejects(openVault({ ...file, data: "not base64!" }, MASTER), /Not a KAPEVault vault file/);
   const started = Date.now();
@@ -172,13 +179,14 @@ test("the page shows its version and explains the format", () => {
   assert.throws(() => openerHtml('1"><script>'), /Bad version/);
 });
 
-test("the opener goes beside a saved copy, but never over someone else's file or a newer opener", () => {
+test("the opener goes beside a saved copy, but never over someone else's file, and a newer-looking one is replaced", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-opener-beside-"));
   const target = path.join(dir, OPENER_NAME);
   assert.equal(writeOpenerBeside(dir, "1.0.0"), "written");
   assert.ok(fs.readFileSync(target, "utf8").includes('content="1.0.0"'));
   assert.equal(writeOpenerBeside(dir, "1.0.0"), "current");
-  assert.equal(writeOpenerBeside(dir, "0.9.0"), "newer", "an older app leaves a newer opener alone, and says it did not check it");
+  assert.equal(writeOpenerBeside(dir, "0.9.0"), "written", "a page that says it is newer is not this app's bytes, so it is replaced");
+  assert.equal(fs.readFileSync(target, "utf8"), openerHtml("0.9.0"));
   assert.equal(writeOpenerBeside(dir, "1.10.0"), "written");
   assert.ok(fs.readFileSync(target, "utf8").includes('content="1.10.0"'));
 
@@ -192,12 +200,20 @@ test("the opener goes beside a saved copy, but never over someone else's file or
   const sha = nodeCrypto.createHash("sha256").update(fs.readFileSync(target)).digest("hex");
   assert.equal(openerSha256("1.10.0"), sha, "the fingerprint shown is the file's own SHA-256");
 
-  fs.writeFileSync(target, "<html>my own page</html>");
-  assert.equal(writeOpenerBeside(dir, "2.0.0"), "foreign");
-  assert.equal(fs.readFileSync(target, "utf8"), "<html>my own page</html>");
+  // A planted page only has to leave the marker out: it is moved aside under a name no browser runs.
+  fs.writeFileSync(target, "<html>mock planted page, no marker</html>");
+  assert.equal(writeOpenerBeside(dir, "2.0.0"), "moved");
+  assert.equal(fs.readFileSync(target, "utf8"), openerHtml("2.0.0"));
+  const aside = fs.readdirSync(dir).filter((f) => f.startsWith("KAPEVault Opener (moved aside "));
+  assert.equal(aside.length, 1);
+  assert.ok(aside[0].endsWith(".html.txt"), aside[0]);
+  assert.equal(fs.readFileSync(path.join(dir, aside[0]), "utf8"), "<html>mock planted page, no marker</html>", "its bytes are kept");
+  fs.writeFileSync(target, "<html>a second one the same day</html>");
+  assert.equal(writeOpenerBeside(dir, "2.0.0"), "moved");
+  assert.equal(fs.readdirSync(dir).filter((f) => f.startsWith("KAPEVault Opener (moved aside ")).length, 2, "never over an earlier one");
   fs.rmSync(target);
   fs.mkdirSync(target);
-  assert.equal(writeOpenerBeside(dir, "2.0.0"), "foreign");
+  assert.equal(writeOpenerBeside(dir, "2.0.0"), "foreign", "a folder of that name is left alone");
 });
 
 test("the opener is written through a new random temp file, never an existing one", () => {
@@ -222,10 +238,32 @@ test("one vault size limit: saving, both restores and the Forever Opener agree",
   }
 });
 
-test("versions compare by number", () => {
-  assert.ok(compareVersions("0.10.0", "0.9.2") > 0);
-  assert.ok(compareVersions("1.0", "1.0.0") === 0);
-  assert.ok(compareVersions("1.0.0-beta", "1.0.1") < 0);
+// Audit crypto 3 (2026-10-04): a planted page that claims 99.0.0 used to survive every later copy.
+test("a planted page that claims a far newer version is replaced, not trusted", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-opener-planted-"));
+  const target = path.join(dir, OPENER_NAME);
+  fs.writeFileSync(target, openerHtml("99.0.0").replace("</body>", "<p>mock planted line</p></body>"));
+  assert.equal(writeOpenerBeside(dir, "1.0.0"), "written");
+  assert.equal(fs.readFileSync(target, "utf8"), openerHtml("1.0.0"));
+});
+
+test("Check my Opener: genuine, changed (put back), missing, and not an opener", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-opener-check-"));
+  const target = path.join(dir, OPENER_NAME);
+  assert.equal(checkOpenerBeside(dir, "1.0.0"), "missing");
+  assert.ok(!fs.existsSync(target), "checking never creates one");
+  writeOpenerBeside(dir, "1.0.0");
+  assert.equal(checkOpenerBeside(dir, "1.0.0"), "genuine");
+  fs.writeFileSync(target, openerHtml("1.0.0").replace("</body>", "<p>mock planted line</p></body>"));
+  assert.equal(checkOpenerBeside(dir, "1.0.0"), "replaced");
+  assert.equal(fs.readFileSync(target, "utf8"), openerHtml("1.0.0"));
+  assert.equal(checkOpenerBeside(dir, "1.0.0"), "genuine");
+  fs.writeFileSync(target, "<html>mock planted page, no marker</html>");
+  assert.equal(checkOpenerBeside(dir, "1.0.0"), "replaced", "a page without the marker is no way around the check");
+  assert.equal(fs.readFileSync(target, "utf8"), openerHtml("1.0.0"));
+  fs.rmSync(target);
+  fs.mkdirSync(target);
+  assert.equal(checkOpenerBeside(dir, "1.0.0"), "foreign");
 });
 
 test("the cloud copy sits beside the snapshots, where listing and thinning never see it", () => {

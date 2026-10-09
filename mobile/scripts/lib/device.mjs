@@ -50,7 +50,15 @@ export function kapevaultDevice(who) {
   // The app's private files (run-as works on debug builds only).
   const appFiles = () => sh("shell", "run-as", APP, "ls", "files").split(/\s+/).filter(Boolean);
   const appFile = (name) => execFileSync(adb, ["-s", serial, "exec-out", "run-as", APP, "cat", `files/${name}`], { env, maxBuffer: 256 << 20 }).toString("utf8");
-  const clearAppFiles = () => sh("shell", "run-as", APP, "sh", "-c", "'rm -f files/*.kapevault files/*.json files/*.next files/backup-pending'");
+  const clearAppFiles = () => sh("shell", "run-as", APP, "sh", "-c", "'rm -f files/*.kapevault files/*.json files/*.next files/*.tmp files/backup-pending files/billing-fake'");
+  // As base64, which needs no quoting on the way through adb's shell (exec-in drops stdin here).
+  const writeAppFile = (name, text) => sh("shell", "run-as", APP, "sh", "-c", `'echo ${Buffer.from(text).toString("base64")} | base64 -d > files/${name}'`);
+  // KAPEVault Pro as a purchase leaves it (host/pro.ts): pro.json, and the debug build's fake Play store
+  // (BillingPlugin.kt) saying it is owned. The host reads them when the app starts.
+  const ownPro = () => {
+    writeAppFile("pro.json", JSON.stringify({ owned: true, pending: false }));
+    writeAppFile("billing-fake", "owned");
+  };
 
   // The clip as the system holds it, over the clipboard binder (IClipboard.getPrimaryClip is call 4 on
   // this Android image; the shell may read it in the background). Parcel words to text, NULs dropped.
@@ -229,5 +237,5 @@ export function kapevaultDevice(who) {
     return page;
   }
 
-  return { serial, sh, shBytes, pidOf, key, touchFinger, appFiles, appFile, clearAppFiles, clipText, resetLock, uiNodes, waitForText, tapText, enrollFingerprint, openPage };
+  return { serial, sh, shBytes, pidOf, key, touchFinger, appFiles, appFile, clearAppFiles, writeAppFile, ownPro, clipText, resetLock, uiNodes, waitForText, tapText, enrollFingerprint, openPage };
 }

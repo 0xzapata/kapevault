@@ -7,7 +7,7 @@ const login = (id, over = {}) => ({ id, kind: "login", spaceId: "s", title: `Moc
 test("a conflict copy is known by the title merge gives it", () => {
   assert.equal(isConflictCopy("Mock Portal (conflict copy, Mock Phone, 2026-09-27)"), true);
   assert.equal(isConflictCopy("Mock Portal (changed after closing, MOCK-DESKTOP, 2026-09-27)"), true);
-  assert.equal(isConflictCopy("Mama (conflict copy, Mock Phone (work), 2026-09-27) (check this number)"), true);
+  assert.equal(isConflictCopy("Mama (conflict copy, Mock Phone (work), 2026-09-27)"), true);
   for (const plain of ["Mock Portal", "Mock Portal (conflict copy)", "Notes (conflict copy, 2026-09-27)", "Mock (conflict copy, Phone, 2026-09-27) edited"]) assert.equal(isConflictCopy(plain), false, plain);
 });
 

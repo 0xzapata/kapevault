@@ -1,13 +1,15 @@
 // The mock vault host: the real host's contract over core/, in memory. No storage, no R2, no
 // fingerprint, no camera - each answers the way the real one would, after a believable wait.
-// Dev switches in the URL: ?firstrun starts at first run, ?nofingerprint turns fingerprint unlock off.
-import { clearHistory, confirmPayee, findIssues, masterProblem, newVaultData, publicView, removeEntries, secretOf, setRecoveryCodes, today, toggleFavorite, touchEntry, upsertEntry, addSpace, findEntry } from "@core";
+// Dev switches in the URL: ?firstrun starts at first run, ?nofingerprint turns fingerprint unlock off,
+// ?free starts without KAPEVault Pro, and store=unavailable|pending|cancel|owned is what Google Play does.
+import { clearGenerated, clearHistory, findIssues, masterProblem, newVaultData, publicView, deleteForever, emptyTrash, restoreEntry, trashEntry, generatedValue, generatedView, recordGenerated, secretOf, setRecoveryCodes, today, toggleFavorite, touchEntry, upsertEntry, addSpace, findEntry } from "@core";
 import { listeners } from "./listeners";
 import { CONFLICT_ID, MOCK_MASTER, NOTE_ID, mockVault } from "./mock-data";
+import { CLIENTS_ARE_PRO, canAddClient, canPlaceIn, createPro } from "./pro";
 import { parseSetupCode } from "./setup-code";
 import { MAX_VAULT_BYTES } from "./vault-file";
 import { totpCode } from "./totp";
-import type { BiometricStatus, CloudStatus, LockReason, PhoneSettings, SecretField, SyncStatus, VaultHost, VaultState, VaultView } from "./types";
+import type { BiometricStatus, CloudStatus, LockReason, PhoneSettings, ProStatus, SecretField, SyncStatus, VaultHost, VaultState, VaultView } from "./types";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const MIN = 60_000;
@@ -45,11 +47,43 @@ export function createMockHost(): VaultHost {
     review: params.has("review") ? { from: ["DESKTOP-4F2A"], reasons: ["deletes"], added: [], changed: [], deleted: ["Old router", "Gym locker", "Water bill", "Spare key", "Wi-Fi guest", "Netflix"], copies: [], secretItems: 0 } : null,
     newMaster: params.has("newmaster") ? "DESKTOP-4F2A" : undefined,
   };
+  // Without Pro the phone has only backed up: no peer; the other devices' rows stay, as on the real host.
+  const synced = sync;
+  const backupOnly = (): Partial<SyncStatus> => ({ backupOnly: true, lastAt: undefined, peer: undefined, fingerprint: undefined });
+  if (params.has("free")) sync = { ...sync, ...backupOnly() };
+  // Google Play as the mock plays it (play: its record of this account); pro.ts keeps the state, as on
+  // the phone, with pro.json in memory. ?free&store=owned: bought before a reinstall (pro.json empty, Play
+  // owns it), so opening the Pro sheet or Restore purchase brings Pro back.
+  const playMode = params.get("store");
+  let play = { owned: !params.has("free") || playMode === "owned", pending: false };
+  let kept = params.has("free") ? null : JSON.stringify(play);
+  const refuse = (code: string) => Promise.reject(Object.assign(new Error(code), { code }));
+  const pro = createPro({
+    store: { read: async () => kept, write: async (_name, text) => void (kept = text), remove: async () => {} },
+    billing: {
+      async status() {
+        await wait(700);
+        return playMode === "unavailable" ? refuse("unavailable") : { ...play, price: "US$9.99" };
+      },
+      async buy() {
+        await wait(900);
+        if (playMode === "unavailable" || playMode === "cancel") return refuse(playMode === "cancel" ? "canceled" : "unavailable");
+        play = { owned: playMode !== "pending", pending: playMode === "pending" };
+        return play;
+      },
+    },
+    onChange(flipped) {
+      proEvents.emit(pro.status());
+      if (flipped) setSync(pro.owned ? { ...synced, backupOnly: false, lastAt: Date.now() } : backupOnly());
+    },
+  });
+  void pro.load();
   let sessionTimer: ReturnType<typeof setTimeout> | undefined;
 
   const stateEvents = listeners<[VaultState, LockReason?]>();
   const changeEvents = listeners<[VaultView]>();
   const syncEvents = listeners<[SyncStatus]>();
+  const proEvents = listeners<[ProStatus]>();
 
   const view = (): VaultView => publicView(data, findIssues(data.entries, today(), mockHash)) as VaultView;
   const conflicts = () => {
@@ -175,6 +209,7 @@ export function createMockHost(): VaultHost {
       need();
       await wait(250);
       try {
+        if (!canPlaceIn(pro.owned, data, input)) throw new Error(CLIENTS_ARE_PRO);
         const id = upsertEntry(data, input);
         changed();
         return { ok: true, id };
@@ -184,7 +219,22 @@ export function createMockHost(): VaultHost {
     },
     async deleteEntry(id) {
       need();
-      removeEntries(data, new Set([id]));
+      trashEntry(data, id);
+      changed();
+    },
+    async restoreEntry(id) {
+      need();
+      restoreEntry(data, id);
+      changed();
+    },
+    async deleteForever(id) {
+      need();
+      deleteForever(data, id);
+      changed();
+    },
+    async emptyTrash() {
+      need();
+      emptyTrash(data);
       changed();
     },
     async toggleFavorite(id) {
@@ -192,15 +242,37 @@ export function createMockHost(): VaultHost {
       toggleFavorite(data, id);
       changed();
     },
-    async confirmPayee(id, number) {
-      need();
-      confirmPayee(data, id, number);
-      changed();
-    },
     async clearHistory(id) {
       need();
       clearHistory(data, id);
       changed();
+    },
+    // Generated passwords: the same core rules as the real host, in memory.
+    async recordGenerated(value) {
+      need();
+      recordGenerated(data, value);
+      changed();
+      return generatedView(data);
+    },
+    async generatedList() {
+      need();
+      return generatedView(data);
+    },
+    async getGenerated(index) {
+      need();
+      return generatedValue(data, index);
+    },
+    async copyGenerated(index) {
+      need();
+      const value = generatedValue(data, index);
+      if (!value) throw new Error("Nothing to copy");
+      await clip(value, true);
+    },
+    async clearGenerated() {
+      need();
+      clearGenerated(data);
+      changed();
+      return generatedView(data);
     },
     async setRecoveryCodes(id, codes) {
       need();
@@ -215,6 +287,7 @@ export function createMockHost(): VaultHost {
     async addSpace(name) {
       need();
       try {
+        if (!canAddClient(pro.owned)) throw new Error(CLIENTS_ARE_PRO);
         const id = addSpace(data, name);
         changed();
         return { ok: true, id };
@@ -257,7 +330,7 @@ export function createMockHost(): VaultHost {
       setSync({ state: "syncing" });
       await wait(1300);
       const now = Date.now();
-      setSync({ state: "idle", lastAt: now, devices: sync.devices.map((d) => ({ ...d, lastSyncAt: d.thisDevice ? now : d.lastSyncAt })) });
+      setSync({ state: "idle", lastAt: pro.owned ? now : undefined, devices: sync.devices.map((d) => ({ ...d, lastSyncAt: d.thisDevice ? now : d.lastSyncAt })) });
       return { ok: true };
     },
     async applySync() {
@@ -312,6 +385,11 @@ export function createMockHost(): VaultHost {
       settings = { ...settings, ...patch };
       return { ...settings };
     },
+
+    proStatus: async () => pro.status(),
+    onPro: proEvents.add,
+    restorePro: () => pro.ask(),
+    buyPro: () => pro.buy(),
 
     // Any file whose header says kapevault stands for a backup (under the real size cap); it opens with
     // the mock master password.

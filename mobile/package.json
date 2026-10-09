@@ -1,17 +1,21 @@
 {
   "name": "kapevault-mobile",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.7",
   "license": "GPL-3.0-only",
   "scripts": {
     "sim": "node scripts/sim.mjs",
     "sim:live": "node scripts/sim.mjs --live",
+    "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "sync": "vite build && cap sync android",
     "apk": "vite build --mode debug && cap sync android && node scripts/gradle.mjs assembleDebug",
     "apk:release": "npm run build && cap sync android && node scripts/apk-release.mjs",
+    "apk:release:foss": "npm run build && cap sync android && node scripts/apk-release.mjs --foss",
+    "aab:release": "npm run build && cap sync android && node scripts/apk-release.mjs --bundle",
+    "notices:android": "node scripts/android-notices.mjs --check",
     "proof": "node scripts/proof.mjs",
-    "test": "node --import ./src/app/host/test/register.mjs --test \"src/app/host/**/*.test.mjs\" \"src/app/features/**/*.test.mjs\" \"scripts/*.test.mjs\""
+    "test": "node --import ./src/app/host/test/register.mjs --test \"src/app/host/**/*.test.mjs\" \"src/app/hooks/**/*.test.mjs\" \"src/app/features/**/*.test.mjs\" \"scripts/*.test.mjs\""
   },
   "dependencies": {
     "@capacitor/android": "8.5.2",

@@ -3,7 +3,7 @@
 // region, and set the viewBox to it (the rest of the path is clipped away by the viewport).
 // Also prints the column coverage profile so a clean gap between symbol and wordmark can be chosen.
 const { chromium } = require("./playwright.cjs");
-const fs = require("fs");
+const fs = require("node:fs");
 const [inp, out, region, padArg, sq] = process.argv.slice(2);
 const [x0, y0, x1, y1] = region.split(",").map(Number);
 const pad = Number(padArg ?? 0.04);
@@ -19,7 +19,7 @@ const src = fs.readFileSync(inp, "utf8").replace(/<\?xml[^>]*>|<!DOCTYPE[^>]*>/g
     if (vb.length !== 4) vb = [0, 0, parseFloat(svg.getAttribute("width")), parseFloat(svg.getAttribute("height"))];
     const W = 2000, H = Math.round((2000 * vb[3]) / vb[2]);
     svg.setAttribute("width", W); svg.setAttribute("height", H);
-    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+    const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(svg))}`;
     const img = new Image(); img.src = url; await img.decode();
     const c = document.createElement("canvas"); c.width = W; c.height = H;
     const g = c.getContext("2d"); g.drawImage(img, 0, 0, W, H);
@@ -41,11 +41,11 @@ const src = fs.readFileSync(inp, "utf8").replace(/<\?xml[^>]*>|<!DOCTYPE[^>]*>/g
   }, { src, x0, y0, x1, y1, pad, sq: !!sq });
   await b.close();
   let outSvg = src.replace(/<svg\b[^>]*>/, (tag) => {
-    let t = tag.replace(/\s(width|height|viewBox|style|x|y|enable-background)="[^"]*"/g, "");
+    const t = tag.replace(/\s(width|height|viewBox|style|x|y|enable-background)="[^"]*"/g, "");
     return t.replace(/<svg/, `<svg viewBox="${r.vb}"`);
   });
   outSvg = outSvg.replace(/<metadata[\s\S]*?<\/metadata>/g, "").replace(/<title>[\s\S]*?<\/title>/g, "");
-  fs.writeFileSync(out, outSvg.trim() + "\n");
-  console.log(out.split("/").pop(), "viewBox", r.vb, fs.statSync(out).size + "B");
+  fs.writeFileSync(out, `${outSvg.trim()}\n`);
+  console.log(out.split("/").pop(), "viewBox", r.vb, `${fs.statSync(out).size}B`);
   console.log("  cols", r.profile);
 })();

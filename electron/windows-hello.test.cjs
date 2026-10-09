@@ -296,3 +296,64 @@ test("a hello.json read that fails for a moment is tried again", async (t) => {
   hello.touchMaster(key);
   assert.equal(hello.masterAt(), clock.t, "sealed again: the 14 days start over");
 });
+
+// --- the real script under conditions this PC's policy can create (Windows only) ----------------------
+
+const { execFile } = require("node:child_process");
+const { powershellPath, psInvocation } = require("./system-tools.cjs");
+const windows = { skip: process.platform !== "win32" && "Windows only" };
+
+// Runs script text the way the app does, with the caller's whole environment.
+function runLikeTheApp(script, env, stdin) {
+  const { args, input } = psInvocation(script, stdin);
+  return new Promise((resolve) => {
+    const child = execFile(powershellPath(), args, { windowsHide: true, timeout: 60_000, encoding: "utf8", env: { ...process.env, ...env } }, (_err, stdout) => resolve(String(stdout).trim().split(/\r?\n/).filter((l) => l.startsWith("{")).pop()));
+    child.stdin.end(input);
+  });
+}
+// Windows PowerShell 5.1 ignores __PSLockdownPolicy set on a single process (only the machine-wide
+// one counts, which takes admin; measured), so Constrained Language Mode is entered the way PowerShell
+// itself allows: a session's language mode can be lowered, never raised.
+const CONSTRAINED = "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'\n";
+const helloScript = (op) => `$Op = '${op}'; $Challenge = ''\n${fs.readFileSync(path.join(__dirname, "windows-hello.ps1"), "utf8").replace(/^﻿/, "")}`;
+
+test("a focus helper that cannot compile does not stop Windows Hello", windows, async () => {
+  // Start-FocusWatch exactly as shipped, with Add-Type made to fail the way a blocked csc.exe does.
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "$ast = [System.Management.Automation.Language.Parser]::ParseFile($env:KVW_HELLO_PS1, [ref]$null, [ref]$null)",
+    "$fn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Start-FocusWatch' }, $true)",
+    "Invoke-Expression $fn.Extent.Text",
+    "function Add-Type { throw 'csc.exe is blocked' }",
+    "try { Start-FocusWatch; @{ survived = $true } | ConvertTo-Json -Compress } catch { @{ survived = $false; message = $_.Exception.Message } | ConvertTo-Json -Compress }",
+  ].join("\n");
+  const answer = JSON.parse(await runLikeTheApp(script, { KVW_HELLO_PS1: path.join(__dirname, "windows-hello.ps1") }));
+  assert.equal(answer.survived, true, answer.message);
+});
+
+test("Constrained Language Mode: every op says Constrained instead of failing without an answer", windows, async () => {
+  for (const op of ["supported", "create", "sign", "delete"]) {
+    const answer = JSON.parse((await runLikeTheApp(CONSTRAINED + helloScript(op), {})) ?? "{}");
+    assert.equal(answer.status, "Constrained", `op ${op}`);
+  }
+});
+
+test("Full Language Mode still answers as before", windows, async () => {
+  const answer = JSON.parse((await runLikeTheApp(helloScript("supported"), {})) ?? "{}");
+  assert.equal(answer.status, "Success");
+});
+
+// Windows only: elsewhere isSupported() says no before it asks the bridge (there is no Windows Hello).
+test("a PC whose policy blocks PowerShell features is told so, not that Hello is not set up", windows, async () => {
+  const blockedAnswer = async () => ({ status: "Constrained" });
+  const backend = { supported: blockedAnswer, create: blockedAnswer, sign: blockedAnswer, delete: async () => ({ status: "Success" }) };
+  const { dataDir } = setup();
+  const hello = createWindowsHello({ dataDir, backend });
+  assert.equal(hello.status().blockedByPolicy, undefined, "not known until Hello has been asked");
+  assert.equal(await hello.isSupported(), false);
+  assert.deepEqual(hello.status(), { enabled: false, needsMaster: false, blockedByPolicy: true });
+  await rejectsWith(hello.enable(crypto.randomBytes(32)), "blocked");
+  const blocked = await hello.enable(crypto.randomBytes(32)).catch((e) => e);
+  assert.equal(blocked.message, "This PC's policy blocks Windows Hello for KAPEVault.");
+  assert.equal(createWindowsHello({ dataDir: os.tmpdir(), fake: "approve" }).status().blockedByPolicy, undefined);
+});

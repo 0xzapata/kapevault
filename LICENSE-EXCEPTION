@@ -1,0 +1,57 @@
+KAPEVault - additional permission under GNU GPL version 3, section 7
+
+Copyright (C) 2026 BrewedOps.
+
+KAPEVault is licensed under the GNU General Public License, version 3 only (the
+file LICENSE, which is the unmodified GPL text). This file adds one permission
+to it, as section 7 of that licence allows. It does not change the GPL text.
+
+The phone app (Android) is built with Google's Play Billing Library and the
+Google Play services client libraries it depends on. They are not free
+software: their licence is the Android Software Development Kit License
+(https://developer.android.com/studio/terms.html), which is not a GPL-compatible
+licence. Without a permission from the holders of KAPEVault's copyright, the
+GPL does not allow the phone app and those libraries to be distributed
+together. The holders give that permission here.
+
+
+Additional permission under GNU GPL version 3 section 7
+
+If you modify this Program, or any covered work, by linking or combining it
+with the Google Play Billing Library (com.android.billingclient:billing) or
+the Google Play services client libraries (com.google.android.gms:
+play-services-base, play-services-basement, play-services-tasks,
+play-services-location and play-services-places-placereport), or a modified
+version of those libraries, containing parts covered by the terms of the
+Android Software Development Kit License, the licensors of this Program grant
+you additional permission to convey the resulting work.
+
+Google does not publish the source of those libraries, so, as the FSF's
+template for this permission provides for libraries whose source cannot be
+distributed, the combination's Corresponding Source does not have to include
+it. It must include all of KAPEVault's own source.
+
+
+Scope
+
+- The permission covers every file of KAPEVault's own source in this
+  repository, unless a file says otherwise. It covers only the libraries
+  named above and nothing else: any other library has to be compatible with
+  the GPL on its own terms.
+- It is for the Android app and its builds. Nothing in the PC app depends on
+  these libraries.
+- A build without Google Play Billing needs no permission at all: see
+  mobile/README.md.
+- As section 7 says, you may remove this permission from your copy of the
+  Program, or from any part of it. A copy from which it has been removed is
+  GPL-3.0-only, and so must not be combined with those libraries.
+- Contributions are accepted under the GPL with this permission
+  (CONTRIBUTING.md). The permission is granted by the licensors of the
+  Program, so a contributor who does not agree to it should not send code.
+
+Wording follows the FSF's own template for linking with libraries that are not
+under the GPL: https://www.gnu.org/licenses/gpl-faq.html#GPLIncompatibleLibs
+(the GPLv3 notice; "GPL version 3 only" replaces its "version 3 or any later
+version"). The same practice exists in other GPL Android apps, for example
+OpenVPN for Android (https://github.com/schwabe/ics-openvpn, doc/LICENSE.txt),
+which grants a linking exception for OpenSSL and for Apache-2.0 libraries.

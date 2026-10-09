@@ -15,18 +15,20 @@ import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { APP, PIN, kapevaultDevice, sleep } from "../../../../scripts/lib/device.mjs";
 import { R2_KEYS, fakeR2, pc, pcVaultText } from "./fixtures.mjs";
-import { aimCamera } from "../../../../scripts/emu-camera.mjs";
+import { aimCamera, discovery } from "../../../../scripts/emu-camera.mjs";
 import { TOTP_CODE } from "./qr-poster.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..", "..", "..", "..");
 const out = path.join(root, "proof", "host");
-const MASTER = "Lantern-Mango-Quiet-47";
+const MASTER = "Lantern-Mango-Quiet-47-Orbit-Gazelle"; // no spaces: `adb shell input text` types it, and adb splits text at a space
 const PC_ID = "9d9d9d9d-1c1d-4e5f-8a9b-0c1d2e3f4a5b";
 const PERSONAL = "5c1f7c1e-0000-4000-8000-000000000001";
 const CDP_PORT = 9334;
 const results = [];
 fs.mkdirSync(out, { recursive: true });
+// Fail now, not 28 checks in: the camera steps need the gRPC that a `npm run sim -- --no-window` boot writes.
+discovery();
 
 function check(name, ok, detail) {
   results.push({ name, ok, detail });
@@ -35,7 +37,7 @@ function check(name, ok, detail) {
 
 // --- adb (scripts/lib/device.mjs) ---------------------------------------------------------------------
 
-const { sh, key, touchFinger, appFiles, appFile, clearAppFiles, clipText, resetLock, waitForText, tapText, ...device } = kapevaultDevice("device-proof");
+const { sh, key, touchFinger, appFiles, appFile, clearAppFiles, ownPro, clipText, resetLock, waitForText, tapText, ...device } = kapevaultDevice("device-proof");
 
 async function enrollFingerprint(finger) {
   await device.enrollFingerprint(finger);
@@ -169,11 +171,11 @@ try {
   // Fresh installs, as a user meets them, on the app's own host (main.tsx). A DevTools script added
   // before the app's code bends only the URL of each native HTTP call to an R2 host, to the fake bucket
   // (as device-entry.ts does for the proof's host).
-  const PHONE_MASTER = "Copper-Violet-Harbor-83";
+  const PHONE_MASTER = "Copper-Violet-Harbor-83-Orbit-Gazelle";
   async function freshInstall() {
     page?.close();
     sh("shell", "am", "force-stop", APP);
-    clearAppFiles();
+    clearAppFiles(); // without KAPEVault Pro
     page = await openPage({ restart: true });
     await page.send("Page.enable"); // without it the WebView never runs the script below
     await page.send("Page.addScriptToEvaluateOnNewDocument", {
@@ -223,7 +225,8 @@ try {
   check("Create: the vault is made on the phone and opens (no fingerprint on the phone: no offer)", /All items/.test(text) && appFiles().includes("vault.kapevault"), text.slice(0, 120));
   const created = await pc.crypto.openFile(PHONE_MASTER, JSON.parse(appFile("vault.kapevault")));
   check("the PC's vault-crypto opens the vault the phone made, its Personal space naming it", created?.data.spaces[0]?.kind === "personal" && created.data.sync.vaultId === created.data.spaces[0].id && created.data.cloud === undefined);
-  check("R2 off: the sync line only says No backup yet", /No backup yet/.test(text));
+  // The sync line draws once the host's first sync status comes, which can be just after the list.
+  check("R2 off: the sync line only says No backup yet", /No backup yet/.test(await page.text(/No backup yet/)));
 
   await page.click("New");
   await page.text(/Kind of item|Title/);
@@ -250,6 +253,14 @@ try {
   check("unlock with the new master password: the item is there", /Phone locker/.test(text), text.slice(0, 120));
 
   // 2. Settings > Backup and sync > Connect to R2: the bucket holds the PC's vault, "Use the vault from your PC".
+  // It then syncs, which is KAPEVault Pro's: bought here (the files a purchase leaves, read as the page starts).
+  ownPro();
+  await page.send("Page.reload", {});
+  await page.loaded("/");
+  await page.text(/Enter your master password/);
+  await fill("Master password", PHONE_MASTER);
+  await page.evaluate(`document.querySelector("form")?.requestSubmit()`);
+  await page.text(/Phone locker/, 30_000);
   await page.click("Settings");
   text = await page.text(/Connect to R2/);
   await page.screenshot("6-settings-backup-off.png");
@@ -261,9 +272,13 @@ try {
   await page.click("Connect");
   text = await page.text(/This bucket holds another vault/, 30_000);
   await page.screenshot("7-another-vault.png");
-  check("a bucket holding another vault asks: Use the vault from your PC, or Keep this phone's vault", /Use the vault from your PC/.test(text) && /Keep this phone's vault/.test(text) && /1 item moves/.test(text), text.slice(0, 240));
+  check("a bucket holding another vault asks: Use the vault from your PC, or Keep this phone's vault", /Use the vault from your PC/.test(text) && /Keep this phone's vault/.test(text) && /1 item is copied into it/.test(text), text.slice(0, 240));
   await fill("Master password of the vault from your PC", MASTER);
   await page.click("Use that vault");
+  text = await page.text(/Copy your items there\?/);
+  await page.screenshot("7b-confirm-carry.png");
+  check("before carrying, a danger confirm names the bucket and warns off being asked to", /set up this bucket yourself/.test(text) && /Copy 1 item and continue/.test(text), text.slice(0, 240));
+  await page.click("Copy 1 item and continue");
   await page.click("Items");
   text = await page.text(/Mail[\s\S]*Phone locker|Phone locker[\s\S]*Mail/, 30_000);
   await page.screenshot("8-used-pc-vault.png");
@@ -307,6 +322,15 @@ try {
   const list = await page.text(/Mail/, 30_000);
   await page.screenshot("10-restored-list.png");
   check("restore via the link: the list from the PC's backup", /Mail/.test(list) && appFiles().includes("vault.kapevault"), list.slice(0, 160));
+  // Without Pro this phone only backs up: its uploads are named -backup-only, and the sync line says so.
+  const phoneId = JSON.parse(appFile("settings.json")).installId;
+  let phoneKeys = [];
+  for (let i = 0; i < 40 && !phoneKeys.length; i += 1) {
+    await sleep(500);
+    phoneKeys = [...r2.objects.keys()].filter((k) => pc.cloud.snapshotOwner(k) === phoneId);
+  }
+  const backupLine = await page.text(/Backed up|Backs up to your bucket/);
+  check("without Pro the restored phone backs up only: its upload ends in -backup-only, the sync line says backed up", phoneKeys.length > 0 && phoneKeys.every((k) => k.endsWith("-backup-only.kapevault")) && /Backed up|Backs up to your bucket/.test(backupLine) && !/Synced with/.test(backupLine), { phoneKeys, line: backupLine.slice(0, 160) });
 
   // 4. The item form's 2FA "Scan QR code", camera already allowed.
   await aimCamera("totp");

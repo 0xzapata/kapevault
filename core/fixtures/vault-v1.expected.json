@@ -1,0 +1,467 @@
+{
+  "spaces": [
+    {
+      "id": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "name": "Personal",
+      "kind": "personal"
+    }
+  ],
+  "entries": [
+    {
+      "id": "0159c784-6463-4c24-88f0-897888bf343e",
+      "spaceId": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "title": "Mock Mail",
+      "tags": [
+        "mock"
+      ],
+      "favorite": true,
+      "notes": "mock note",
+      "updatedAt": "2026-10-09",
+      "kind": "login",
+      "username": "mock.user@example.com",
+      "password": "mock-pass-two",
+      "url": "mail.example.com",
+      "signIn": "password",
+      "totp": "otpauth://totp/KAPEVault?secret=JBSWY3DPEHPK3PXP&algorithm=SHA1&digits=6&period=30",
+      "history": [
+        {
+          "password": "mock-pass-one",
+          "changedAt": "2026-10-09T06:45:18.262Z"
+        }
+      ],
+      "passwordChangedAt": "2026-10-09"
+    },
+    {
+      "id": "9289472e-bcf3-4b8d-a633-a09ea2f1598e",
+      "spaceId": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "title": "Mock Note",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "note",
+      "body": "mock secret body é中"
+    },
+    {
+      "id": "2b1bbe9d-9736-4b44-b2f8-6af5982f8972",
+      "spaceId": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "title": "Mock API Key",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "key",
+      "keyId": "mock-key-id",
+      "secret": "mock-secret-token",
+      "url": "",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "339cdd74-2951-4666-b193-df6cdf473279",
+      "spaceId": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "title": "Mock Docs",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "link",
+      "linkType": "web",
+      "location": "https://example.com/docs"
+    },
+    {
+      "id": "4c2825cd-de82-4a5a-b961-e7c452aa0c39",
+      "spaceId": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "title": "Mock Payee",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "payee",
+      "who": "Mock Person",
+      "provider": "GCash",
+      "number": "09171234567"
+    },
+    {
+      "id": "378b35fe-bfdd-4a83-bfc4-edd01d90d8f3",
+      "spaceId": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "title": "Mock Trashed",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "note",
+      "body": "in the trash",
+      "trashedAt": "2026-10-09T06:45:18.453Z"
+    }
+  ],
+  "minReader": 1,
+  "sync": {
+    "v": 1,
+    "vaultId": "cfd98c67-3929-466e-9ded-b228b2851938",
+    "epoch": {
+      "id": "cfd98c67-3929-466e-9ded-b228b2851938",
+      "at": [
+        0,
+        0,
+        ""
+      ]
+    },
+    "keys": [
+      {
+        "salt": "6mfeCJYhepjU17uQsc9UiA==",
+        "n": 1,
+        "at": [
+          0,
+          0,
+          ""
+        ],
+        "by": ""
+      }
+    ],
+    "clock": [
+      1791528318453,
+      0,
+      "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+    ],
+    "meta": {
+      "0159c784-6463-4c24-88f0-897888bf343e": {
+        "vv": {
+          "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40": 2
+        },
+        "g": {
+          "space": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318226,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "core": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318226,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "fav": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318226,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "pw": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              2
+            ],
+            "at": [
+              1791528318262,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "totp": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318226,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "history": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              2
+            ],
+            "at": [
+              1791528318262,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          }
+        },
+        "h": "dbf1bc4293ac127eb665d9d2a2836284ef33ad8ef8857ff44926b21965774484"
+      },
+      "9289472e-bcf3-4b8d-a633-a09ea2f1598e": {
+        "vv": {
+          "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40": 1
+        },
+        "g": {
+          "space": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318303,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "core": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318303,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "fav": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318303,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "body": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318303,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          }
+        },
+        "h": "3b041aefacc43a4a195ad1c0f7753e9b8ddc544bdffdd53effe784f1abf8f0b9"
+      },
+      "2b1bbe9d-9736-4b44-b2f8-6af5982f8972": {
+        "vv": {
+          "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40": 1
+        },
+        "g": {
+          "space": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318345,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "core": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318345,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "fav": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318345,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "secret": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318345,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          }
+        },
+        "h": "51df8a1f8c22725c99cca0a3c5a5ad5c39d4cb8575094515bf9ff20cf4c56b18"
+      },
+      "339cdd74-2951-4666-b193-df6cdf473279": {
+        "vv": {
+          "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40": 1
+        },
+        "g": {
+          "space": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318370,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "core": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318370,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "fav": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318370,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          }
+        },
+        "h": "f8b690e1a1f30eb524144983ca6c5035ad70ca54539a802a4e6c5cd49e55332e"
+      },
+      "4c2825cd-de82-4a5a-b961-e7c452aa0c39": {
+        "vv": {
+          "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40": 1
+        },
+        "g": {
+          "space": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318395,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "core": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318395,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "fav": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318395,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "pay": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318395,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          }
+        },
+        "h": "f5e9e119301bb9d9423143af4ae5ce47998d34014568f54907836545b94f33e4"
+      },
+      "378b35fe-bfdd-4a83-bfc4-edd01d90d8f3": {
+        "vv": {
+          "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40": 2
+        },
+        "g": {
+          "space": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318428,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "core": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318428,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "fav": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318428,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "body": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              1
+            ],
+            "at": [
+              1791528318428,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          },
+          "trash": {
+            "dot": [
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40",
+              2
+            ],
+            "at": [
+              1791528318453,
+              0,
+              "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40"
+            ]
+          }
+        },
+        "h": "b73f0fb68aca3b72e89d42ff349089c2d2f4184a7ea9ca75f4db984ea5da45fa"
+      }
+    },
+    "gone": {},
+    "histFloor": {},
+    "devices": {}
+  },
+  "keySalt": "6mfeCJYhepjU17uQsc9UiA=="
+}

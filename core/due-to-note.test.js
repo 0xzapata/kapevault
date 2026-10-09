@@ -79,6 +79,6 @@ test("a link to a login that is gone is left out; every other item passes throug
   const others = [portal, { id: "mock-note", kind: "note", title: "Mock", body: "For: SSS" }];
   const converted = dueToNotes(others);
   assert.deepEqual(converted, others);
-  converted.forEach((e, i) => assert.equal(e, others[i], "the same object"));
+  for (const [i, e] of converted.entries()) assert.equal(e, others[i], "the same object");
   assert.deepEqual(dueToNotes(dueToNotes([{ kind: "due", title: "Mock", nextDue: "2026-12-01" }])), [{ kind: "note", title: "Mock", body: "Next due: 2026-12-01" }], "twice = once");
 });

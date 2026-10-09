@@ -16,6 +16,8 @@ export function SortMenu({ value, onChange, onClose }: { value: SortOrder; onCha
 
   return createPortal(
     <div data-closing={closing || undefined}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the scrim closes the menu on a tap outside it; the back gesture closes it too */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the scrim closes the menu on a tap outside it; the back gesture closes it too */}
       <div className="fixed inset-0 z-40" onClick={close} />
       <div role="menu" aria-label="Sort by" className="drop fixed right-3 top-[calc(var(--sat)+50px)] z-50 w-56 rounded-[14px] border border-line bg-raised p-1 shadow-sheet">
         <p className="px-3 pb-1 pt-2 text-[11.5px] font-semibold text-ink-3">Sort by</p>

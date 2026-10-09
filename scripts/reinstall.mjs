@@ -9,11 +9,14 @@ import path from "node:path";
 const { version } = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const local = process.env.LOCALAPPDATA;
 const setup = path.join(local, "KAPEVault-build", `KAPEVault Setup ${version}.exe`);
-const exe = path.join(local, "Programs", "kapevault", "KAPEVault.exe");
-const asar = path.join(local, "Programs", "kapevault", "resources", "app.asar");
 const shortcut = path.join(process.env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "KAPEVault.lnk");
 const QUIT_WAIT_MS = 15_000;
 const ps = (command) => execFileSync("powershell", ["-NoProfile", "-Command", command], { encoding: "utf8" }).trim();
+// The wizard lets the folder be picked (D:\Kapevault on this PC) and a silent install reuses it, so
+// the Start menu shortcut says where the app lives; the default folder only before a first install.
+const linked = fs.existsSync(shortcut) ? ps(`(New-Object -ComObject WScript.Shell).CreateShortcut('${shortcut}').TargetPath`) : "";
+const exe = linked || path.join(local, "Programs", "kapevault", "KAPEVault.exe");
+const asar = path.join(path.dirname(exe), "resources", "app.asar");
 const appCount = () => Number(ps("(Get-Process KAPEVault -ErrorAction SilentlyContinue).Count"));
 
 execSync("npm run installer", { stdio: "inherit" });
@@ -31,7 +34,7 @@ if (appCount() > 0) {
     ps("Get-Process KAPEVault -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1");
   }
 }
-execFileSync(setup, ["/S"]); // one-click NSIS: /S installs silently and waits
+execFileSync(setup, ["/S"]); // NSIS: /S skips the wizard, installs for this user and waits
 spawnSync("explorer.exe", [shortcut]); // clean env like a Start click; explorer exits 1 even on success
 await new Promise((r) => setTimeout(r, 6000));
 

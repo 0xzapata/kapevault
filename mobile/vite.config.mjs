@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { buildNotices } from "./scripts/lib/notices.mjs";
 
 // The built pages get a strict CSP: only the app's own script, style, font and images (plus blob: for
 // an ID's photo, made in the page from the vault), no requests of any kind. The dev server (npm run sim:live, debug builds only) goes without it, since reloads need
@@ -17,6 +18,13 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     tailwindcss(),
+    {
+      // Settings > About > Open source licences: the texts of what ships, made from the lockfile and the
+      // committed Android list on every build, so they cannot go stale (scripts/lib/notices.mjs).
+      name: "kapevault-notices",
+      resolveId: (id) => (id === "virtual:kapevault-notices" ? "\0virtual:kapevault-notices" : null),
+      load: (id) => (id === "\0virtual:kapevault-notices" ? `export default ${JSON.stringify(buildNotices())};` : null),
+    },
     {
       name: "kapevault-csp",
       apply: "build",

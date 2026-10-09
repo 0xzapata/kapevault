@@ -124,7 +124,8 @@ export function Menu({ anchor, items, onClose, label }: { anchor: MenuAnchor; it
     >
       {items.map((item, i) =>
         item === "separator" ? (
-          <div key={`sep-${i}`} role="separator" className="mx-2 my-1 h-px bg-line" />
+          // biome-ignore lint/suspicious/noArrayIndexKey: a menu's items are a fixed array for as long as it is open; a separator has no label to key by
+          <hr key={`sep-${i}`} className="mx-2 my-1 h-px border-0 bg-line" />
         ) : (
           <button
             key={item.label}

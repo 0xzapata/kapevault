@@ -5,7 +5,7 @@
 cd "$(dirname "$0")/.." || exit 1
 [ "$1" = "--no-build" ] || npm run build > /dev/null 2>&1 || { echo "BUILD FAILED"; exit 1; }
 failed=0
-for s in e2e e2e-v2 e2e-payee e2e-held-for e2e-recovery-codes e2e-lie-keeper e2e-shrink-queue e2e-where-is-it e2e-sticker-capture e2e-id e2e-air-wall e2e-opener e2e-carryover e2e-sync; do
+for s in e2e e2e-v2 e2e-held-for e2e-recovery-codes e2e-lie-keeper e2e-shrink-queue e2e-where-is-it e2e-sticker-capture e2e-id e2e-air-wall e2e-opener e2e-carryover e2e-sync; do
   out=$(node "scripts/$s.cjs" 2>&1); code=$?
   echo "== $s exit=$code :: $(echo "$out" | grep -iE 'passed|failed' | tail -1)"
   if [ $code -ne 0 ]; then failed=1; echo "$out" | grep -iE 'fail|error' | head -8; fi

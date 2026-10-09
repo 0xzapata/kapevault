@@ -1,12 +1,12 @@
 // Contact sheet of every bundled logo on a checkerboard, to confirm each is transparent and not a
 // wordmark before keeping it. Run after fetch-logos: `npm run logos:check` -> %TEMP%\kapevault-logos.png
 const { chromium } = require("./playwright.cjs");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const dir = path.resolve(__dirname, "..", "src", "assets", "logos");
-const toUrl = (p) => "file:///" + p.split(path.sep).join("/");
+const toUrl = (p) => `file:///${p.split(path.sep).join("/")}`;
 const cells = fs
   .readdirSync(dir)
   .sort()

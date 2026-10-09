@@ -1,8 +1,8 @@
 // Real-window proof: a mock old BOVault folder is carried into a fresh KAPEVault data dir and unlocks.
 // Part of npm run e2e. Throwaway folders only - the real %APPDATA%/BOVault is never read.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createVaultSession } = require("../electron/vault-session.cjs");
 const { createHarness } = require("./e2e-harness.cjs");
 
@@ -12,7 +12,7 @@ const { createHarness } = require("./e2e-harness.cjs");
   const data = path.join(root, "KAPEVault");
   fs.mkdirSync(legacy);
   const old = createVaultSession(path.join(legacy, "vault.bovault"));
-  await old.create("correct horse battery");
+  await old.create("correct horse battery orbit gazelle");
   old.importEntries([{ space: "Acme Client", kind: "login", title: "Mock Carry Login", username: "team@acme.test", password: "pw-1" }]);
   old.lock();
   const f = path.join(legacy, "vault.bovault");
@@ -22,7 +22,7 @@ const { createHarness } = require("./e2e-harness.cjs");
   const h = createHarness();
   const { app, page, errors } = await h.launch({ KAPEVAULT_DATA_DIR: data, KAPEVAULT_LEGACY_DIR: legacy });
   h.check("vault copied into the new folder", fs.existsSync(path.join(data, "vault.kapevault")));
-  await page.getByPlaceholder("Master password", { exact: true }).fill("correct horse battery");
+  await page.getByPlaceholder("Master password", { exact: true }).fill("correct horse battery orbit gazelle");
   await page.keyboard.press("Enter");
   h.check("old vault unlocks in KAPEVault and shows its items", await page.getByText("Mock Carry Login").first().waitFor({ timeout: 20000 }).then(() => true, () => false));
   h.check("window title is KAPEVault", (await page.title()) === "KAPEVault");
@@ -42,7 +42,7 @@ const { createHarness } = require("./e2e-harness.cjs");
   await oldPw.fill("mock wrong passphrase");
   await dialog.getByRole("button", { name: "Confirm delete" }).click();
   h.check("a wrong old password deletes nothing", await dialog.getByText("Wrong master password for that vault.").waitFor({ timeout: 8000 }).then(() => fs.existsSync(f), () => false));
-  await oldPw.fill("correct horse battery");
+  await oldPw.fill("correct horse battery orbit gazelle");
   await dialog.getByRole("button", { name: "Confirm delete" }).click();
   h.check("Confirm delete removes the old vault", await dialog.getByText("Old vault", { exact: true }).waitFor({ state: "hidden", timeout: 4000 }).then(() => !fs.existsSync(f), () => false));
   h.check("the empty old folder goes too", !fs.existsSync(legacy));

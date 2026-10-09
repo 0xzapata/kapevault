@@ -2,10 +2,11 @@
 // tests run on real device histories. The edits call the real core functions; the test file fakes their
 // clock and ids and stamps each edit with the real stamp().
 import { newSync, validSync } from "./shape.js";
-import { clearHistory, confirmPayee, moveEntry, removeEntries, toggleFavorite, touchEntry, upsertEntry } from "../entries.js";
+import { clearHistory, isTrashed, moveEntry, removeEntries, toggleFavorite, touchEntry, upsertEntry } from "../entries.js";
 import { confirmGone, setLifecycle } from "../lifecycle.js";
 import { markRecoveryCode, setRecoveryCodes } from "../recovery-codes.js";
 import { addSpace, deleteSpace, renameSpace } from "../spaces.js";
+import { deleteForever, restoreEntry, trashEntry } from "../trash.js";
 
 export const DEVICES = [
   { id: "dev-a", name: "Test PC" },
@@ -40,10 +41,9 @@ const SHARED_CODES = ["1111-2222", "3333-4444", "5555-6666", "7777-8888", "9999-
 export function editor(r) {
   let count = 0;
   const value = () => (r.chance(0.2) ? r.pick(["alpha", "bravo"]) : `v${++count}`);
-  const digits = (n) => Array.from({ length: n }, () => r.int(10)).join("");
   const totp = () => (r.chance(0.3) ? "" : Array.from({ length: 16 }, () => r.pick([...BASE32])).join(""));
   const liveEntry = (data, kind) => {
-    const pool = data.entries.filter((e) => (!kind || e.kind === kind) && e.lifecycle?.state !== "gone");
+    const pool = data.entries.filter((e) => (!kind || e.kind === kind) && e.lifecycle?.state !== "gone" && !isTrashed(e));
     if (!pool.length) throw new Error("nothing to edit");
     return r.pick(pool);
   };
@@ -51,19 +51,23 @@ export function editor(r) {
     login: { password: value, username: value, totp, questions: () => [{ question: value(), answer: value() }] },
     note: { body: value },
     key: { secret: value, keyId: value },
-    payee: { number: () => `09${digits(9)}`, provider: value, accountName: value },
     thing: { spot: value, room: value },
     device: { adminPassword: value, wifiPassword: value, model: value },
     link: { location: value },
   };
   const COMMON = { title: value, notes: value, tags: () => [value()] };
-  const NEW = { login: { password: value }, note: { body: value }, key: { secret: value }, payee: { who: value, provider: () => "GCash", number: () => `09${digits(9)}` }, thing: { spot: value }, device: { type: () => "router" }, link: { location: value } };
+  const NEW = { login: { password: value }, note: { body: value }, key: { secret: value }, thing: { spot: value }, device: { type: () => "router" }, link: { location: value } };
 
   const create = (data) => {
     const kind = r.pick(Object.keys(NEW));
     const input = { kind, title: value(), spaceId: r.pick(data.spaces).id };
     for (const [field, make] of Object.entries(NEW[kind])) input[field] = make();
     upsertEntry(data, input);
+  };
+  const inTrash = (data) => {
+    const pool = data.entries.filter(isTrashed);
+    if (!pool.length) throw new Error("nothing in the Trash");
+    return r.pick(pool);
   };
   const edit = (data) => {
     const entry = liveEntry(data);
@@ -95,18 +99,23 @@ export function editor(r) {
     [1, (data) => removeEntries(data, new Set([liveEntry(data).id]))],
     [1, (data) => toggleFavorite(data, liveEntry(data).id)],
     [1, (data) => moveEntry(data, liveEntry(data).id, r.pick(data.spaces).id)],
-    [1, (data) => { const payee = liveEntry(data, "payee"); confirmPayee(data, payee.id, payee.number); }],
     [2, codes],
     [1, (data) => setLifecycle(data, liveEntry(data, "login").id, r.pick(["dormant", "deletion-requested", null]))],
     [1, (data) => confirmGone(data, liveEntry(data, "login").id, r.chance(0.5))],
     [1, (data) => clearHistory(data, liveEntry(data, "login").id)],
     [1, (data) => touchEntry(data, liveEntry(data).id)],
+    [2, (data) => trashEntry(data, liveEntry(data).id, Date.now())],
+    [1, (data) => restoreEntry(data, inTrash(data).id)],
+    [1, (data) => deleteForever(data, inTrash(data).id)],
     [1, space],
   ];
   const total = EDITS.reduce((sum, [weight]) => sum + weight, 0);
   const any = (data) => {
     let roll = r.int(total);
-    for (const [weight, change] of EDITS) if ((roll -= weight) < 0) return change(data);
+    for (const [weight, change] of EDITS) {
+      roll -= weight;
+      if (roll < 0) return change(data);
+    }
   };
   return { create, any };
 }

@@ -9,6 +9,7 @@ import { BackupSection } from "@/features/backup/components/BackupSection";
 import { GeneralSection } from "./GeneralSection";
 import { SecuritySection } from "./SecuritySection";
 import { ImportSection } from "./ImportSection";
+import { LicencesSheet } from "./LicencesSheet";
 
 export type SettingsSection = "general" | "security" | "backup" | "import";
 
@@ -32,6 +33,7 @@ export function SettingsSheet({ onClose, onImported, onRestored, onShowShortcuts
   const [section, setSection] = useState<SettingsSection>(initialSection);
   // A file restore: picked in its sheet, or the replaced vault, already picked (its name).
   const [restoring, setRestoring] = useState<{ replaced?: string } | null>(null);
+  const [licences, setLicences] = useState(false);
   const tabRefs = useRef<Partial<Record<SettingsSection, HTMLButtonElement | null>>>({});
   const ids = useId();
 
@@ -63,6 +65,9 @@ export function SettingsSheet({ onClose, onImported, onRestored, onShowShortcuts
       />
     );
   }
+
+  // Same for the licences: Settings comes back when Done closes them.
+  if (licences) return <LicencesSheet onClose={() => setLicences(false)} />;
 
   return (
     <Sheet title="Settings" width="w-[760px]" bare onClose={onClose}>
@@ -108,6 +113,7 @@ export function SettingsSheet({ onClose, onImported, onRestored, onShowShortcuts
               role="tabpanel"
               id={`${ids}-${section}-panel`}
               aria-labelledby={`${ids}-${section}-tab`}
+              // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region takes the focus so the arrow keys can scroll it
               tabIndex={0}
               className="settle mt-3 flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 pb-6 focus-ring focus-ring-inset sm:mt-0 sm:border-l sm:border-line sm:px-7 sm:pt-1"
             >
@@ -117,6 +123,7 @@ export function SettingsSheet({ onClose, onImported, onRestored, onShowShortcuts
                     close(); // one sheet at a time: two would both close on a single Escape
                     onShowShortcuts();
                   }}
+                  onShowLicences={() => setLicences(true)}
                 />
               )}
               {section === "security" && <SecuritySection />}

@@ -14,6 +14,7 @@ import { useShortcuts } from "@/features/keyboard/use-shortcuts";
 import { Sidebar } from "@/features/vault/components/Sidebar";
 import { EntryList } from "@/features/vault/components/EntryList";
 import { EntryDetail } from "@/features/vault/components/EntryDetail";
+import { TrashDetail } from "@/features/vault/components/TrashDetail";
 import { EntryForm } from "@/features/vault/components/EntryForm";
 import { rowMenu } from "@/features/vault/components/row-menu";
 import { DeleteClientSheet, MoveEntrySheet } from "@/features/vault/components/SpaceSheets";
@@ -23,6 +24,7 @@ import { isThing } from "@/features/things/lib/things";
 import { personKey } from "@/features/held-for/lib/held-for";
 import { isGone } from "@/features/closing/lib/lifecycle";
 import { useVault } from "@/features/vault/hooks/use-vault";
+import { useInstallFolderWriters } from "@/features/security/hooks/use-install-folder";
 import { viewOf } from "@/features/vault/lib/views";
 import { copyCode, copySecretOf, copyUsername, openEntry, primaryAction } from "@/features/vault/lib/entry-actions";
 import { ipcMessage } from "@/lib/ipc-message";
@@ -34,6 +36,7 @@ type SettingsSection = "general" | "security" | "backup" | "import";
 
 function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void }) {
   const vault = useVault(initial);
+  const installWriters = useInstallFolderWriters();
   const mode = useLayoutMode();
   const inline = sidebarInline(mode);
   const collapse = useSidebarCollapse();
@@ -91,7 +94,7 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
   // Runs an item action and reports it in a toast. The action says what it did, or null if it
   // did not apply (no username to copy, no link to open).
   async function act(action: (e: Entry) => Promise<string | null>, entry: Entry | null = selected, missing?: string) {
-    if (!entry) return;
+    if (!entry || entry.trashedAt) return; // an item in the Trash copies and opens nothing
     try {
       const message = await action(entry);
       if (message) toast(message);
@@ -117,6 +120,18 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
     try {
       await vault.moveEntry(id, spaceId);
       toast(`Moved to ${vault.spaces.find((s) => s.id === spaceId)?.name ?? "space"}`);
+    } catch (e) {
+      toast(ipcMessage(e), "error");
+    }
+  }
+
+  // Undo on the "Moved to Trash" toast: the item comes back and is the chosen one again.
+  async function undoTrash(id: string) {
+    try {
+      await vault.restoreEntry(id);
+      vault.reveal(id);
+      if (mode === "compact") setDetailOpen(true);
+      toast("Restored");
     } catch (e) {
       toast(ipcMessage(e), "error");
     }
@@ -163,8 +178,8 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
     copyCode: () => act(copyCode, selected, "This item has no 2FA code"),
     open: () => act(openEntry, selected, "This item has no link"),
     create: newItem,
-    edit: () => selected && !isGone(selected) && setForm(selected), // a closed account is read only
-    favorite: () => selected && !isGone(selected) && toggleFavorite(selected.id),
+    edit: () => selected && !isGone(selected) && !selected.trashedAt && setForm(selected), // a closed account and a trashed item are read only
+    favorite: () => selected && !isGone(selected) && !selected.trashedAt && toggleFavorite(selected.id),
     lock,
     settings: () => setSettings({}),
     help: () => setShortcutsOpen(true),
@@ -175,6 +190,9 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
 
   const sidebarProps = {
     entries: vault.entries,
+    trash: vault.trash,
+    masterWeak: vault.masterWeak,
+    installWriters,
     spaces: vault.spaces,
     view: vault.view,
     spaceId: vault.spaceId,
@@ -228,15 +246,43 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
       onNew={newItem}
       onShowSidebar={toggleSidebar}
       rowMenu={(entry) => rowMenu(entry, menuActions)}
-      payeeVerdict={vault.payeeVerdict}
-      onOpenPayee={select}
       onHandBack={vault.heldFor ? () => setHandingBack(vault.heldFor) : undefined}
       onEvacuate={vault.view === "thing" ? () => setEvacuating(true) : undefined}
+      onEmptyTrash={async () => {
+        try {
+          await vault.emptyTrash();
+          setDetailOpen(false);
+          toast("Trash emptied");
+        } catch (e) {
+          toast(ipcMessage(e), "error");
+        }
+      }}
+      masterWeak={vault.masterWeak}
+      installWriters={installWriters}
+      onFixMaster={() => setSettings({ section: "security" })}
     />
   );
 
   // revision remounts the pane after a save so a revealed password never shows a stale value
-  const detail = (
+  const detail = selected?.trashedAt ? (
+    <TrashDetail
+      key={selected.id}
+      entry={selected}
+      spaces={vault.spaces}
+      mode={mode}
+      onBack={() => setDetailOpen(false)}
+      onRestore={async (id) => {
+        await vault.restoreEntry(id);
+        setDetailOpen(false);
+        toast("Restored");
+      }}
+      onDeleteNow={async (id) => {
+        await vault.deleteForever(id);
+        setDetailOpen(false);
+        toast("Deleted for good");
+      }}
+    />
+  ) : (
     <EntryDetail
       key={`${selected?.id}-${revision}`}
       entry={selected}
@@ -283,6 +329,7 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
 
       {drawer.state && (
         <div className="fixed inset-0 z-40">
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: the scrim is a mouse shortcut for closing the drawer; Escape closes it from the keyboard */}
           <div data-closing={drawer.state === "closing" || undefined} className="drawer-scrim absolute inset-0 bg-scrim" onMouseDown={drawer.close} />
           <div data-closing={drawer.state === "closing" || undefined} className="drawer absolute inset-y-0 left-0 flex">
             <Sidebar {...sidebarProps} variant="drawer" />
@@ -307,7 +354,7 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
           onDelete={async (id) => {
             await vault.deleteEntry(id);
             setDetailOpen(false);
-            toast("Item deleted");
+            toast("Moved to Trash", "ok", { label: "Undo", run: () => undoTrash(id) });
           }}
           onClose={() => {
             setForm(null);
@@ -355,7 +402,7 @@ function Root() {
   const [screen, setScreen] = useState<Screen>({ name: "loading" });
 
   useEffect(() => {
-    vaultApi.status().then((s) => setScreen({ name: "locked", isNew: !s.exists }));
+    vaultApi.status().then((s) => setScreen({ name: "locked", isNew: !s.exists, reason: s.lockReason }));
     // Auto-lock (idle, sleep, OS lock) comes from the main process, and so does an unlock done in
     // the quick search window - both windows always show the same state.
     const offLocked = vaultApi.onLocked((reason) => setScreen({ name: "locked", isNew: false, reason }));

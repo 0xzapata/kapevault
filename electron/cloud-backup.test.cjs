@@ -54,7 +54,7 @@ test("configFromInput checks the URL and keys, and a blank secret keeps the save
 
 test("only a KAPEVault file may be restored", () => {
   const b64 = (n) => Buffer.alloc(n, 7).toString("base64");
-  const shape = (over = {}, kdf = {}) => ({ format: "kapevault", version: 1, kdf: { name: "scrypt", N: 2 ** 17, r: 8, p: 1, salt: b64(16), ...kdf }, iv: b64(12), tag: b64(16), data: "d", ...over });
+  const shape = (over = {}, kdf = {}) => ({ format: "kapevault", version: 1, kdf: { name: "scrypt", N: 2 ** 17, r: 8, p: 1, salt: b64(16), ...kdf }, iv: b64(12), tag: b64(16), data: b64(31), ...over });
   const good = Buffer.from(JSON.stringify(shape()));
   assert.equal(checkBackupBytes(good), good);
   const legacy = Buffer.from(JSON.stringify(shape({ format: "bovault" }))); // saved before the rename
@@ -79,7 +79,7 @@ test("R2 keys are stored encrypted, the page view has no secret, and a restore b
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
   let writes = 0;
   const vault = createVaultSession(file, { onPersist: () => writes++ });
-  await vault.create("correct horse battery");
+  await vault.create("correct horse battery orbit gazelle");
   const before = fs.readFileSync(file);
   vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "key-id-123", secretAccessKey: "super-secret-r2" }));
   assert.equal(writes, 2);
@@ -91,13 +91,13 @@ test("R2 keys are stored encrypted, the page view has no secret, and a restore b
 
   assert.equal((await vault.verifyBackup(before.toString("utf8"), "wrong password here")).ok, false, "a wrong password changes nothing");
   assert.ok(vault.cloudConfig(), "still the current vault");
-  const check = await vault.verifyBackup(before.toString("utf8"), "correct horse battery");
+  const check = await vault.verifyBackup(before.toString("utf8"), "correct horse battery orbit gazelle");
   assert.equal(vault.commitRestore(before.toString("utf8"), check.opened, { cloud: vault.cloudConfig() }).keptCloud, true);
   assert.equal(vault.cloudView().accessKeyId, "key-id-123", "the restored vault keeps this device's R2 keys: they are its setup, not vault content");
 
   // After a master change with cloud on, the offer to delete old-password backups stays until done.
   vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "key-id-123", secretAccessKey: "super-secret-r2" }));
-  assert.ok((await vault.changeMaster("correct horse battery", "another strong passphrase")).ok);
+  assert.ok((await vault.changeMaster("correct horse battery orbit gazelle", "another strong passphrase")).ok);
   assert.equal(vault.cloudView().olderBackups, true);
   vault.clearOlderBackups();
   assert.equal(vault.cloudView().olderBackups, false);
@@ -161,7 +161,7 @@ const until = async (done) => {
 test("the Opener in the bucket is checked byte for byte and put back when changed", async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
   const vault = createVaultSession(file);
-  await vault.create("correct horse battery");
+  await vault.create("correct horse battery orbit gazelle");
   vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "key-id-123", secretAccessKey: "mock-r2-secret" }));
   const KEY = "kapevault/opener/kapevault-opener-1.0.0.html";
   const REAL = "<!doctype html><title>mock opener</title>";
@@ -209,7 +209,7 @@ function fakeBuckets() {
 test("before a restore, the current vault goes only to the SAVED bucket, never to keys typed for the restore", async () => {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
   const vault = createVaultSession(file);
-  await vault.create("correct horse battery");
+  await vault.create("correct horse battery orbit gazelle");
   const buckets = fakeBuckets();
   const cloud = createCloudBackup({ vault, installId: () => ID, transport: buckets.transport });
   const typed = { url: "https://0123abcd.r2.cloudflarestorage.com/typed-bucket", accessKeyId: "mock-typed", secretAccessKey: "mock-typed-secret" };
@@ -221,7 +221,7 @@ test("before a restore, the current vault goes only to the SAVED bucket, never t
   await assert.rejects(cloud.saveBeforeRestore(typed), /nothing was restored/);
   assert.equal(puts("typed-bucket"), 0, "the typed bucket never receives this vault");
 
-  await vault.unlock("correct horse battery");
+  await vault.unlock("correct horse battery orbit gazelle");
   vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "mock-saved", secretAccessKey: "mock-saved-secret" }));
   await cloud.saveBeforeRestore(typed);
   assert.equal(puts("typed-bucket"), 0);
@@ -254,7 +254,7 @@ async function wired(options = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-"));
   let cloud = null;
   const vault = createVaultSession(path.join(dir, "vault.kapevault"), { onPersist: () => cloud?.schedule() });
-  await vault.create("correct horse battery");
+  await vault.create("correct horse battery orbit gazelle");
   const bucket = fakeBucket();
   cloud = createCloudBackup({ vault, installId: () => ID, delayMs: 40, transport: bucket.transport, ...options });
   vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "mock-key", secretAccessKey: "mock-secret" }));
@@ -287,7 +287,7 @@ test("a backup still owed survives a crash: a marker beside the vault, and the n
   vault.lock();
   down = false;
   const next = createCloudBackup({ vault, installId: () => ID, delayMs: 10, transport });
-  await vault.unlock("correct horse battery");
+  await vault.unlock("correct horse battery orbit gazelle");
   next.onUnlocked();
   await until(() => next.status().state === "ok");
   assert.equal(offline.log.filter((l) => l.startsWith("PUT kapevault/snapshots/")).length, 1);
@@ -308,7 +308,7 @@ test("the marker stays while a newer change still waits behind an upload", async
 });
 
 test("a device never uploads a vault file it cannot open with its own key (SYNC.md 3.5)", async () => {
-  const { dir, vault, cloud, puts } = await wired();
+  const { dir, cloud, puts } = await wired();
   await until(() => puts() === 1);
   const file = path.join(dir, "vault.kapevault");
   const disk = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -372,6 +372,16 @@ test("snapshots planted under this install's id are never pruned against, and ne
   assert.ok(listed.every((r) => r.at < Date.UTC(2099, 0, 1)), "ranked by R2's clock, never a name dated 2099");
 });
 
+test("a phone's backup-only snapshot lists for a restore, as another device", async () => {
+  const { cloud, bucket } = await wired();
+  const phone = "7d1e2f30-4a5b-4c6d-8e9f-0a1b2c3d4e5f";
+  const key = snapshotKey(new Date(), phone, "backup-only");
+  bucket.objects.set(key, Buffer.from("a phone backup"));
+  const row = (await cloud.list()).find((r) => r.key === key);
+  assert.equal(row?.otherDevice, true);
+  await assert.rejects(cloud.download(key), /not a KAPEVault file/, "a known snapshot name: downloaded and checked like any backup");
+});
+
 test("a name dated in the future never counts as the newest when pruning", () => {
   const key = (at) => `kapevault/snapshots/${ID}/${at}.kapevault`;
   const now = Date.UTC(2026, 8, 28, 12);
@@ -396,4 +406,32 @@ test("Sync now with automatic backup off sends the vault up once per change", as
 test("the Add a phone code is the saved bucket's URL and both keys, as the phone reads it", () => {
   const config = configFromInput({ url: URL_OK, accessKeyId: "mock-key", secretAccessKey: "mock-secret" });
   assert.deepEqual(JSON.parse(setupCode(config)), { kapevault: "r2", v: 1, url: URL_OK, accessKeyId: "mock-key", secretAccessKey: "mock-secret" });
+});
+
+test("a saved config that is not an R2 bucket never gets a client, so nothing is sent to it", async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
+  const vault = createVaultSession(file);
+  await vault.create("Xq7!vR2#mLp9$wZk4");
+  const sent = [];
+  const cloud = createCloudBackup({ vault, installId: () => ID, transport: async (req) => { sent.push(req.url); throw new Error("mock: should not be reached"); } });
+  vault.setCloud({ endpoint: "https://evil.example", bucket: "vault-backups", accessKeyId: "mock-k", secretAccessKey: "mock-s", auto: true });
+  await assert.rejects(cloud.list(), /not an R2 bucket/);
+  assert.deepEqual(sent, []);
+});
+
+// Audit crypto 5 (2026-10-04): with a Bucket Lock on the snapshots prefix R2 refuses some deletes; the
+// rest must still go, and the count left must be reported.
+test("forgetting older backups goes past a refused delete and counts what is left", async () => {
+  let locked = null;
+  const bucket = fakeBucket();
+  const transport = async (req) => (req.method === "DELETE" && decodeURIComponent(req.url).endsWith(locked) ? { status: 403, body: Buffer.from("<Error><Code>AccessDenied</Code></Error>") } : bucket.transport(req));
+  const { cloud } = await wired({ transport });
+  const old = (at) => `kapevault/snapshots/${ID}/${at}.kapevault`;
+  const keys = ["2026-01-01T00-00-00-000Z", "2026-01-02T00-00-00-000Z", "2026-01-03T00-00-00-000Z"].map(old);
+  for (const k of keys) bucket.objects.set(k, Buffer.from("old"));
+  locked = keys[0].split("/").pop(); // the oldest is inside its retention
+  const result = await cloud.forgetOlder();
+  assert.deepEqual(result, { deleted: 2, refused: 1 });
+  assert.ok(bucket.objects.has(keys[0]));
+  assert.ok(!bucket.objects.has(keys[1]) && !bucket.objects.has(keys[2]), "the ones after the refusal are still deleted");
 });

@@ -104,6 +104,13 @@ function register({ handle, attempt, requireUnlocked, vault, folderCopy, windows
       return { status: folderCopy.choose(filePaths[0]) };
     }),
   );
+  // "Check my Opener": reads the Opener in the linked folder and compares it to this app's own bytes.
+  handle("backup:checkOpener", () =>
+    attempt(() => {
+      requireUnlocked();
+      return { result: folderCopy.checkOpener(), version: app.getVersion() };
+    }),
+  );
   handle("backup:stopFolder", () =>
     attempt(() => {
       requireUnlocked();

@@ -8,17 +8,25 @@ import {
   addKey,
   addSpace,
   cleanText,
+  clearGenerated,
   clearHistory,
-  confirmPayee,
-  findEntry,
+  deleteForever,
+  emptyTrash,
+  findLiveEntry,
+  generatedValue,
+  generatedView,
+  isNewerVaultFile,
   keySaltMatches,
   masterProblem,
+  NewerVaultError,
   newVaultData,
-  removeEntries,
+  recordGenerated,
+  restoreEntry,
   secretOf,
   setRecoveryCodes,
   toggleFavorite,
   touchEntry,
+  trashEntry,
   upsertEntry,
 } from "@core";
 import { createBiometric, type Keystore } from "./biometric";
@@ -26,8 +34,9 @@ import { createCloudConnect } from "./cloud-connect";
 import { createBackups } from "./cloud";
 import { listeners } from "./listeners";
 import { cleanSettings, loadSettings, saveSettings } from "./phone-settings";
+import { CLIENTS_ARE_PRO, canAddClient, canPlaceIn, createPro, type Billing } from "./pro";
 import { createR2Client, type CloudConfig, type Transport } from "./r2";
-import { createRestore, type R2For } from "./restore";
+import { createRestore, newerResult, type R2For } from "./restore";
 import { VAULT, attempt, createSession, isVaultText, message, pause, type Open, type SessionData } from "./session";
 import { parseSetupCode } from "./setup-code";
 import { createStore, type RawFs } from "./storage";
@@ -35,7 +44,7 @@ import { createSync, type SyncHost } from "./sync";
 import { createThrottle } from "./throttle";
 import { totpCode } from "./totp";
 import { MAX_VAULT_BYTES, createKey, decryptWithKey, openFile, openFileWithKey, parseVaultFile, toBase64 } from "./vault-file";
-import type { LockReason, PhoneSettings, Result, SyncStatus, VaultHost, VaultState, VaultView } from "./types";
+import type { LockReason, PhoneSettings, ProStatus, Result, SyncStatus, VaultHost, VaultState, VaultView } from "./types";
 
 export interface Clipboard {
   copySecret(text: string): Promise<void>; // marked sensitive, cleared after 30 s (SecureClipboard)
@@ -54,6 +63,7 @@ export interface HostDeps {
   model: string; // this phone, for the Sync sheet and the other devices' device lists: "Pixel 8"
   onResume?: (fn: () => void) => void; // the app came back to the screen: a sync, when one is due
   hideFromCapture?: (hidden: boolean) => Promise<void>; // FLAG_SECURE on or off (ScreenCapture plugin)
+  billing?: Billing; // Google Play Billing (BillingPlugin.kt), for KAPEVault Pro; none: Pro cannot be bought here
   now?: () => number;
   monotonic?: () => number; // for Lock after: a changed clock cannot stretch it
   backupDelayMs?: number;
@@ -77,6 +87,9 @@ function openTarget(entry: any): string {
   return url.href;
 }
 
+// An item in the Trash gives up no secret, copy or link (core/entries.js findLiveEntry).
+const liveEntry = (data: any, id: string): any => findLiveEntry(data, id);
+
 export function createRealHost(deps: HostDeps): VaultHost {
   const now = deps.now ?? Date.now;
   const store = createStore(deps.fs);
@@ -86,17 +99,30 @@ export function createRealHost(deps: HostDeps): VaultHost {
 
   let installId = "";
   let settings: PhoneSettings;
+  const pro = createPro({ store, billing: deps.billing, onChange: proChanged });
   // The window starts out hidden from capture (MainActivity); a phone that turned it off shows once read.
   const applyCapture = () => deps.hideFromCapture?.(settings.hideFromCapture);
   const ready = loadSettings(store, now).then(async (loaded) => {
     ({ installId, settings } = loaded);
     await applyCapture()?.catch(() => {});
+    await pro.load();
   });
 
   const stateEvents = listeners<[VaultState, LockReason?]>();
   const changeEvents = listeners<[VaultView]>();
   const syncEvents = listeners<[SyncStatus]>();
+  const proEvents = listeners<[ProStatus]>();
   const emitSync = () => syncEvents.emit(syncer.status());
+
+  // Pro came or went. Bought: sync runs now, and the vault goes up again as a snapshot the other devices
+  // merge. Refunded: a merge held for review, or another device's new master password, goes with it.
+  function proChanged(flipped: boolean) {
+    proEvents.emit(pro.status());
+    if (!flipped) return;
+    syncer.reset();
+    if (pro.owned && session.open?.data.cloud) void syncer.syncNow();
+    emitSync();
+  }
   let rekeyedOff = false; // the last adopted master password turned fingerprint unlock off
 
   const session = createSession({
@@ -120,6 +146,7 @@ export function createRealHost(deps: HostDeps): VaultHost {
     store,
     installId: () => installId,
     config: () => session.open?.data.cloud ?? null,
+    pro: () => pro.owned,
     snapshot() {
       const key = session.open?.key;
       return async () => {
@@ -133,6 +160,7 @@ export function createRealHost(deps: HostDeps): VaultHost {
     delayMs: deps.backupDelayMs ?? 10_000,
     retryMs: deps.retryMs ?? 60_000,
     onListed: (objects) => syncer.listed(objects),
+    onSettled: emitSync,
   });
 
   const restore = createRestore({ session, store, throttled, bio, backups, r2For, installId: () => installId, now, ready });
@@ -179,19 +207,25 @@ export function createRealHost(deps: HostDeps): VaultHost {
       now,
       base: () => (session.open ? { generation: session.generation, revision: session.revision, data: session.open.data } : null),
       config: () => (session.open?.data.cloud as CloudConfig | undefined) ?? null,
+      pro: () => pro.owned,
       r2: r2For,
       openSnapshot,
       openWithPassword(text, master) {
         const file = parseVaultFile(text);
-        return file ? restore.openThrottled(file, master, WRONG) : Promise.resolve({ ok: false as const, damaged: true, error: "That backup cannot be opened." });
+        if (file) return restore.openThrottled(file, master, WRONG);
+        return Promise.resolve(isNewerVaultFile(text) ? newerResult() : { ok: false as const, damaged: true, error: "That backup cannot be opened." });
       },
       commit: syncCommit,
       upload: () => backups.backupNow({ ifChanged: true }),
+      backupError: () => backups.status().error ?? "",
       changed: emitSync,
     },
     deps.syncDelayMs,
   );
-  deps.onResume?.(() => session.open && syncer.resumed());
+  deps.onResume?.(() => {
+    pro.resumed();
+    if (session.open) syncer.resumed();
+  });
 
   const cloud = createCloudConnect({ session, restore, syncer, bio, r2For, installId: () => installId, now, onSync: emitSync });
   const used = (id: string) => change((data) => touchEntry(data, id), { backup: false, only: (touched) => touched }).catch(() => {});
@@ -244,19 +278,26 @@ export function createRealHost(deps: HostDeps): VaultHost {
     async unlock(master) {
       await ready;
       const result = await throttled(async () => {
-        const file = await session.readVault();
-        if (!file) return { ok: false as const, error: DAMAGED };
-        await pause();
-        const opened = await openFile(master, file, pause);
-        if (!opened) return { ok: false as const, error: WRONG };
-        const unmarked = !keySaltMatches(opened.data, file.kdf.salt);
-        session.start(opened);
-        // A vault from before keySalt gets it on disk now, so the next fingerprint unlock works.
-        if (unmarked) await session.persist(false).catch(() => {});
-        return { ok: true as const };
+        try {
+          const file = await session.readVault();
+          if (!file) return { ok: false as const, error: DAMAGED };
+          await pause();
+          const opened = await openFile(master, file, pause);
+          if (!opened) return { ok: false as const, error: WRONG };
+          const unmarked = !keySaltMatches(opened.data, file.kdf.salt);
+          session.start(opened);
+          // A vault from before keySalt gets it on disk now, so the next fingerprint unlock works.
+          if (unmarked) await session.persist(false).catch(() => {});
+          return { ok: true as const };
+        } catch (e) {
+          // A vault a newer KAPEVault saved (header, or data that start() refuses): said plainly, never thrown at a spinner.
+          if (e instanceof NewerVaultError) return newerResult();
+          throw e;
+        }
       });
       if (!result.ok) return result;
       session.lastMasterAt = now();
+      session.masterWeak = masterProblem(master) !== null;
       const key = Uint8Array.from((session.open as Open).raw);
       session.unlocked();
       void bio.touchMaster(key).finally(() => key.fill(0));
@@ -267,19 +308,25 @@ export function createRealHost(deps: HostDeps): VaultHost {
 
     async unlockBiometric() {
       await ready;
-      const file = await session.readVault();
-      const unwrapped = await bio.unlock((key) => (file ? openFileWithKey(key, file) : Promise.resolve(null)));
-      if (!unwrapped.ok) return unwrapped;
-      // The key opens the data, but the header's salt may have been edited (the tag does not cover it):
-      // saving would write a header the master password no longer opens (core/key-salt.js).
-      if (!file || !keySaltMatches(unwrapped.opened.data, file.kdf.salt)) {
-        unwrapped.opened.raw.fill(0);
-        return { ok: false, code: "master-required", error: "Enter your master password to unlock this time." };
+      try {
+        const file = await session.readVault();
+        const unwrapped = await bio.unlock((key) => (file ? openFileWithKey(key, file) : Promise.resolve(null)));
+        if (!unwrapped.ok) return unwrapped;
+        // The key opens the data, but the header's salt may have been edited (the tag does not cover it):
+        // saving would write a header the master password no longer opens (core/key-salt.js).
+        if (!file || !keySaltMatches(unwrapped.opened.data, file.kdf.salt)) {
+          unwrapped.opened.raw.fill(0);
+          return { ok: false, code: "master-required", error: "Enter your master password to unlock this time." };
+        }
+        session.start(unwrapped.opened);
+        session.lastMasterAt = unwrapped.masterAt;
+        session.unlocked();
+        return { ok: true };
+      } catch (e) {
+        // A newer vault: the key still fits, so the fingerprint stays on; the master password would be refused too.
+        if (e instanceof NewerVaultError) return { ok: false, code: "failed", error: e.message };
+        throw e;
       }
-      session.start(unwrapped.opened);
-      session.lastMasterAt = unwrapped.masterAt;
-      session.unlocked();
-      return { ok: true };
     },
 
     async enableBiometric() {
@@ -323,27 +370,81 @@ export function createRealHost(deps: HostDeps): VaultHost {
     onChanged: changeEvents.add,
 
     async getSecret(id, field, index) {
-      return secretOf(findEntry(need(), id), field, index);
+      return secretOf(liveEntry(need(), id), field, index);
     },
-    saveEntry: (input) => attempt(async () => ({ id: await change((data) => upsertEntry(data, input) as string) }), "Could not save."),
+    saveEntry: (input) =>
+      attempt(async () => {
+        const id = await change((data) => {
+          if (!canPlaceIn(pro.owned, data, input)) throw new Error(CLIENTS_ARE_PRO);
+          return upsertEntry(data, input) as string;
+        });
+        return { id };
+      }, "Could not save."),
+    // Delete moves the item to the Trash (core/trash.js); a closed account's tombstone goes outright.
     async deleteEntry(id) {
-      await change((data) => removeEntries(data, new Set([id])));
+      await change((data) => trashEntry(data, id, now()));
+    },
+    async restoreEntry(id) {
+      await change((data) => restoreEntry(data, id));
+    },
+    async deleteForever(id) {
+      await change((data) => deleteForever(data, id));
+    },
+    async emptyTrash() {
+      await change((data) => emptyTrash(data));
     },
     async toggleFavorite(id) {
       await change((data) => toggleFavorite(data, id));
     },
-    async confirmPayee(id, number) {
-      await change((data) => confirmPayee(data, id, number));
-    },
     async clearHistory(id) {
       await change((data) => clearHistory(data, id));
     },
+    // Generated passwords (core/generated.js; the PC's vault-session.cjs has the same four): a value is kept
+    // the moment it leaves the generator, before the item is saved, so a lock cannot take the only copy of
+    // a password already pasted into a site. The page gets the times; one value comes out by its place.
+    async recordGenerated(value) {
+      await change(
+        (data) => {
+          const before = data.genHistory;
+          recordGenerated(data, value, now());
+          return data.genHistory !== before;
+        },
+        { only: Boolean },
+      );
+      return generatedView(need(), now());
+    },
+    async generatedList() {
+      return generatedView(need(), now());
+    },
+    async getGenerated(index) {
+      return generatedValue(need(), index, now());
+    },
+    async copyGenerated(index) {
+      const value = generatedValue(need(), index, now());
+      if (!value) throw new Error("Nothing to copy");
+      await deps.clipboard.copySecret(value);
+    },
+    async clearGenerated() {
+      await change(
+        (data) => {
+          const had = data.genHistory !== undefined;
+          clearGenerated(data);
+          return had;
+        },
+        { only: Boolean },
+      );
+      return generatedView(need(), now());
+    },
     setRecoveryCodes: (id, codes) => attempt(async () => (await change((data) => setRecoveryCodes(data, id, codes)), {}), "Could not save the codes."),
-    addSpace: (name) => attempt(async () => ({ id: await change((data) => addSpace(data, name) as string) }), "Could not add the client."),
+    addSpace: (name) =>
+      attempt(async () => {
+        if (!canAddClient(pro.owned)) throw new Error(CLIENTS_ARE_PRO);
+        return { id: await change((data) => addSpace(data, name) as string) };
+      }, "Could not add the client."),
 
     async copySecret(id, field, index) {
       if (field === "photo") throw new Error("A photo is not copied");
-      await deps.clipboard.copySecret(secretOf(findEntry(need(), id), field, index));
+      await deps.clipboard.copySecret(secretOf(liveEntry(need(), id), field, index));
       void used(id);
     },
     async copyText(text, id) {
@@ -351,7 +452,7 @@ export function createRealHost(deps: HostDeps): VaultHost {
       if (id && session.open) void used(id);
     },
     async totp(id) {
-      const entry = findEntry(need(), id);
+      const entry = liveEntry(need(), id);
       if (entry.kind !== "login" || !entry.totp) throw new Error("No 2FA code for this item");
       return totpCode(entry.totp);
     },
@@ -360,7 +461,7 @@ export function createRealHost(deps: HostDeps): VaultHost {
       void used(id);
     },
     async openEntry(id) {
-      deps.openUrl(openTarget(findEntry(need(), id)));
+      deps.openUrl(openTarget(liveEntry(need(), id)));
       void used(id);
     },
 
@@ -393,6 +494,20 @@ export function createRealHost(deps: HostDeps): VaultHost {
       await saveSettings(store, installId, settings);
       await applyCapture();
       return { ...settings };
+    },
+
+    async proStatus() {
+      await ready;
+      return pro.status();
+    },
+    onPro: proEvents.add,
+    async restorePro() {
+      await ready;
+      return pro.ask();
+    },
+    async buyPro() {
+      await ready;
+      return pro.buy();
     },
   };
   return host;

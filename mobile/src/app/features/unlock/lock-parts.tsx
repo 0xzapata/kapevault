@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowRight, Fingerprint, LockSimple } from "@phosphor-icons/react";
+import { ArrowRight, DeviceMobile, Fingerprint } from "@phosphor-icons/react";
 
 // Pieces of the PC lock screen at phone size, shared by unlock and first run.
 
@@ -10,8 +10,8 @@ export function useClock() {
     return () => clearInterval(t);
   }, []);
   return {
-    time: now.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", hour12: true }).replace(/\s?[AP]M$/i, ""),
-    date: now.toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric" }),
+    time: now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }).replace(/\s?[AP]M$/i, ""),
+    date: now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
   };
 }
 
@@ -30,6 +30,7 @@ export function Pill({ label, value, onChange, busy, mono, autoFocus, withSubmit
     <span className={`flex h-11 w-[300px] max-w-full items-center rounded-full pl-5 pr-1.5 focus-within:outline-2 focus-within:outline-accent ${glass} ${pillShadow}`}>
       <input
         type={type}
+        // biome-ignore lint/a11y/noAutofocus: the unlock screen's password field is ready to type in as it appears
         autoFocus={autoFocus}
         aria-label={label}
         placeholder={label}
@@ -73,10 +74,13 @@ export function BigFingerprint() {
 
 export function Safe() {
   return (
-    <p className="track-small mt-6 flex items-center justify-center gap-1.5 text-[12px] text-ink-3">
-      <LockSimple size={12} weight="bold" />
-      AES-256 encrypted on this phone
-    </p>
+    <div className="track-small mt-6 flex flex-col items-center gap-0.5">
+      <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink-2">
+        <DeviceMobile size={14} weight="bold" />
+        No account. No server.
+      </p>
+      <p className="text-[12px] text-ink-3">Your vault stays AES-256 encrypted on this phone.</p>
+    </div>
   );
 }
 

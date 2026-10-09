@@ -2,7 +2,7 @@
 // Keeps only shapes whose bbox CENTER lies inside the fractional region of the rendered SVG, drops
 // near-full-size background shapes, then sets a tight viewBox (plus pad) around what is left.
 const { chromium } = require("./playwright.cjs");
-const fs = require("fs");
+const fs = require("node:fs");
 const [inp, out, region, padArg, sq] = process.argv.slice(2);
 const [x0, y0, x1, y1] = region.split(",").map(Number);
 const pad = Number(padArg ?? 0.04);
@@ -12,7 +12,7 @@ const pad = Number(padArg ?? 0.04);
   await p.setContent(`<body style="margin:0">${fs.readFileSync(inp, "utf8").replace(/<\?xml[^>]*>|<!DOCTYPE[^>]*>/g, "")}</body>`);
   const res = await p.evaluate(({ x0, y0, x1, y1, pad, sq }) => {
     const svg = document.querySelector("svg");
-    const vb = svg.viewBox.baseVal && svg.viewBox.baseVal.width ? svg.viewBox.baseVal : { x: 0, y: 0, width: svg.width.baseVal.value, height: svg.height.baseVal.value };
+    const vb = svg.viewBox.baseVal?.width ? svg.viewBox.baseVal : { x: 0, y: 0, width: svg.width.baseVal.value, height: svg.height.baseVal.value };
     const rootInv = svg.getScreenCTM().inverse();
     const shapes = [...svg.querySelectorAll("path,rect,circle,ellipse,polygon,polyline,line,text,image,use")].filter((e) => !e.closest("defs,clipPath,mask,pattern,symbol,linearGradient,radialGradient"));
     const box = (e) => {
@@ -45,5 +45,5 @@ const pad = Number(padArg ?? 0.04);
   await b.close();
   const clean = res.svg.replace(/<metadata[\s\S]*?<\/metadata>/g, "").replace(/<title>[\s\S]*?<\/title>/g, "").replace(/\s+id="[^"]*"/g, (m) => m).replace(/\n\s*\n/g, "\n");
   fs.writeFileSync(out, clean.startsWith("<svg") && !/xmlns=/.test(clean.slice(0, 200)) ? clean.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"') : clean);
-  console.log(out, `kept ${res.kept} dropped ${res.dropped}`, fs.statSync(out).size + "B");
+  console.log(out, `kept ${res.kept} dropped ${res.dropped}`, `${fs.statSync(out).size}B`);
 })();

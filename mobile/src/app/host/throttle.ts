@@ -7,7 +7,7 @@ import type { Store } from "./storage";
 
 const FILE = "unlock-throttle.json";
 
-type Attempt = { ok: boolean; rule?: boolean };
+type Attempt = { ok: boolean; rule?: boolean; newer?: boolean };
 type State = ReturnType<typeof readThrottle>;
 
 export function createThrottle(store: Store, now: () => number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))) {

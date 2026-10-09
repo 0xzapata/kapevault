@@ -27,6 +27,8 @@ interface EntryBase {
   brand?: string; // undefined = auto-detect logo, "none" = no logo, else a brand slug
   heldFor?: string; // the person this is kept for ("Mama"); undefined = your own
   issues: Issue[];
+  trashedAt?: string; // UTC timestamp; only on the items in VaultView.trash
+  daysLeft?: number; // whole days before the Trash lets go; only on the items in VaultView.trash
 }
 
 // The page never holds a stored secret - only whether one exists. Reveal/copy fetch it on demand.
@@ -104,17 +106,6 @@ export interface KeyEntry extends EntryBase {
   expires?: string; // YYYY-MM-DD
 }
 
-// Someone you send money to. The number is not a secret, so the page holds it for Payee Check.
-export interface PayeeEntry extends EntryBase {
-  kind: "payee";
-  who: string; // "Mama"
-  relation: string;
-  provider: string; // "GCash", "BDO", or any name typed under Other
-  number: string; // digits only; +63 mobiles saved as 09...
-  accountName: string; // the registered name the wallet shows, e.g. "MA*** D*** C."
-  confirmedAt?: string; // YYYY-MM-DD, confirmed by a real phone call
-}
-
 // Where Is It: a physical thing (passport, land title, YubiKey) and where it is kept. Not secret.
 export type GrabPriority = 1 | 2 | 3; // 1 grab first, 2 if there is time, 3 leave it
 export interface ThingEntry extends EntryBase {
@@ -152,16 +143,18 @@ export interface IdEntry extends EntryBase {
   hasPhoto: boolean;
 }
 
-export type Entry = LoginEntry | LinkEntry | NoteEntry | KeyEntry | PayeeEntry | ThingEntry | DeviceEntry | IdEntry;
+export type Entry = LoginEntry | LinkEntry | NoteEntry | KeyEntry | ThingEntry | DeviceEntry | IdEntry;
 export type EntryKind = Entry["kind"];
 
-export type ViewFilter = "all" | "favorites" | "login" | "totp" | "note" | "key" | "link" | "payee" | "thing" | "device" | "security" | "closing" | "closed" | "id";
+export type ViewFilter = "all" | "favorites" | "login" | "totp" | "note" | "key" | "link" | "thing" | "device" | "security" | "closing" | "closed" | "id" | "trash";
 
 export type SortOrder = "recent" | "title" | "edited";
 
 export interface VaultView {
   spaces: Space[];
-  entries: Entry[];
+  entries: Entry[]; // never the Trash: every list, search and count reads this
+  trash: Entry[]; // moved to the Trash less than 30 days ago
+  masterWeak?: boolean; // the last master-password unlock found the master easy to guess (main keeps only this flag)
 }
 
 // What the form sends. A secret left undefined keeps the stored one.
@@ -188,11 +181,6 @@ export interface EntryInput {
   keyId?: string;
   secret?: string;
   expires?: string;
-  who?: string;
-  relation?: string;
-  provider?: string;
-  number?: string;
-  accountName?: string;
   room?: string;
   spot?: string;
   grab?: GrabPriority;

@@ -1,9 +1,11 @@
 import "./stub";
 import "@/index.css";
 import { createRoot } from "react-dom/client";
+import { BRANDS, detectBrand } from "@/features/brands/brands";
 import { EntryForm } from "@/features/vault/components/EntryForm";
 import type { Entry } from "@/features/vault/types";
 import { ToastProvider } from "@/components/Toast";
+import { FormsFixture, MoveFixture } from "./forms-fixture";
 import { ModalFixture, ReturnFixture } from "./modal-fixture";
 
 const scenario = new URLSearchParams(location.search).get("s") ?? "new";
@@ -16,13 +18,19 @@ const ENTRIES: Record<string, Entry | null> = {
   key: { ...common, id: "k1", kind: "key", title: "Stripe", keyId: "pk_live_123", hasSecret: true, url: "https://stripe.com", expires: "2027-01-01" },
 };
 
-const root = createRoot(document.getElementById("root")!);
+const rootEl = document.getElementById("root");
+if (!rootEl) throw new Error("the harness page has no #root");
+const root = createRoot(rootEl);
 if (scenario === "modal") root.render(<ToastProvider><ModalFixture /></ToastProvider>);
 else if (scenario === "return") root.render(<ReturnFixture />);
+else if (scenario === "forms") root.render(<ToastProvider><FormsFixture /></ToastProvider>);
+else if (scenario === "move") root.render(<ToastProvider><MoveFixture /></ToastProvider>);
+// BRANDS is built with Vite's import.meta.glob, which Node cannot run, so its contents are read here.
+else if (scenario === "brands") root.render(<pre id="brands">{JSON.stringify({ brands: BRANDS.map((b) => [b.slug, Boolean(b.logo)]), landbank: detectBrand("https://www.landbank.com", "")?.slug ?? null })}</pre>);
 else root.render(
   <div style={{ height: "100dvh", background: "white" }}>
     {/* The app behind the sheet: the sheet must make it inert. */}
-    <button data-behind>Behind</button>
+    <button type="button" data-behind>Behind</button>
     <EntryForm
       entry={ENTRIES[scenario]}
       entries={[]}

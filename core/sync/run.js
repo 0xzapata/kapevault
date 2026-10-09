@@ -2,8 +2,10 @@
 // (mobile host/sync.ts): merging the downloaded snapshots in, the sync log, and what a review shows.
 // Listing, downloads, the commit and when a run may start stay in each host.
 import { dueToNotes } from "../due-to-note.js";
+import { payeeToNotes } from "../payee-to-note.js";
 import { tooFarAhead } from "./hlc.js";
 import { adoptEpoch, isNewerEpoch, merge, VaultMismatchError } from "./merge.js";
+import { NewerVaultError } from "../vault-format.js";
 import { readSync, registerDevice } from "./shape.js";
 
 const LOG_SIZE = 50;
@@ -18,9 +20,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** How the user sees another device: the name it gave itself, never its install id. */
 export const nameOf = (/** @type {Record<string, { name?: string }>} */ devices, /** @type {string} */ id) => devices[id]?.name ?? "Another device";
 
+/** What the sync status says of a device whose snapshot is from a newer KAPEVault than this app. */
+export const newerProblem = (/** @type {string} */ name) => `${name} runs a newer KAPEVault. Update this app.`;
+
 /**
  * Each remote in turn into the local vault. A device that cannot be merged is left out and named in
- * `problems`. epoch: a device restored a backup as the vault on all devices, and this one adopts it
+ * `problems` - one from a newer KAPEVault too, whose snapshot this app must not touch. epoch: a device restored a backup as the vault on all devices, and this one adopts it
  * (SYNC.md 3.7). From its first run this install is in the device list, so a device that restores or
  * merges its vault names it at once (written once: the same record is a no-op).
  * @template {{ sync: any }} T
@@ -35,7 +40,14 @@ export function mergeRemotes(local, remotes, { installId, device, now, sha256 })
   const merged = [];
   const problems = [];
   for (const remote of remotes) {
-    const theirs = { ...remote.data, entries: dueToNotes(remote.data.entries), sync: readSync(remote.data, remote.salt) };
+    let theirs;
+    try {
+      theirs = { ...remote.data, entries: payeeToNotes(dueToNotes(remote.data.entries)), sync: readSync(remote.data, remote.salt) };
+    } catch (e) {
+      if (!(e instanceof NewerVaultError)) throw e;
+      problems.push(newerProblem(nameOf(data.sync.devices, remote.device)));
+      continue;
+    }
     const name = nameOf({ ...theirs.sync.devices, ...data.sync.devices }, remote.device);
     if (tooFarAhead(theirs.sync.clock, now)) {
       problems.push(`${name}'s clock is ${Math.ceil((theirs.sync.clock[0] - now) / DAY_MS)} days ahead. Fix its date, then Sync now.`);

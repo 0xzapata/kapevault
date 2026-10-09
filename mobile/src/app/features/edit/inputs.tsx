@@ -2,10 +2,12 @@ import { useState, type ReactNode } from "react";
 import { ArrowsClockwise, CaretDown } from "@phosphor-icons/react";
 import { ratePassword } from "@core";
 import { EyeButton, Label, TextInput, fieldIcon } from "../../components/form";
+import { GeneratorSheet } from "./GeneratorSheet";
 
-// A secret's field: masked, with show (and for passwords, generate) inside it on the right.
-export function SecretInput({ label, value, onChange, generate }: { label: string; value: string | null; onChange: (v: string) => void; generate?: () => string }) {
+// A secret's field: masked, with show (and for passwords, the generator sheet) inside it on the right.
+export function SecretInput({ label, value, onChange, generator }: { label: string; value: string | null; onChange: (v: string) => void; generator?: boolean }) {
   const [shown, setShown] = useState(false);
+  const [generating, setGenerating] = useState(false);
   return (
     <Label text={label}>
       <span className="relative flex items-center">
@@ -16,25 +18,28 @@ export function SecretInput({ label, value, onChange, generate }: { label: strin
           onChange={(e) => onChange(e.target.value)}
           spellCheck={false}
           autoComplete="off"
-          className={`font-mono ${generate ? "pr-[92px]" : "pr-12"}`}
+          autoCorrect="off"
+          autoCapitalize="none"
+          className={`font-mono ${generator ? "pr-[92px]" : "pr-12"}`}
         />
         <span className="absolute right-0 flex">
           <EyeButton shown={shown} what={label.toLowerCase()} onClick={() => setShown(!shown)} />
-          {generate && (
-            <button
-              type="button"
-              aria-label="Generate password"
-              onClick={() => {
-                onChange(generate());
-                setShown(true);
-              }}
-              className={fieldIcon}
-            >
+          {generator && (
+            <button type="button" aria-label="Generate password" onClick={() => setGenerating(true)} className={fieldIcon}>
               <ArrowsClockwise size={15} weight="bold" />
             </button>
           )}
         </span>
       </span>
+      {generating && (
+        <GeneratorSheet
+          onUse={(password) => {
+            onChange(password);
+            setShown(true);
+          }}
+          onClose={() => setGenerating(false)}
+        />
+      )}
     </Label>
   );
 }

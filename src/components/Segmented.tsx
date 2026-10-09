@@ -16,6 +16,7 @@ export function Segmented<T extends string | number>({ label, options, value, on
   return (
     <div role="radiogroup" aria-label={label} className={`grid gap-1 rounded-[10px] bg-field p-1 ${className}`}>
       {options.map((o, i) => (
+        // biome-ignore lint/a11y/useSemanticElements: a segmented radio drawn as buttons on one sliding track; a native radio input cannot be styled as this control
         <button
           key={o.value}
           {...tile(i)}

@@ -121,3 +121,7 @@ test("on a Mac a plain folder with a dot in its name is a folder, not a bundle",
     assert.equal(revealTarget(folder, "darwin"), path.join(folder, "receipt.pdf"), name);
   }
 });
+
+test("csv and tsv are reveal-only: Excel runs formulas from a hostile file", () => {
+  for (const f of ["a.csv", "b.TSV"]) assert.equal(canOpenInApp("C:/x/" + f), false, f);
+});

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { entrySubtitle, kindLabel } from "./entry-text.ts";
 import { formatDay } from "../../../lib/local-date.ts";
 import { isLocalPath, isNetworkPath } from "./paths.ts";
-import { device, id, key, link, login, note, payee, thing } from "./test-entries.ts";
+import { device, id, key, link, login, note, thing } from "./test-entries.ts";
 
 test("entrySubtitle: each kind's second line", () => {
   assert.equal(entrySubtitle(login()), "mock.user@example.com");
@@ -16,7 +16,6 @@ test("entrySubtitle: each kind's second line", () => {
   assert.equal(entrySubtitle(key()), "pk_mock_123");
   assert.equal(entrySubtitle(key({ keyId: "" })), "API key");
   assert.equal(entrySubtitle(link()), "https://drive.example.com/assets");
-  assert.equal(entrySubtitle(payee({ number: "09171234567" })).startsWith("GCash · "), true);
   assert.equal(entrySubtitle(thing()), "Bedroom · blue folder, top shelf");
   assert.equal(entrySubtitle(thing({ room: "" })), "blue folder, top shelf");
   assert.equal(entrySubtitle(device()), "Router · Archer C6");
@@ -42,7 +41,6 @@ test("kindLabel names each kind", () => {
   assert.equal(kindLabel(link({ linkType: "folder" })), "Local folder");
   assert.equal(kindLabel(link({ linkType: "drive" })), "Google Drive");
   assert.equal(kindLabel(link({ linkType: "doc" })), "Document");
-  assert.equal(kindLabel(payee()), "Payee");
   assert.equal(kindLabel(thing()), "Thing");
   assert.equal(kindLabel(device()), "Router");
   assert.equal(kindLabel(device({ type: "other" })), "Device");

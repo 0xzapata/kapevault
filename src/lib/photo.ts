@@ -42,7 +42,8 @@ export async function preparePhoto(image: Blob, withScan = true): Promise<{ phot
   const longest = Math.max(bitmap.width, bitmap.height);
   const draw = (factor: number, quality: number) => {
     const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * factor)), Math.max(1, Math.round(bitmap.height * factor)));
-    const g = canvas.getContext("2d")!;
+    const g = canvas.getContext("2d");
+    if (!g) throw new Error("This device cannot prepare photos.");
     g.fillStyle = "white"; // a transparent screenshot would turn black in a JPEG
     g.fillRect(0, 0, canvas.width, canvas.height);
     g.drawImage(bitmap, 0, 0, canvas.width, canvas.height);

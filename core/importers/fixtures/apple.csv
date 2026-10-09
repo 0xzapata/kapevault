@@ -1,0 +1,3 @@
+Title,URL,Username,Password,Notes,OTPAuth
+mock-apple.example.com (mock.user),https://mock-apple.example.com,mock.user,mock-pass-1,,otpauth://totp/Mock:mock.user?secret=JBSWY3DPEHPK3PXP&issuer=Mock
+Mock Hotel,https://hotel.example.com,mock.guest,mock-pass-2,room 12,

@@ -2,7 +2,7 @@
 // values each list offers are core's (the ones a save keeps); the words are the page's.
 import { DEVICE_TYPES as DEVICE_VALUES, GRAB as GRAB_VALUES, LINK_TYPES as LINK_VALUES } from "@core";
 import type { DeviceType, Entry, EntryKind, GrabPriority, Issue, LinkType, SignInMethod } from "../host/types";
-import { formatDay, formatNumber } from "./format";
+import { formatDay } from "./format";
 import { signInOption } from "./sign-in";
 
 // The kind picker, in the phone's order (core's KINDS in another; kinds.test.mjs holds the two sets equal).
@@ -11,13 +11,12 @@ export const KINDS: { value: EntryKind; label: string }[] = [
   { value: "note", label: "Secure note" },
   { value: "key", label: "API key" },
   { value: "link", label: "File link" },
-  { value: "payee", label: "Payee" },
   { value: "thing", label: "Thing" },
   { value: "device", label: "Device" },
   { value: "id", label: "ID" },
 ];
 
-// The ways to sign in are the PC's list: SIGN_IN_OPTIONS in lib/sign-in.ts, made from it by brands-sync.
+// The ways to sign in are the PC's list: SIGN_IN_OPTIONS in lib/sign-in.ts, made from it by sync-shared.
 export const signInLabel = (m: SignInMethod) => signInOption(m).label;
 
 const LINK_LABELS: Record<LinkType, string> = { web: "Web link", drive: "Google Drive", folder: "Local folder", doc: "Document" };
@@ -46,8 +45,6 @@ export function kindLabel(e: Entry): string {
       return "API key";
     case "link":
       return LINK_TYPES.find((t) => t.value === e.linkType)?.label ?? "Link";
-    case "payee":
-      return "Payee";
     case "thing":
       return "Thing";
     case "device":
@@ -66,8 +63,6 @@ export function subtitle(e: Entry): string {
       return "Secure note";
     case "key":
       return e.keyId || "API key";
-    case "payee":
-      return `${e.provider} · ${formatNumber(e.number)}`;
     case "thing":
       return e.room ? `${e.room} · ${e.spot}` : e.spot;
     case "device":
@@ -105,7 +100,7 @@ export function peopleHeldFor(entries: Entry[]) {
     if (!key) continue;
     const p = people.get(key);
     if (p) p.count += 1;
-    else people.set(key, { name: e.heldFor!.trim(), count: 1 });
+    else people.set(key, { name: (e.heldFor ?? "").trim(), count: 1 });
   }
   return [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

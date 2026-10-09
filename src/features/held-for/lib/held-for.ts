@@ -18,7 +18,7 @@ export function peopleHeldFor(entries: Entry[]): Person[] {
     if (!key) continue;
     const person = people.get(key);
     if (person) person.count += 1;
-    else people.set(key, { name: e.heldFor!.trim(), count: 1 });
+    else people.set(key, { name: (e.heldFor ?? "").trim(), count: 1 });
   }
   return [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -48,6 +48,7 @@ export function HandBackSheet({ person, entries, onClose }: HandBackSheetProps) 
           </p>
           <ul aria-label={`Kept for ${person}`} className="flex flex-wrap gap-1.5">
             {titles.slice(0, PREVIEW).map((t, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: titles can repeat, shown read-only and replaced whole
               <li key={`${t}-${i}`} className="max-w-full truncate rounded-full bg-field px-2.5 py-1 text-[12px] font-medium text-ink-2">
                 {t}
               </li>

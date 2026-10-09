@@ -19,8 +19,11 @@ export function QuickRow({ entry, spaceName, selected, onRun }: QuickRowProps) {
   const tone = selected ? "bg-accent text-on-accent" : "hover:bg-hover";
   const quiet = selected ? "text-on-accent-2" : "text-ink-3";
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: an option of a listbox: the search field keeps the focus and owns the keys (aria-activedescendant), so the row is not a tab stop
+    // biome-ignore lint/a11y/useFocusableInteractive: an option of a listbox: the search field keeps the focus and owns the keys (aria-activedescendant), so the row is not a tab stop
     <li
       id={optionId(entry.id)}
+      // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role option on a li
       role="option"
       aria-selected={selected}
       onClick={onRun}

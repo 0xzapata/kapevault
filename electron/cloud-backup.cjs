@@ -62,8 +62,10 @@ function checkBackupBytes(bytes) {
 // settings.json could not be read this run: snapshots then go up un-named, like before install ids.
 // opener: { key, html() } - this version's Forever Opener, kept beside the snapshots.
 // transport: a stand-in courier for unit tests (default: the system curl).
+/** @param {{ vault: any, endpoint?: string, delayMs?: number, installId: () => string, opener?: any, transport?: any }} options */
 function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transport }) {
   let timer = null;
+  /** @type {Promise<any>} */
   let queue = Promise.resolve();
   let last = { state: "idle" };
   const openerIn = new Set(); // buckets known to hold this version's opener
@@ -117,11 +119,16 @@ function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transp
       keepSent([...mine, ...sending]);
       return [];
     }
-    return mine.filter((k) => !sent.has(k) && !sending.has(k));
+    return mine.filter((k) => !(/** @type {Set<string>} */ (sent)).has(k) && !sending.has(k));
   }
 
   // Plain http is allowed only for the test override (a fake R2 on 127.0.0.1).
-  const clientFor = (config) => createR2Client({ ...config, endpoint: endpoint || config.endpoint, allowHttp: Boolean(endpoint), transport });
+  // A config also comes out of a synced or restored vault (cleanVault checks it there too): never sign and
+  // send for anything but an R2 bucket. The test override is exempt.
+  const clientFor = (config) => {
+    if (!endpoint && parseR2Url(`${config.endpoint}/${config.bucket}`)?.endpoint !== config.endpoint) throw new Error("The saved backup is not an R2 bucket. Connect to R2 again in Settings.");
+    return createR2Client({ ...config, endpoint: endpoint || config.endpoint, allowHttp: Boolean(endpoint), transport });
+  };
 
   // The opener is not secret: it holds no vault data. Once per bucket per run it is read back and
   // compared byte for byte - a page someone changed in the bucket must not sit beside the backups as
@@ -158,11 +165,11 @@ function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transp
       // snapshots this install sent count: anyone with the R2 keys can put objects under its id, and
       // 20 planted ones used to push every real snapshot out of the newest 20.
       try {
-        const mine = (await listSnapshots(r2)).map((o) => o.key).filter((k) => snapshotOwner(k) === me && (!sent || sent.has(k)));
+        const mine = (await listSnapshots(r2)).map((o) => o.key).filter((k) => snapshotOwner(k) === me && (!sent || (/** @type {Set<string>} */ (sent)).has(k)));
         const pruned = new Set(snapshotsToPrune(mine, Date.now()));
         for (const old of pruned) await r2.del(old);
         const left = mine.filter((k) => !pruned.has(k));
-        keepSent(sent ? left.filter((k) => sent.has(k)) : left);
+        keepSent(sent ? left.filter((k) => (/** @type {Set<string>} */ (sent)).has(k)) : left);
       } catch {}
     } finally {
       sending.delete(key);
@@ -240,9 +247,18 @@ function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transp
     // PC's named snapshots are left alone.
     const older = (await listSnapshots(r2))
       .map((o) => o.key)
-      .filter((k) => snapshotTime(k) !== null && snapshotTime(k) < cutoff && [me, null].includes(snapshotOwner(k)));
-    for (const key of older) await r2.del(key);
-    return older.length;
+      .filter((k) => snapshotTime(k) !== null && /** @type {number} */ (snapshotTime(k)) < /** @type {number} */ (cutoff) && [me, null].includes(snapshotOwner(k)));
+    // A Bucket Lock (SYNC.md) refuses deleting a snapshot still inside its retention: skip it and go on
+    // with the rest, then say how many are left, so one locked object never keeps the others.
+    let refused = 0;
+    for (const key of older) {
+      try {
+        await r2.del(key);
+      } catch {
+        refused++;
+      }
+    }
+    return { deleted: older.length - refused, refused };
   }
 
   // input = credentials typed on the lock screen; without it the saved config is used.

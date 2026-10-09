@@ -1,6 +1,6 @@
-import { Buildings, Code, Cpu, DeviceMobile, Devices, EnvelopeSimple, FileText, GoogleDriveLogo, HandCoins, IdentificationCard, Key, Laptop, Link, NotePencil, Package, SecurityCamera, WifiHigh } from "@phosphor-icons/react";
+import { Buildings, Code, Cpu, DeviceMobile, Devices, EnvelopeSimple, FileText, GoogleDriveLogo, IdentificationCard, Key, Laptop, Link, NotePencil, Package, SecurityCamera, WifiHigh } from "@phosphor-icons/react";
 import appIcon from "../assets/app-icon.svg";
-import { brandBySlug, brandForEntry } from "../lib/brands";
+import { brandBySlug, brandForEntry, type Brand } from "../lib/brands";
 import { signInOption } from "../lib/sign-in";
 import type { Entry, EntryKind, SignInMethod } from "../host/types";
 
@@ -10,12 +10,11 @@ const KIND_TONE: Record<EntryKind, string> = {
   link: "from-icon-top to-icon-bottom",
   note: "from-sys-orange to-sys-orange",
   key: "from-sys-purple to-sys-indigo",
-  payee: "from-sys-green to-sys-teal",
   thing: "from-sys-brown to-sys-brown",
   device: "from-sys-cyan to-sys-blue",
   id: "from-sys-pink to-sys-pink",
 };
-const KIND_GLYPH = { login: Key, note: NotePencil, key: Code, payee: HandCoins, link: Link, thing: Package, device: Devices, id: IdentificationCard };
+const KIND_GLYPH = { login: Key, note: NotePencil, key: Code, link: Link, thing: Package, device: Devices, id: IdentificationCard };
 const LINK_GLYPH = { web: Link, drive: GoogleDriveLogo, doc: FileText }; // a folder is drawn as FolderArt
 export const DEVICE_GLYPH = { router: WifiHigh, cctv: SecurityCamera, phone: DeviceMobile, laptop: Laptop, other: Cpu };
 
@@ -47,6 +46,16 @@ function FolderArt({ size = 64 }: { size?: number }) {
   );
 }
 
+// A brand's logo at `size` px, or its first letter on the Monogram gradient when it has none (the PC's BrandLogo).
+export function BrandLogo({ brand, size }: { brand: Brand; size: number }) {
+  if (brand.logo) return <img src={brand.logo} alt="" draggable={false} style={{ width: size, height: size }} className="object-contain" />;
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size, fontSize: size * 0.45 }} className="grid shrink-0 place-items-center rounded-full bg-linear-to-b from-mono-top to-mono-bottom font-semibold text-on-accent">
+      {brand.name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
 // App-icon style tiles: a brand logo on paper, a Finder folder for local folders, or a system-tinted
 // glyph. On a selected (blue) row the glyph tile goes translucent white; a logo keeps its paper so its
 // colours stay true.
@@ -56,7 +65,7 @@ export function EntryIcon({ entry, size, inverted = false }: { entry: Entry; siz
   if (brand) {
     return (
       <div className={`${box} border border-line bg-paper shadow-tile`}>
-        <img src={brand.logo} alt="" draggable={false} className={size === "lg" ? "size-12 object-contain" : "size-[22px] object-contain"} />
+        <BrandLogo brand={brand} size={size === "lg" ? 48 : 22} />
       </div>
     );
   }
@@ -83,7 +92,7 @@ const SIGN_IN_GLYPH = { password: Key, "email-link": EnvelopeSimple, sso: Buildi
 export function SignInMark({ method, size = 16 }: { method: SignInMethod; size?: number }) {
   const option = signInOption(method);
   const logo = option.brand ? brandBySlug(option.brand) : null;
-  if (logo) return <img src={logo.logo} alt="" draggable={false} style={{ width: size, height: size }} className="object-contain" />;
+  if (logo) return <BrandLogo brand={logo} size={size} />;
   const Glyph = SIGN_IN_GLYPH[method as keyof typeof SIGN_IN_GLYPH] ?? Key;
   return <Glyph size={size} weight="bold" className="text-accent" />;
 }

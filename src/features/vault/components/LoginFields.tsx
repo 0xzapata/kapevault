@@ -56,6 +56,7 @@ export function LoginFields({ login, entries, url, onUrl }: LoginFieldsProps) {
         <span className="mb-1.5 block text-[12.5px] font-medium text-ink-2">Sign in with</span>
         <div role="radiogroup" aria-label="Sign in with" className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
           {SIGN_IN_OPTIONS.map((o, i) => (
+            // biome-ignore lint/a11y/useSemanticElements: a radio drawn as a button tile; a native radio input cannot be styled as this control
             <button
               key={o.value}
               {...signInTile(i)}

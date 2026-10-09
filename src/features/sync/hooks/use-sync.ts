@@ -31,6 +31,7 @@ export function useSync() {
     busy,
     syncNow: () => running(() => vaultApi.syncNow()),
     answerRestore: (everywhere: boolean) => running(() => vaultApi.syncAnswerRestore(everywhere)),
+    refresh: async () => setStatus(await vaultApi.syncStatus()),
     apply: async () => setStatus(await vaultApi.syncApply()),
     revoke: async (ref: string) => setStatus(await vaultApi.syncRevoke(ref)),
     // The master password another device set. Its merge then waits in status.review.

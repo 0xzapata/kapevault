@@ -10,6 +10,7 @@ import { useSync } from "@/features/sync/hooks/use-sync";
 import { noBackup } from "@/features/sync/lib/sync-line";
 import { useFolderCopy } from "../hooks/use-folder-copy";
 import { FolderCopy } from "./FolderCopy";
+import { CheckMyOpener } from "./CheckMyOpener";
 import { OpenerCheck } from "./OpenerCheck";
 import { ReplacedCopy } from "./ReplacedCopy";
 
@@ -50,13 +51,12 @@ function SaveButton({ label, busyLabel, run, saved }: SaveButtonProps) {
 
 const OPENER = "KAPEVault Opener.html";
 
-// A saved copy says whether the Forever Opener landed beside it. A file of that name that is not an
-// opener is never replaced, so the user is sent to Save Opener instead; one that claims a newer version
-// was not checked, so the note never vouches for it.
+// A saved copy says whether the Forever Opener landed beside it. Another file of that name is renamed
+// aside (.txt added) and said so; only a folder of that name keeps the Opener out.
 function copySaved(name: string, opener?: OpenerWrite) {
-  if (opener === "foreign") return `Saved ${name}. Another file there is already called ${OPENER}, so use Save Opener below.`;
+  if (opener === "moved") return `Saved ${name}, with ${OPENER} beside it. Another file had that name, so it was renamed with .txt added.`;
+  if (opener === "foreign") return `Saved ${name}. A folder there is already called ${OPENER}, so use Save Opener below.`;
   if (opener === "failed") return `Saved ${name}. The Opener could not be added - use Save Opener below.`;
-  if (opener === "newer") return `Saved ${name}. The Opener already there says it is newer, so KAPEVault left it alone.`;
   return `Saved ${name}, with ${OPENER} beside it.`;
 }
 
@@ -98,6 +98,7 @@ export function BackupSection({ onRestoreFromFile }: { onRestoreFromFile: (repla
           A page that opens your vault in any web browser, even without KAPEVault. Encrypted copies get one beside them.
         </p>
         <SaveButton label="Save Opener..." busyLabel="Saving..." run={() => vaultApi.saveOpener()} saved={(name) => `Saved ${name}. Keep it with your backups.`} />
+        <CheckMyOpener />
         <OpenerCheck />
       </Group>
 

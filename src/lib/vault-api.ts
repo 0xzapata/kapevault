@@ -54,6 +54,9 @@ export interface SyncStatus {
   lastSync: { at: number; with: string[] } | null; // device names
   // ref: how the page names a device to syncRevoke; lastSeen: its newest backup, by R2's clock
   devices: { ref: string; name: string; platform: string; lastSeen: number | null }[];
+  // Removed devices not yet locked out: the master password has not changed since (SYNC.md 3.9), and the
+  // R2 token is still the old one until the user replaces it.
+  lockOut: { ref: string; name: string }[];
   needsLook: { id: string; title: string }[]; // conflict copies
   review: SyncReview | null; // a merge held until Apply
   fingerprint: string; // 8 hex of the shared state: the same on every device that has synced
@@ -83,6 +86,7 @@ export interface BiometricStatus {
   enabled: boolean;
   needsMaster: boolean;
   stale: boolean; // unlocked only: it was set up for this vault's old key (a restore or a password change), so turn it on again
+  blockedByPolicy?: boolean; // Windows: this PC's policy (Constrained Language Mode) stops the Windows Hello bridge
 }
 
 // Air Wall: the Windows Firewall rule that blocks KAPEVault itself from the internet.
@@ -108,6 +112,7 @@ export interface AppSettings {
   sessionLimitHours: SessionLimitHours; // locks this long after an unlock, even in use
   sessionLimitOptions: number[];
   hideFromCapture: boolean; // off: screenshots, recordings and screen sharing see the windows
+  checkForUpdates: boolean; // opt-in, off by default: asks GitHub once a day whether a newer KAPEVault is out
   oldCopy: { path: string; modifiedAt: number } | null; // BOVault's vault, still in its old folder
   oldInstall: string | null; // BOVault.exe still installed (it holds the quick search hotkey); its path
 }
@@ -116,6 +121,7 @@ export interface VaultStatus {
   exists: boolean;
   unlocked: boolean;
   path: string;
+  lockReason?: LockReason; // why the last lock happened: a page reloaded after the lock (every lock recycles the renderer) asks for it here
   replacedCopy: { at: number; size: number } | null; // the vault the last restore replaced, kept beside this one: when and how big, never where
 }
 
@@ -142,7 +148,12 @@ export interface TotpCode {
 
 // code / answer: a backup code / security answer at index; photo: a device's label photo or an ID's
 // photo (never copied)
-export type SecretField = "password" | "body" | "secret" | "history" | "code" | "answer" | "adminPassword" | "wifiPassword" | "photo" | "idNumber";
+// One generated password as the page sees it: when it was made (a UTC ISO time), never the value.
+export interface GeneratedRow {
+  at: string;
+}
+
+export type SecretField ="password" | "body" | "secret" | "history" | "code" | "answer" | "adminPassword" | "wifiPassword" | "photo" | "idNumber";
 
 // What "Scan a label" read off a sticker: suggestions for the form, never saved until the user saves.
 export interface LabelFound {
@@ -163,8 +174,10 @@ export interface LabelFound {
 type Attempt<T> = ({ ok: true } & T) | { ok: false; error: string };
 type Canceled = { canceled?: true; name?: string };
 // What happened to the Forever Opener beside a saved copy: "foreign" = a file of that name that is not
-// one, "newer" = an opener that says it is from a newer version (left alone, not checked).
-export type OpenerWrite = "written" | "current" | "newer" | "foreign" | "failed";
+// one (left alone). Any other opener that is not this version's exact bytes is replaced ("written").
+export type OpenerWrite = "written" | "current" | "moved" | "foreign" | "failed"; // moved: another file had the name, renamed aside with .txt
+// "Check my Opener" on the linked folder: "replaced" = it had been changed and KAPEVault put the real one back.
+export type OpenerCheckResult = "genuine" | "replaced" | "missing" | "foreign" | "no-folder" | "failed";
 
 interface KAPEVaultBridge {
   platform: string;
@@ -175,9 +188,11 @@ interface KAPEVaultBridge {
   unlockBiometric(): Promise<BiometricResult>;
   lock(): Promise<void>;
   saveEntry(input: EntryInput): Promise<{ vault: VaultView; id: string }>;
-  deleteEntry(id: string): Promise<VaultView>;
+  deleteEntry(id: string): Promise<VaultView>; // moves the item to the Trash (a closed account's tombstone is deleted outright)
+  restoreEntry(id: string): Promise<VaultView>;
+  deleteForever(id: string): Promise<VaultView>; // "Delete now" on an item in the Trash
+  emptyTrash(): Promise<VaultView>;
   toggleFavorite(id: string): Promise<VaultView>;
-  confirmPayee(id: string, number: string): Promise<VaultView>; // today, by main's clock; number = the one called
   recoveryCodes(id: string): Promise<{ code: string; used: boolean }[]>; // the whole grid, on reveal only
   setRecoveryCodes(id: string, codes: string[]): Promise<VaultView>; // new or replacement set
   markRecoveryCode(id: string, index: number, used: boolean): Promise<VaultView>;
@@ -190,6 +205,14 @@ interface KAPEVaultBridge {
   renameSpace(id: string, name: string): Promise<VaultView>;
   deleteSpace(id: string, moveToId: string | null): Promise<VaultView>;
   clearHistory(id: string): Promise<VaultView>;
+  // Generated passwords (core/generated.js): the generator's recent values, kept in main. The page sends a
+  // value once when it leaves the generator and gets only the times back; one value is read or copied by
+  // its place in that list.
+  recordGenerated(value: string): Promise<GeneratedRow[]>;
+  generatedList(): Promise<GeneratedRow[]>;
+  getGenerated(index: number): Promise<string>;
+  copyGenerated(index: number): Promise<void>;
+  clearGenerated(): Promise<GeneratedRow[]>;
   getPassword(id: string): Promise<string>;
   copyPassword(id: string): Promise<void>;
   getSecret(id: string, field: SecretField, index?: number): Promise<string>;
@@ -203,10 +226,14 @@ interface KAPEVaultBridge {
   openEntry(id: string): Promise<void>; // opens the item's own website or link, looked up in main
   changeMaster(current: string, next: string): Promise<{ ok: boolean; error?: string; biometricOff?: boolean }>;
   revealFile(): Promise<void>;
-  importFile(): Promise<{ ok: true; added: number; skipped: number; vault: VaultView; deleted: boolean; name: string } | { ok: false; canceled?: boolean; error?: string }>;
+  // source = the manager the file came from; notes = what was changed on the way; unreadable = rows that
+  // could not become items, counted by reason (skipped = already in the vault; kept = rows left out that
+  // held something, so the file was not deleted)
+  importFile(): Promise<{ ok: true; added: number; skipped: number; kept: number; vault: VaultView; deleted: boolean; name: string; source: string; notes: string[]; unreadable: { reason: string; count: number }[] } | { ok: false; canceled?: boolean; error?: string }>;
   biometricStatus(): Promise<BiometricStatus>;
   biometricEnable(): Promise<Attempt<{ status: BiometricStatus }>>;
   biometricDisable(): Promise<BiometricStatus>;
+  installFolderWriters(): Promise<string[]>; // other accounts that can write the folder KAPEVault runs from (Security lists it)
   airWallStatus(): Promise<Attempt<{ status: AirWallStatus }>>;
   airWallSet(on: boolean): Promise<Attempt<{ status: AirWallStatus }>>; // one UAC prompt
   airWallTest(): Promise<Attempt<{ result: AirWallTest }>>; // one outbound connection, on click only
@@ -239,7 +266,7 @@ interface KAPEVaultBridge {
   cloudSetAuto(auto: boolean): Promise<CloudStatus>;
   cloudDisconnect(): Promise<CloudStatus>;
   cloudBackupNow(): Promise<Attempt<{ status: CloudStatus }>>;
-  cloudForgetOlder(): Promise<Attempt<{ deleted: number; status: CloudStatus }>>;
+  cloudForgetOlder(): Promise<Attempt<{ deleted: number; refused: number; status: CloudStatus }>>;
   // input = keys typed on the lock screen; without it the vault's saved keys are used
   cloudList(input?: CloudInput): Promise<Attempt<{ snapshots: Snapshot[] }>>;
   cloudRestore(key: string, input: CloudInput | undefined, master: string, confirmed?: boolean, current?: string): Promise<({ ok: true; vault: VaultView } & RestoreKept) | RestoreRefused>;
@@ -262,7 +289,28 @@ interface KAPEVaultBridge {
   folderStatus(): Promise<FolderCopyStatus>;
   chooseFolder(): Promise<Attempt<Canceled & { status?: FolderCopyStatus }>>; // unlocked only, main's own folder dialog
   stopFolder(): Promise<Attempt<{ status: FolderCopyStatus }>>; // unlocked only; the copy already in the folder stays
+  checkOpener(): Promise<Attempt<{ result: OpenerCheckResult; version: string }>>; // unlocked only
   onFolderStatus(callback: (status: FolderCopyStatus) => void): () => void;
+  updateStatus(): Promise<UpdateStatus>;
+  updateCheck(): Promise<UpdateStatus>; // asks GitHub when a day has passed and the setting is on
+  updateOpen(): Promise<void>; // opens the release page main found; the page never names an address
+  licences(): Promise<LicenceText[]>; // the texts the installer ships, read by main from a fixed list
+  appVersion(): Promise<string>;
+}
+
+// One licence file for Settings > Open source licences; a file main could not read is not in the list.
+export interface LicenceText {
+  name: string;
+  text: string;
+}
+
+// The opt-in update check: whether a newer KAPEVault is out, which, when the last good answer came, and
+// "Could not check" after a failed ask.
+export interface UpdateStatus {
+  available: boolean;
+  version: string | null;
+  checkedAt: number | null;
+  error?: string;
 }
 
 // Keep a copy in a folder: the folder ("" = off), when the last copy was written, and why the last one failed.

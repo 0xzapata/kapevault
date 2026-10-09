@@ -1,19 +1,19 @@
 // Two PCs syncing through one (fake) R2 bucket, each a real window with its own throwaway vault and
 // install id (SYNC.md 3.5, 3.9). PC B starts from PC A's vault file, as a restore would.
 // Run: npm run build && node scripts/e2e-sync.cjs (the launcher lives in e2e-harness.cjs)
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const http = require("http");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const http = require("node:http");
 const { createHarness, shows, gone, waitFor } = require("./e2e-harness.cjs");
 const { decodeQr } = require("../electron/qr-scan.cjs");
 
-const MASTER = "sync test kettle harbor pass";
-const NEW_MASTER = "a new sync master phrase";
+const MASTER = "sync test kettle harbor pass orbit gazelle";
+const NEW_MASTER = "a new sync master phrase orbit gazelle";
 const SHOTS = os.tmpdir();
 const dirA = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-sync-a-"));
 const dirB = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-sync-b-"));
-const { check, launch, report } = createHarness();
+const { check, launch, lockedBy, report } = createHarness();
 
 // A fake R2 bucket that stamps LastModified by its own clock: every PUT one second after the last.
 const r2 = { objects: new Map(), modified: new Map(), clock: Date.now(), puts: 0 };
@@ -29,8 +29,17 @@ const r2Server = http.createServer((req, res) => {
       res.end(body);
     };
     if (!/Credential=e2e-key-id\//.test(req.headers.authorization || "") || bucket !== "kapevault-e2e") return reply(403, "<Error><Code>InvalidAccessKeyId</Code></Error>");
-    if (req.method === "PUT") return (r2.puts += key.startsWith("kapevault/snapshots/") ? 1 : 0), r2.objects.set(key, Buffer.concat(chunks)), r2.modified.set(key, (r2.clock += 1000)), reply(200);
-    if (req.method === "DELETE") return r2.objects.delete(key), reply(204);
+    if (req.method === "PUT") {
+      r2.puts += key.startsWith("kapevault/snapshots/") ? 1 : 0;
+      r2.objects.set(key, Buffer.concat(chunks));
+      r2.clock += 1000;
+      r2.modified.set(key, r2.clock);
+      return reply(200);
+    }
+    if (req.method === "DELETE") {
+      r2.objects.delete(key);
+      return reply(204);
+    }
     if (req.method === "GET" && !key) {
       const prefix = u.searchParams.get("prefix") || "";
       const items = [...r2.objects].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => `<Contents><Key>${k}</Key><LastModified>${new Date(r2.modified.get(k)).toISOString()}</LastModified><Size>${v.length}</Size></Contents>`);
@@ -172,14 +181,18 @@ async function syncNow(page) {
   await gone(b.page.getByRole("dialog"));
 
   // A delete on A removes the item on B.
-  await bridge(a.page, (api, id) => api.deleteEntry(id), ids.links[0]);
+  // (Delete moves to the Trash; Delete now is the real delete that sync carries.)
+  await bridge(a.page, (api, id) => api.deleteEntry(id).then(() => api.deleteForever(id)), ids.links[0]);
   await syncNow(a.page);
   await syncNow(b.page);
   check("a delete on A removes the item on B", await gone(listed(b.page, "Mock link 0")));
 
   // A mass delete on A waits for review on B.
   await bridge(a.page, async (api, links) => {
-    for (const id of links) await api.deleteEntry(id);
+    for (const id of links) {
+      await api.deleteEntry(id);
+      await api.deleteForever(id);
+    }
   }, ids.links.slice(1, 7));
   await syncNow(a.page);
   await syncNow(b.page);
@@ -244,7 +257,7 @@ async function syncNow(page) {
 
   // One delete from A never waits for a review, even as more than 10% of the items.
   const total = (await bridge(b.page, (api) => api.view())).entries.length;
-  await bridge(a.page, (api, id) => api.deleteEntry(id), ids.links[7]);
+  await bridge(a.page, (api, id) => api.deleteEntry(id).then(() => api.deleteForever(id)), ids.links[7]);
   await syncNow(a.page);
   await syncNow(b.page);
   check(`one delete of ${total} items syncs with no review`, (await gone(listed(b.page, "Mock link 7"))) && !(await b.page.getByRole("dialog").isVisible()));
@@ -267,7 +280,7 @@ async function syncNow(page) {
   await bridge(b.page, (api) => api.cloudSetAuto(true));
 
   // B restores the backup from before: sync waits, and still waits after B is closed and opened again.
-  const restored = await bridge(b.page, (api, key) => api.cloudRestore(key, undefined, "sync test kettle harbor pass"), restorePoint);
+  const restored = await bridge(b.page, (api, key) => api.cloudRestore(key, undefined, "sync test kettle harbor pass orbit gazelle"), restorePoint);
   check("B restores an older backup", restored.ok === true, restored.error);
   check("after a restore the line says sync is paused", await lineSays(b.page, "Sync is paused after the restore"));
   await bridge(a.page, (api, spaceId) => api.saveEntry({ kind: "note", spaceId, title: "Mock after the backup", body: "a" }), ids.spaceId);
@@ -307,7 +320,7 @@ async function syncNow(page) {
   // A changes the master password; B, with Windows Hello on, types it once and adopts it.
   const hello = await bridge(b.page, (api) => api.biometricEnable());
   check("Windows Hello is on for B", hello.ok === true && hello.status.enabled === true, hello.error);
-  const changedMaster = await bridge(a.page, (api, next) => api.changeMaster("sync test kettle harbor pass", next), NEW_MASTER);
+  const changedMaster = await bridge(a.page, (api, next) => api.changeMaster("sync test kettle harbor pass orbit gazelle", next), NEW_MASTER);
   check("A changes the master password", changedMaster.ok === true, changedMaster.error);
   await syncNow(a.page);
   await syncNow(b.page);
@@ -328,7 +341,7 @@ async function syncNow(page) {
   await b.page.getByRole("dialog", { name: "Sync" }).getByRole("button", { name: "Done" }).click();
   await gone(b.page.getByRole("dialog"));
   check("B turned Windows Hello off", await waitFor(async () => !(await bridge(b.page, (api) => api.biometricStatus())).enabled, 8000));
-  await bridge(b.page, (api) => api.lock());
+  await lockedBy(b.app, b.page, () => bridge(b.page, (api) => api.lock()));
   await unlock(b.page, NEW_MASTER);
   check("B now unlocks with A's new master password", await lineSays(b.page, "Synced with"));
 
@@ -356,10 +369,13 @@ async function syncNow(page) {
   const deviceList = b.page.getByRole("dialog", { name: "Sync" }).getByRole("list", { name: "Devices" });
   const rowA = deviceList.getByRole("listitem").filter({ hasText: "Mock PC A" });
   await rowA.getByRole("button", { name: "Remove from sync" }).click();
-  check("removing asks first", await shows(rowA.getByText("Its changes will never sync again. For a lost or sold device.")));
+  check("removing asks first, and says two steps follow", await shows(rowA.getByText("Its changes will never sync again. For a lost or sold device. Two steps to lock it out for good follow.")));
   await b.page.screenshot({ path: path.join(SHOTS, "e2e-sync-7-remove.png") });
   await rowA.getByRole("button", { name: "Remove", exact: true }).click();
   check("the removed PC leaves the list", await gone(deviceList.getByText("Mock PC A")));
+  const lockOut = b.page.getByRole("dialog", { name: "Sync" }).getByRole("region", { name: "Finish locking out" });
+  check("and the lock-out steps appear at once: new master password, new R2 token", (await shows(lockOut.getByText("Finish locking out Mock PC A"))) && (await shows(lockOut.getByRole("button", { name: "Change master password..." }))) && (await shows(lockOut.getByText("2. Replace your R2 API token"))));
+  await b.page.screenshot({ path: path.join(SHOTS, "e2e-sync-7b-lock-out.png") });
   await b.page.getByRole("dialog", { name: "Sync" }).getByRole("button", { name: "Done" }).click();
   await gone(b.page.getByRole("dialog"));
   await syncNow(b.page);
@@ -371,6 +387,7 @@ async function syncNow(page) {
   await b.page.waitForTimeout(1000);
   check("a removed PC's change never reaches B", !(await listed(b.page, "Mock from the removed PC").isVisible()));
   check("A's line says it was removed", await lineSays(a.page, "This device was removed from sync"));
+  check("B's line keeps the reminder until the master password changes", await lineSays(b.page, "Finish locking out Mock PC A"));
 
   for (const [name, errors] of [["A", a.errors], ...opened, ["B", b.errors]]) check(`no page errors on ${name}`, errors.length === 0, errors.join(" | "));
   await a.app.close();

@@ -1,4 +1,4 @@
-// Made from the PC's src/features/vault/lib/sign-in.ts by scripts/brands-sync.mjs - change it there, then run the script.
+// Made from the PC's src/features/vault/lib/sign-in.ts by scripts/sync-shared.mjs - change it there, then run the script.
 import type { SignInMethod } from "../host/types";
 import { SIGN_IN } from "@core";
 

@@ -1,11 +1,11 @@
 // Which items a list shows and in what order: the PC's filter-entries.ts, same rules. What a search reads
-// and how a list sorts are the PC's own code (lib/search.ts, made by scripts/brands-sync.mjs); the views
+// and how a list sorts are the PC's own code (lib/search.ts, made by scripts/sync-shared.mjs); the views
 // and scopes around them are the phone's (no Closed or Closing view).
 import type { Entry, Space } from "../host/types";
 import { isGone, personKey } from "./entries";
 import { searchText, sortEntries, titleScore } from "./search";
 
-export type ViewFilter = "all" | "favorites" | "login" | "totp" | "note" | "key" | "link" | "payee" | "thing" | "device" | "security" | "id";
+export type ViewFilter = "all" | "favorites" | "login" | "totp" | "note" | "key" | "link" | "thing" | "device" | "security" | "id";
 export type SortOrder = "recent" | "title" | "edited";
 export const SORT_LABELS: Record<SortOrder, string> = { recent: "Recently used", title: "Title", edited: "Date edited" };
 
@@ -44,7 +44,7 @@ export function filterEntries(entries: Entry[], spaces: Space[], scope: ListScop
   const sorted = sortEntries(matched, sort);
   if (!q) return sorted;
   const scores = new Map(sorted.map((e) => [e.id, titleScore(e.title, words, q)]));
-  return sorted.sort((a, b) => scores.get(b.id)! - scores.get(a.id)!);
+  return sorted.sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
 }
 
 export function countIn(entries: Entry[], scope: ListScope) {

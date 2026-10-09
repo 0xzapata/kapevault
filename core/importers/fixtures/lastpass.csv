@@ -1,0 +1,5 @@
+url,username,password,totp,extra,name,grouping,fav
+https://shop.example.com,mock.user,mock-pass-1,JBSWY3DPEHPK3PXP,shopper since 2020,Mock Shop,Shopping,1
+http://sn,,,,"NoteType:Generic
+mock secret text",Mock Secure Note,Notes,0
+http://group,,,,,,Empty Folder,0

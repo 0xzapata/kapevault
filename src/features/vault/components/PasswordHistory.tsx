@@ -34,6 +34,7 @@ export function PasswordHistory({ entryId, history }: PasswordHistoryProps) {
     <section className="mt-5">
       <Card>
         <button
+          type="button"
           aria-expanded={open}
           aria-controls="password-history"
           onClick={() => setOpen(!open)}
@@ -47,6 +48,7 @@ export function PasswordHistory({ entryId, history }: PasswordHistoryProps) {
           <div id="password-history" className="settle border-t border-line">
             {history.map((h, i) => (
               <SecretField
+                // biome-ignore lint/suspicious/noArrayIndexKey: history is addressed by position (the main process takes the index); the timestamp in the key makes a shifted list remount its rows, so a revealed password never sticks to another one
                 key={`${h.changedAt}-${i}`}
                 label={`Replaced ${formatDay(h.changedAt)}`}
                 reveal={() => vaultApi.getSecret(entryId, "history", i)}
@@ -61,15 +63,15 @@ export function PasswordHistory({ entryId, history }: PasswordHistoryProps) {
               {confirming ? (
                 <>
                   <span className="mr-auto px-1 text-[12.5px] text-ink-3">Old passwords cannot be brought back.</span>
-                  <button onClick={() => setConfirming(false)} className={`${textButton} text-ink-2 hover:bg-field`}>
+                  <button type="button" onClick={() => setConfirming(false)} className={`${textButton} text-ink-2 hover:bg-field`}>
                     Cancel
                   </button>
-                  <button onClick={clear} disabled={busy} className={`${textButton} bg-danger-soft text-danger hover:bg-danger hover:text-on-accent`}>
+                  <button type="button" onClick={clear} disabled={busy} className={`${textButton} bg-danger-soft text-danger hover:bg-danger hover:text-on-accent`}>
                     Confirm clear
                   </button>
                 </>
               ) : (
-                <button onClick={() => setConfirming(true)} className={`${textButton} text-danger hover:bg-danger-soft`}>
+                <button type="button" onClick={() => setConfirming(true)} className={`${textButton} text-danger hover:bg-danger-soft`}>
                   Clear history
                 </button>
               )}

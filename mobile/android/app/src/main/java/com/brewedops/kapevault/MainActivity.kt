@@ -1,6 +1,7 @@
 package com.brewedops.kapevault
 
 import android.app.Activity
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -17,10 +18,12 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsCompat.Type
 import com.getcapacitor.BridgeActivity
 import com.getcapacitor.WebViewListener
+import com.getcapacitor.plugin.WebView as WebViewPlugin
 
 class MainActivity : BridgeActivity() {
-    // Set by a plugin while a system dialog it opened sits over the app (the camera permission): the
-    // dialog pauses this activity, but the user has not left the app. Leaving from it still stops it.
+    // Set by a plugin while a system dialog it opened sits over the app (the camera permission, Play's
+    // purchase sheet): the dialog pauses this activity, but the user has not left the app. Leaving from
+    // it still stops it.
     var ownDialog = false
     private var quiet = false // a pause that sent no background event
     private var safeArea = "" // the page's --safe-area-inset-* as a script, from the last insets
@@ -30,15 +33,25 @@ class MainActivity : BridgeActivity() {
         // Settings can turn it off (ScreenCapturePlugin) once the page has read that setting.
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
+        // The page is only ever the bundled one. A server path the page persisted (WebView plugin,
+        // SharedPreferences) is read by the Bridge while super.onCreate builds it, and would load files
+        // the page wrote, with every plugin: so it is dropped first. DisabledCorePlugins closes the
+        // plugin that writes it; this also covers a path written some other way (a file written into
+        // shared_prefs, an old install).
+        getSharedPreferences(WebViewPlugin.WEBVIEW_PREFS_NAME, Context.MODE_PRIVATE).edit().remove(WebViewPlugin.CAP_SERVER_PATH).commit()
+        registerPlugins(listOf(DisabledWebViewPlugin::class.java, R2OnlyHttpPlugin::class.java))
         registerPlugin(VaultKeystorePlugin::class.java)
         registerPlugin(SecureClipboardPlugin::class.java)
         registerPlugin(QrScannerPlugin::class.java)
         registerPlugin(AutofillPlugin::class.java)
         registerPlugin(ScreenCapturePlugin::class.java)
+        registerPlugin(BillingPlugin::class.java)
+        registerPlugin(DurableFilePlugin::class.java)
         // Before super.onCreate, so the plugins' own Back handlers (the camera view) sit above it.
         onBackPressedDispatcher.addCallback(pageBack)
         super.onCreate(savedInstanceState)
         guardAgainstOverlays(this, bridge.webView)
+        keepFromAbusiveAccessibilityServices(bridge.webView)
         drawBehindSystemBars()
     }
 
@@ -154,4 +167,17 @@ private const val OBSCURED_NOTE_MS = 4_000L // one toast per this long while tap
 fun guardAgainstOverlays(activity: Activity, view: View?) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) activity.window.setHideOverlayWindows(true)
     view?.filterTouchesWhenObscured = true
+}
+
+/**
+ * Banking trojans read other apps' screens and tap their buttons through an accessibility service, which
+ * FLAG_SECURE does not stop. On Android 14+ a view marked data-sensitive is shown only to services that
+ * declare isAccessibilityTool (TalkBack and the like); any other service gets no node for it or its
+ * children (View.includeForAccessibility) and its events are withheld. filterTouchesWhenObscured, set
+ * above, already implies this by default; it is stated here so it does not hang on that side effect.
+ * Earlier Androids have no such switch. A service that declares itself a tool, or one the user enabled
+ * before this flag mattered to it, is not stopped.
+ */
+fun keepFromAbusiveAccessibilityServices(view: View?) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) view?.setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)
 }

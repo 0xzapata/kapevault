@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../../components/Toast";
 import { useHost } from "../../host/host-context";
-import { useSync, useVault } from "../../hooks/use-vault";
+import { canPlaceIn } from "../../host/pro";
+import { usePro, useSync, useVault } from "../../hooks/use-vault";
 import { countIn, filterEntries, type ListScope, type SortOrder } from "../../lib/filter";
 import { SHEET } from "../../lib/spring";
 import { ItemDetail } from "../detail/ItemDetail";
 import { ItemSheet } from "../edit/ItemSheet";
 import { ConnectSheet } from "../settings/ConnectSheet";
+import { ChangeMasterSheet } from "../settings/settings-sheets";
 import { SettingsTab } from "../settings/SettingsTab";
+import { TrashScreen } from "../trash/TrashScreen";
 import { TrustSheet } from "../settings/TrustSheet";
 import { ItemList } from "./ItemList";
 import { SidebarDrawer } from "./SidebarDrawer";
@@ -26,6 +29,8 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
   const toast = useToast();
   const view = useVault();
   const sync = useSync();
+  const pro = usePro();
+  const owned = Boolean(pro?.owned);
   const [tab, setTab] = useState<Tab>(startTab);
   const [items, setItems] = useState<{ scope: ListScope; title: string }>({ scope: { view: "all" }, title: "All items" });
   const [query, setQuery] = useState("");
@@ -37,11 +42,14 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
   const [syncOpen, setSyncOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const [about, setAbout] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [changingMaster, setChangingMaster] = useState(false);
   const leaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const content = useRef<HTMLDivElement>(null);
 
   const list = tab === "codes" || tab === "security" ? TAB_LISTS[tab] : items;
   const entries = useMemo(() => (view ? filterEntries(view.entries, view.spaces, list.scope, query, sort) : null), [view, list.scope, query, sort]);
+  const masterWeak = view?.masterWeak === true;
   const detailEntry = (detail && view?.entries.find((e) => e.id === detail.id)) || null;
 
   // An item deleted while open (a conflict copy) closes its page.
@@ -68,7 +76,8 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
 
   const personal = view?.spaces.find((s) => s.kind === "personal")?.id ?? "";
   const scope = items.scope;
-  const defaultSpace = tab === "items" && "spaceId" in scope ? scope.spaceId : personal;
+  // A new item goes to the client being viewed, or to Personal without KAPEVault Pro.
+  const defaultSpace = tab === "items" && "spaceId" in scope && view && canPlaceIn(owned, view, { spaceId: scope.spaceId }) ? scope.spaceId : personal;
 
   return (
     <div className="fixed inset-0 flex flex-col bg-surface pt-[var(--sat)]" style={{ animation: "fade 200ms ease" }}>
@@ -80,6 +89,8 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
             title={list.title}
             entries={entries}
             issuesView={"view" in list.scope && list.scope.view === "security"}
+            masterWeak={masterWeak}
+            onFixMaster={() => setChangingMaster(true)}
             query={query}
             sort={sort}
             selectedId={selectedId}
@@ -92,15 +103,18 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
           />
         )}
       </div>
-      <TabBar tab={tab} issues={view ? countIn(view.entries, { view: "security" }) : 0} onTab={switchTab} />
+      <TabBar tab={tab} issues={view ? countIn(view.entries, { view: "security" }) + (masterWeak ? 1 : 0) : 0} onTab={switchTab} />
 
       {view && (
         <SidebarDrawer
           open={drawer}
           entries={view.entries}
+          masterWeak={masterWeak}
           spaces={view.spaces}
           scope={list.scope}
           query={query}
+          pro={owned}
+          trashCount={view.trash.length}
           onQuery={setQuery}
           onScope={(s, title) => {
             const v = "view" in s ? s.view : null;
@@ -117,6 +131,10 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
           onSettings={() => {
             setDrawer(false);
             switchTab("settings");
+          }}
+          onTrash={() => {
+            setDrawer(false);
+            setTrashOpen(true);
           }}
           onAbout={() => setAbout(true)}
           onClose={() => setDrawer(false)}
@@ -136,6 +154,8 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
         />
       )}
 
+      {view && <TrashScreen open={trashOpen} trash={view.trash} spaces={view.spaces} onClose={() => setTrashOpen(false)} />}
+
       {editing && view && (
         <ItemSheet
           entry={editing.entry}
@@ -143,14 +163,16 @@ export function HomeScreen({ startTab, onRestoreFile }: { startTab: Tab; onResto
           spaces={view.spaces}
           defaultSpaceId={defaultSpace}
           defaultHeldFor={tab === "items" && "heldFor" in scope ? scope.heldFor : ""}
+          pro={owned}
           onSaved={(id) => !editing.entry && openItem(id)}
           onDeleted={() => closeItem()}
           onClose={() => setEditing(null)}
         />
       )}
-      {syncOpen && sync && view && <SyncSheet status={sync} entries={view.entries} onOpenItem={openItem} onConnect={() => setConnectOpen(true)} onClose={() => setSyncOpen(false)} />}
+      {syncOpen && sync && view && <SyncSheet status={sync} owned={owned} entries={view.entries} onOpenItem={openItem} onConnect={() => setConnectOpen(true)} onClose={() => setSyncOpen(false)} />}
       {connectOpen && <ConnectSheet onClose={() => setConnectOpen(false)} onConnected={() => {}} />}
       {about && <TrustSheet onClose={() => setAbout(false)} />}
+      {changingMaster && <ChangeMasterSheet onClose={() => setChangingMaster(false)} onBiometricOff={() => {}} />}
     </div>
   );
 }

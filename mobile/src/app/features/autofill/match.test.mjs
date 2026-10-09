@@ -3,7 +3,7 @@
 // Chromium, and sites that share a public suffix (pages.dev, github.io, vercel.app, blogspot.com, me.uk).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { matchesTarget, registrableDomain, sameSite, searchHint, targetSite } from "./match.ts";
+import { matchesTarget, mismatchWarning, registrableDomain, sameSite, searchHint, targetSite } from "./match.ts";
 
 const login = (title, url) => ({ id: title, kind: "login", title, url, username: "sam.home@example.com", hasPassword: true });
 const app = (packageName, appLabel) => ({ id: "r-1", packageName, appLabel, browser: false, username: true, password: true });
@@ -133,4 +133,11 @@ test("web: login fields in different documents (a cross-origin frame) come with 
 test("the picker names a checked browser's site, never an app", () => {
   assert.equal(targetSite(browser("www.Accounts.Google.com")), "accounts.google.com");
   assert.equal(targetSite(app("com.phish.paypal", "PayPal")), "");
+});
+
+test("a login saved for another site or app gets a plain confirm naming both sides", () => {
+  assert.equal(mismatchWarning(PAYPAL, app("com.example.fake", "PayPal Login")), "This login is for paypal.com. The app asking is com.example.fake. Fill anyway?");
+  assert.equal(mismatchWarning(PAYPAL, browser("evil.pages.dev")), "This login is for paypal.com. The page asking is evil.pages.dev. Fill anyway?");
+  assert.equal(mismatchWarning(login("Bank", "androidapp://com.example.bank"), app("com.example.fake", "Bank")), "This login is for com.example.bank. The app asking is com.example.fake. Fill anyway?");
+  assert.equal(mismatchWarning(login("Notes", ""), app("com.example.fake", "Notes")), "This login has no site saved. The app asking is com.example.fake. Fill anyway?");
 });

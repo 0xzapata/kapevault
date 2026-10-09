@@ -31,9 +31,9 @@ function register({ handle, attempt, vault, cloud, sync, broadcast, devEnv }) {
   });
   handle("cloud:forgetOlder", () =>
     attempt(async () => {
-      const deleted = await cloud.forgetOlder();
-      vault.clearOlderBackups();
-      return { deleted, status: cloudStatus() };
+      const { deleted, refused } = await cloud.forgetOlder();
+      if (refused === 0) vault.clearOlderBackups(); // old-password snapshots are still there while any delete is refused
+      return { deleted, refused, status: cloudStatus() };
     }),
   );
   handle("cloud:backupNow", () =>

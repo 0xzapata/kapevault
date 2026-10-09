@@ -56,6 +56,8 @@ export function Sheet({ title, onClose, tall = false, hideTitle = false, childre
 
   return createPortal(
     <div data-closing={closing || undefined}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the scrim is a touch shortcut for Done; the way out for everyone else is the Done button and the back gesture */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the scrim is a touch shortcut for Done; the way out for everyone else is the Done button and the back gesture */}
       <div className="pc-scrim fixed inset-0 z-40 bg-scrim" onClick={close} />
       <div
         ref={dialog}
@@ -73,5 +75,18 @@ export function Sheet({ title, onClose, tall = false, hideTitle = false, childre
       </div>
     </div>,
     document.body,
+  );
+}
+
+// One point in a sheet's body (the trust page, Pro): an icon, a title and a sentence or two.
+export function Point({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return (
+    <section className="flex gap-3.5">
+      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[9px] bg-accent-soft text-accent">{icon}</span>
+      <div className="min-w-0">
+        <h3 className="text-[14px] font-semibold text-ink">{title}</h3>
+        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">{children}</p>
+      </div>
+    </section>
   );
 }

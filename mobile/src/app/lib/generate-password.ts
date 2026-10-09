@@ -1,4 +1,4 @@
-// Made from the PC's src/features/generator/lib/generate-password.ts by scripts/brands-sync.mjs - change it there, then run the script.
+// Made from the PC's src/features/generator/lib/generate-password.ts by scripts/sync-shared.mjs - change it there, then run the script.
 // Password generator. Pure, uses only globalThis.crypto so it runs in the renderer and in Node.
 
 export interface GeneratorOptions {

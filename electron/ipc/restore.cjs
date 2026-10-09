@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { dialog } = require("electron");
 const { createRestores } = require("../restore.cjs");
+const { NewerVaultError, isNewerVaultFile } = require("../../core/index.js");
 const { parseVaultFile, MAX_VAULT_BYTES } = require("../vault-crypto.cjs");
 
 function register({ handle, attempt, requireUnlocked, vault, cloud, sync, folderCopy, throttledUnlock, proveOwnsCopy, vaultStatus, clearCopiedPassword, setLastMasterAt, changed, unlocked, biometricKeyChanged, windows, isMac }) {
@@ -38,12 +39,12 @@ function register({ handle, attempt, requireUnlocked, vault, cloud, sync, folder
       const info = fs.statSync(file);
       if (!info.isFile() || info.size > MAX_VAULT_BYTES) throw new Error("too big");
       const text = fs.readFileSync(file, "utf8");
-      if (!parseVaultFile(text)) throw new Error("not a vault");
+      if (!parseVaultFile(text)) throw isNewerVaultFile(text) ? new NewerVaultError() : new Error("not a vault");
       pendingRestore = { text, name: path.basename(file), fromReplaced: vault.isReplacedCopy(file) };
       return { ok: true, name: pendingRestore.name };
-    } catch {
+    } catch (e) {
       pendingRestore = null;
-      return { ok: false, error: "That file is not a KAPEVault vault." };
+      return { ok: false, error: e instanceof NewerVaultError ? e.message : "That file is not a KAPEVault vault." };
     }
   }
 

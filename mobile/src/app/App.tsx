@@ -39,7 +39,7 @@ export function App() {
 
   useTheme(settings?.theme ?? "system");
   useKeyboardInset();
-  useLockOnLeave(state === "unlocked", settings?.lockGrace ?? 30, () => void host.lock("background"));
+  const away = useLockOnLeave(state === "unlocked", settings?.lockGrace ?? 30, () => void host.lock("background"));
 
   if (state === null) return null;
   if (onboarding === "create") return <CreateVault onRestore={() => setOnboarding("restore-new")} onDone={() => setOnboarding(null)} />;
@@ -63,6 +63,8 @@ export function App() {
       <>
         <HomeScreen startTab={backToSettings ? "settings" : "items"} onRestoreFile={() => setOnboarding("restore-file")} />
         {fillTarget && <FillPicker key={JSON.stringify(fillTarget)} target={fillTarget} />}
+        {/* No transition: it must be there before the app's last frame, and gone the moment it is back. */}
+        {away && <div aria-hidden className="fixed inset-0 z-[100] bg-canvas" />}
       </>
     );
   return <UnlockScreen reason={reason} onRestore={() => setOnboarding("restore")} />;

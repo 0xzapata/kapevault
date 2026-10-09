@@ -2,10 +2,10 @@
 // password history, health, clients, keyboard, sorting, quick search, Windows Hello (fake), backup
 // + Emergency Kit + restore from file, and the resizable layout at every breakpoint.
 // Run: npm run e2e (runs e2e.cjs first). Throwaway vault, mock names only.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const { execFileSync } = require("child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { createHarness, shows, gone, clip, opened, waitFor } = require("./e2e-harness.cjs");
 const { totpCode } = require("../electron/totp.cjs");
 const { parseTotp } = require("../core/index.js");
@@ -14,9 +14,9 @@ const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
 fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e2-"));
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e2-out-"));
-const { check, launch: launchWith, report } = createHarness();
+const { check, launch: launchWith, lockedBy, report } = createHarness();
 const launch = () => launchWith({ KAPEVAULT_DATA_DIR: dataDir, KAPEVAULT_BIOMETRIC_FAKE: "approve" });
-const MASTER = "mock kettle harbor pass";
+const MASTER = "mock kettle harbor pass orbit gazelle";
 const TOTP_KEY = "JBSWY3DPEHPK3PXP";
 
 // The code on the clipboard must be the current code (or the neighbour step, if the 30s boundary passed).
@@ -92,6 +92,46 @@ function codeMatches(code) {
   await page.getByRole("button", { name: "Copy old password (clears in 30s)" }).click();
   await page.waitForTimeout(200);
   check("history keeps the replaced password", (await clip(app)) === generated);
+
+  // ---- Generated passwords: a value is kept the moment it leaves the generator, so a lock with the item
+  // form open and unsaved (Win+L, sleep, idle) cannot take a password already pasted into a site
+  await page.getByRole("button", { name: "New" }).click();
+  await dialog.getByPlaceholder("GitHub").fill("Mock Unsaved Site");
+  await dialog.getByRole("button", { name: "Generate password" }).click();
+  const generator = page.getByRole("group", { name: "Password generator" });
+  await generator.waitFor();
+  // The login above took its password through "Use password", so that one is already kept.
+  check("Use password kept the value it put in the form", await shows(generator.getByRole("button", { name: "Recent (1)" })));
+  await generator.getByRole("button", { name: "New password" }).click(); // a re-roll keeps nothing
+  const copiedRoll = await generator.locator("p.font-mono").innerText();
+  await generator.getByRole("button", { name: "Copy", exact: true }).click();
+  check("Copy puts the generated password on the clipboard", await waitFor(async () => (await clip(app)) === copiedRoll));
+  check("the copy is listed under Recent", await shows(generator.getByRole("button", { name: "Recent (2)" })));
+  await lockedBy(app, page, () => page.evaluate(() => window.kapevault.lock()));
+  await page.getByPlaceholder("Master password", { exact: true }).fill(MASTER);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Lock vault" }).waitFor({ timeout: 8000 });
+  check("the lock took the unsaved form", (await page.getByText("Mock Unsaved Site").count()) === 0);
+  await page.getByRole("button", { name: "New" }).click();
+  await dialog.getByRole("button", { name: "Generate password" }).click();
+  await generator.waitFor();
+  check("after the lock and unlock, Recent still holds both", await shows(generator.getByRole("button", { name: "Recent (2)" })));
+  await generator.getByRole("button", { name: "Recent (2)" }).click();
+  check("the page holds the list's times only, no value, until one is shown", !(await page.content()).includes(copiedRoll));
+  // Newest first: the copy, then the earlier "Use password" value - and nothing else, so the re-roll was never kept.
+  await generator.getByRole("button", { name: "Show password" }).first().click();
+  check("Show reveals the copied password first", await shows(generator.getByText(copiedRoll, { exact: true })));
+  await generator.getByRole("button", { name: "Show password" }).last().click();
+  check("then the one Use password put in the form", await shows(generator.getByText(generated, { exact: true })));
+  await app.evaluate(({ clipboard }) => clipboard.clear());
+  await generator.getByRole("button", { name: "Copy password" }).first().click();
+  check("Copy in Recent puts it on the clipboard", await waitFor(async () => (await clip(app)) === copiedRoll));
+  await generator.getByRole("button", { name: "Clear" }).click();
+  await generator.getByRole("button", { name: "Confirm delete" }).click();
+  check("Clear empties Recent", await gone(generator.getByRole("button", { name: /^Recent/ })));
+  await page.keyboard.press("Escape"); // the generator
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await gone(dialog);
 
   // ---- Weak + reused -> Security view
   await page.getByRole("button", { name: "New" }).click();
@@ -253,11 +293,15 @@ function codeMatches(code) {
   // ---- Hide from screen capture: on by default; the switch flips the window's content protection live
   const captured = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.isContentProtected()));
   const hideSwitch = (checked) => dialog.getByRole("switch", { name: "Hide from screen capture", checked });
-  check("Hide from screen capture starts on, windows protected", (await shows(hideSwitch(true))) && (await captured()).every(Boolean));
+  // A watched run (KAPEVAULT_ALLOW_CAPTURE=1, so a recording or screen share shows the windows) keeps
+  // them capturable whatever the switch says; the switch itself is still checked.
+  const watched = Boolean(process.env.KAPEVAULT_ALLOW_CAPTURE);
+  const protectedNow = async () => (await captured()).every((p) => p === !watched);
+  check(watched ? "Hide from screen capture starts on (watched run: windows stay capturable)" : "Hide from screen capture starts on, windows protected", (await shows(hideSwitch(true))) && (await protectedNow()));
   await hideSwitch(true).click();
   check("turned off, the windows can be captured", (await shows(hideSwitch(false))) && (await waitFor(async () => (await captured()).every((p) => !p))));
   await hideSwitch(false).click();
-  check("turned on again, the windows are protected", (await shows(hideSwitch(true))) && (await waitFor(async () => (await captured()).every(Boolean))));
+  check(watched ? "turned on again (watched run: windows stay capturable)" : "turned on again, the windows are protected", (await shows(hideSwitch(true))) && (await waitFor(protectedNow)));
   // ---- Backup: encrypted copy + Emergency Kit
   await dialog.getByRole("tab", { name: "Backup" }).click();
   const copyPath = path.join(outDir, "mock-copy.kapevault");
@@ -279,7 +323,7 @@ function codeMatches(code) {
   await dialog.getByRole("button", { name: "Save" }).click();
   await gone(dialog);
 
-  await page.getByRole("button", { name: "Lock vault" }).click();
+  await lockedBy(app, page, () => page.getByRole("button", { name: "Lock vault" }).click());
   check("lock screen offers Windows Hello", await shows(page.getByRole("button", { name: "Unlock with Windows Hello" })));
   await page.getByRole("button", { name: "Unlock with Windows Hello" }).click();
   check("Windows Hello unlocks without the master password", await shows(page.getByRole("button", { name: "Lock vault" }), 8000));
@@ -343,7 +387,7 @@ function codeMatches(code) {
   await dialog.getByPlaceholder("GitHub").fill("Mock Before Locked Restore");
   await dialog.getByRole("button", { name: "Save" }).click();
   await gone(dialog);
-  await page.getByRole("button", { name: "Lock vault" }).click();
+  await lockedBy(app, page, () => page.getByRole("button", { name: "Lock vault" }).click());
   await page.getByRole("button", { name: "Restore from backup" }).click();
   await dialog.getByRole("tab", { name: "File" }).click();
   await dialog.getByRole("button", { name: "Choose file..." }).click();
@@ -513,7 +557,7 @@ function codeMatches(code) {
   await page.screenshot({ path: path.join(SHOTS, "theme-dark.png") });
 
   // ---- A lock by the session limit says why on the lock screen (a test cannot wait hours for it)
-  await app.evaluate(() => globalThis.__kapevaultLock("session-limit"));
+  await lockedBy(app, page, () => app.evaluate(() => globalThis.__kapevaultLock("session-limit")));
   check("the lock screen says the session limit locked it", await shows(page.getByText("Locked after 8 hours", { exact: true })));
   await page.getByPlaceholder("Master password", { exact: true }).fill(MASTER);
   await page.getByRole("button", { name: "Continue" }).click();

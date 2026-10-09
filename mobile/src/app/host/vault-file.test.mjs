@@ -74,7 +74,6 @@ test("the header check refuses what the PC's refuses, before any key derivation"
     { ...good, kdf: { ...good.kdf, N: 2 ** 18 } },
     { ...good, kdf: { ...good.kdf, N: 3 * 2 ** 14 } },
     { ...good, kdf: { ...good.kdf, name: "pbkdf2" } },
-    { ...good, version: 2 },
     { ...good, format: "other" },
     { ...good, iv: Buffer.alloc(8).toString("base64") },
     { ...good, tag: Buffer.alloc(8).toString("base64") },
@@ -85,6 +84,12 @@ test("the header check refuses what the PC's refuses, before any key derivation"
     assert.throws(() => pc.checkVaultFile(file));
     assert.throws(() => checkVaultFile(file), /Not a KAPEVault file/);
     await assert.rejects(openFile(MASTER, file), /Not a KAPEVault file/);
+  }
+  // A later header version is told apart from a damaged file, before any key derivation.
+  for (const newer of [{ ...good, version: 2 }, { ...good, version: 2, kdf: { ...good.kdf, N: 2 ** 20 } }]) {
+    assert.throws(() => checkVaultFile(newer), { name: "NewerVaultError", message: "This vault was saved by a newer KAPEVault. Update this app to open it." });
+    await assert.rejects(openFile(MASTER, newer), { name: "NewerVaultError" });
+    assert.equal(parseVaultFile(JSON.stringify(newer)), null);
   }
   assert.doesNotThrow(() => checkVaultFile({ ...good, format: "bovault" }), "pre-rename files still open");
   assert.equal(parseVaultFile("not json"), null);

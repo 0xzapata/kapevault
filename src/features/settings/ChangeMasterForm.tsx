@@ -1,0 +1,70 @@
+import { useState, type FormEvent } from "react";
+import { Button, ErrorText, Label, TextInput } from "@/components/form";
+import { StrengthMeter } from "@/features/generator/components/StrengthMeter";
+import { OlderBackupsNotice } from "@/features/cloud/components/OlderBackupsNotice";
+import { vaultApi } from "@/lib/vault-api";
+
+// The change-master-password form: Settings > Security, and the lock-out steps after removing a device.
+// onChanged runs once the password has changed (biometricOff: Hello / Touch ID was turned off with it).
+export function ChangeMasterForm({ onChanged, className = "" }: { onChanged?: (result: { biometricOff?: boolean }) => void; className?: string }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function changeMaster(e: FormEvent) {
+    e.preventDefault();
+    setDone(false);
+    if (next !== confirm) {
+      setError("The new passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    let result;
+    try {
+      result = await vaultApi.changeMaster(current, next);
+    } catch {
+      result = { ok: false, error: "The vault locked while changing the password. Unlock and try again." };
+    } finally {
+      setBusy(false);
+    }
+    if (!result.ok) {
+      setError(result.error ?? "Could not change the password.");
+      return;
+    }
+    setError("");
+    setDone(true);
+    setCurrent("");
+    setNext("");
+    setConfirm("");
+    onChanged?.(result);
+  }
+
+  return (
+    <form onSubmit={changeMaster} className={`space-y-3 ${className}`}>
+      <h3 className="text-[13px] font-semibold text-ink-2">Change master password</h3>
+      <Label text="Current password">
+        <TextInput type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+      </Label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Label text="New password">
+          <TextInput type="password" value={next} onChange={(e) => setNext(e.target.value)} />
+        </Label>
+        <Label text="Confirm new password">
+          <TextInput type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </Label>
+      </div>
+      {next ? <StrengthMeter password={next} /> : <p className="text-[12.5px] text-ink-3">At least 12 characters, rated Strong.</p>}
+      <ErrorText message={error} />
+      {done && <p className="text-[13px] text-ok">Master password changed.</p>}
+      {done && <OlderBackupsNotice />}
+      <div className="flex justify-end pt-2">
+        <Button type="submit" variant="primary" disabled={busy || !current || !next}>
+          {busy ? "Changing..." : "Change password"}
+        </Button>
+      </div>
+    </form>
+  );
+}

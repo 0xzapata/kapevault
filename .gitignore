@@ -30,3 +30,7 @@ scripts/component-harness/shots/
 *.jks
 *.keystore
 keystore.properties
+
+# Phone proof screenshots and release artifacts are local output, never committed
+mobile/proof/
+mobile/release/

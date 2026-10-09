@@ -32,14 +32,26 @@ function encryptWithKey(key, kdf, salt, data) {
 // Returns the decoded vault, or null when the password is wrong, the file was altered, or what it holds
 // is not a usable vault (cleanVault: every open reads the contents as untrusted).
 function decryptWithKey(key, file) {
+  // The decipher's chunks and the joined copy all hold the whole vault; each is zeroed once parsed
+  // (or on a failure, where a wrong key leaves garbage in the chunk). The parsed strings stay: JS
+  // cannot zero a string, they go with the session.
+  let part;
+  let last;
+  let plain;
   try {
     // Pin the tag length so a truncated (forgeable) tag is rejected, not accepted.
     const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(file.iv, "base64"), { authTagLength: 16 });
     decipher.setAuthTag(Buffer.from(file.tag, "base64"));
-    const plain = Buffer.concat([decipher.update(Buffer.from(file.data, "base64")), decipher.final()]);
+    part = decipher.update(Buffer.from(file.data, "base64"));
+    last = decipher.final();
+    plain = Buffer.concat([part, last]);
     return cleanVault(JSON.parse(plain.toString("utf8")));
   } catch {
     return null;
+  } finally {
+    part?.fill(0);
+    last?.fill(0);
+    plain?.fill(0);
   }
 }
 

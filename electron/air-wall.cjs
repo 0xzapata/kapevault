@@ -5,12 +5,13 @@
 const net = require("node:net");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
-const { system32, powershellPath, canElevate, PS_ARGS, encodeCommand } = require("./system-tools.cjs");
+const { system32, powershellPath, canElevate, psEnv, psInvocation, PS_ARGS, encodeCommand } = require("./system-tools.cjs");
 
 const RULE = "KAPEVault Air Wall";
 const PROBE = { host: "1.1.1.1", port: 443, timeoutMs: 3000 };
 const PROMPT_MS = 10 * 60_000; // the UAC prompt waits for the user; one left open past this is still read back
 const CANCELLED = 1223; // ERROR_CANCELLED: the UAC prompt was dismissed
+const BLOCKED_BY_POLICY = 1260; // ERROR_ACCESS_DISABLED_BY_POLICY: Constrained Language Mode stops the launcher
 const WRONG_WINDOWS = "Something on this PC points to the wrong Windows folder, so KAPEVault did not ask for admin rights.";
 const FAKE_OTHER = "C:\\Users\\Mock\\AppData\\Local\\Programs\\kapevault-old\\KAPEVault.exe";
 
@@ -60,10 +61,15 @@ function ruleScript(on, exePath) {
 }
 
 // Starts the rule script through ONE UAC prompt and waits for it. Its exit code is the script's, or
-// the Windows error that stopped the prompt (1223 = cancelled).
+// the Windows error that stopped the prompt (1223 = cancelled, 1260 = this PC's policy blocks the
+// launcher). The elevated process comes from ShellExecute's "runas", which leaves the caller no stdin
+// to feed it, so ITS script has to ride in the arguments. -EncodedCommand is the quoting-safe way (no
+// shell parses it) and the script is fixed text of quoted literals: the one encoded command left; the
+// unelevated launcher around it travels on stdin like every other script.
 function launcherScript(inner) {
   const args = `${PS_ARGS.join(" ")} -WindowStyle Hidden -EncodedCommand ${encodeCommand(inner)}`;
   return [
+    `if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') { exit ${BLOCKED_BY_POLICY} }`,
     "$psi = New-Object System.Diagnostics.ProcessStartInfo",
     `$psi.FileName = ${psQuote(powershellPath())}`,
     `$psi.Arguments = ${psQuote(args)}`,
@@ -81,9 +87,11 @@ function launcherScript(inner) {
 
 function runElevated(inner) {
   if (!canElevate()) return Promise.reject(new Error(WRONG_WINDOWS)); // see system-tools.cjs
-  const args = [...PS_ARGS, "-EncodedCommand", encodeCommand(launcherScript(inner))];
+  const { args, input } = psInvocation(launcherScript(inner));
   return new Promise((resolve) => {
-    execFile(powershellPath(), args, { windowsHide: true, timeout: PROMPT_MS }, (err) => resolve(err ? (Number.isInteger(err.code) ? err.code : -1) : 0));
+    const child = execFile(powershellPath(), args, { windowsHide: true, timeout: PROMPT_MS, env: psEnv() }, (err) => resolve(err ? (Number.isInteger(err.code) ? err.code : -1) : 0));
+    /** @type {import("node:stream").Writable} */ (child.stdin).on("error", () => {}); // see runPsJson
+    /** @type {import("node:stream").Writable} */ (child.stdin).end(input);
   });
 }
 
@@ -121,7 +129,7 @@ function probe({ host, port, timeoutMs } = PROBE) {
     };
     socket.setTimeout(timeoutMs, () => done("offline"));
     socket.once("connect", () => done("open"));
-    socket.once("error", (e) => done(probeResult(e.code)));
+    socket.once("error", (e) => done(probeResult(/** @type {NodeJS.ErrnoException} */ (e).code)));
   });
 }
 
@@ -134,6 +142,7 @@ function createAirWall({ exePath, packaged, platform = process.platform, fake, d
   let busy = false;
 
   // on | unenforced (the rule is there, the firewall is off) | other (another copy's rule) | off
+  /** @returns {Promise<{ available: boolean, state?: string, reason?: string, program?: string }>} */
   async function status() {
     if (platform !== "win32") return { available: false, reason: "platform" };
     if (faking) return { available: true, state: fakeState, ...(fakeState === "other" && { program: FAKE_OTHER }) };
@@ -154,8 +163,9 @@ function createAirWall({ exePath, packaged, platform = process.platform, fake, d
       }
       const code = await deps.runElevated(ruleScript(on, exePath));
       const now = await status();
-      if (on ? ["on", "unenforced"].includes(now.state) : now.state === "off") return now;
+      if (on ? ["on", "unenforced"].includes(/** @type {string} */ (now.state)) : now.state === "off") return now;
       if (code === CANCELLED) throw new Error("The Windows prompt was cancelled, so nothing changed.");
+      if (code === BLOCKED_BY_POLICY) throw new Error("This PC's policy blocks KAPEVault from changing the firewall.");
       throw new Error(on ? "Windows did not add the firewall rule." : "Windows did not remove the firewall rule.");
     } finally {
       busy = false;
@@ -172,4 +182,4 @@ function createAirWall({ exePath, packaged, platform = process.platform, fake, d
   return { status, set, test };
 }
 
-module.exports = { createAirWall, parseRuleStatus, firewallOn, ruleScript, runElevated, psQuote, probe, probeResult, RULE };
+module.exports = { createAirWall, parseRuleStatus, firewallOn, ruleScript, launcherScript, runElevated, psQuote, probe, probeResult, RULE, BLOCKED_BY_POLICY };

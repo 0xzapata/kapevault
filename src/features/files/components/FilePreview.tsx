@@ -85,7 +85,7 @@ function HtmlView({ title, url }: { title: string; url: string }) {
       {!scripts && (
         <div className="flex items-center gap-3 border-b border-line bg-surface px-5 py-2">
           <p className="flex-1 text-[12.5px] text-ink-2">Scripts in this page are off. Run them only for files you trust - KAPEVault never asks for your master password inside a preview.</p>
-          <button onClick={() => setScripts(true)} className="press h-7 shrink-0 rounded-full bg-field px-3 text-[12.5px] font-medium text-ink hover:bg-line">
+          <button type="button" onClick={() => setScripts(true)} className="press h-7 shrink-0 rounded-full bg-field px-3 text-[12.5px] font-medium text-ink hover:bg-line">
             Run scripts
           </button>
         </div>
@@ -122,8 +122,10 @@ function useText(item: FolderItem, kind: FileKind) {
 function CodeView({ text }: { text: string }) {
   const lines = text.split(/\r?\n/).slice(0, 5000);
   return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable file view takes the focus so the arrow keys can scroll it
     <div data-own-keys tabIndex={0} className="selectable h-full overflow-auto bg-surface py-4 font-mono outline-none text-[12.5px] leading-[1.6]">
       {lines.map((line, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: the rows of a file the user opened: the position is the identity, read-only, replaced whole
         <div key={i} className="flex">
           <span className="w-14 shrink-0 select-none pr-4 text-right text-ink-3 tabular-nums">{i + 1}</span>
           <span className="whitespace-pre pr-6">{line || " "}</span>
@@ -136,15 +138,29 @@ function CodeView({ text }: { text: string }) {
 function TableView({ text, delimiter }: { text: string; delimiter: string }) {
   const [head, ...rows] = parseDelimited(text, delimiter);
   return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable file view takes the focus so the arrow keys can scroll it
     <div data-own-keys tabIndex={0} className="selectable h-full overflow-auto outline-none">
       <table className="min-w-full border-collapse text-[13px]">
         <thead className="sticky top-0 bg-surface">
-          <tr>{head?.map((h, i) => <th key={i} className="border-b border-line px-3 py-2 text-left font-semibold whitespace-nowrap">{h}</th>)}</tr>
+          <tr>
+            {head?.map((h, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: the cells of a file the user opened: the position is the identity, read-only, replaced whole
+              <th key={i} className="border-b border-line px-3 py-2 text-left font-semibold whitespace-nowrap">
+                {h}
+              </th>
+            ))}
+          </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: the rows of a file the user opened: the position is the identity, read-only, replaced whole
             <tr key={i} className="even:bg-surface">
-              {r.map((c, j) => <td key={j} className="border-b border-line px-3 py-1.5 whitespace-nowrap">{c}</td>)}
+              {r.map((c, j) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: the cells of a file the user opened: the position is the identity, read-only, replaced whole
+                <td key={j} className="border-b border-line px-3 py-1.5 whitespace-nowrap">
+                  {c}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -173,6 +189,7 @@ function Body({ item, kind }: { item: FolderItem; kind: FileKind }) {
     case "video":
       return (
         <div className="relative h-full bg-stage">
+          {/* biome-ignore lint/a11y/useMediaCaption: a file the user opened from their own folder: there is no caption track to offer */}
           <video src={url} controls className="absolute inset-0 m-auto max-h-[calc(100%-32px)] max-w-[calc(100%-32px)]" />
         </div>
       );
@@ -181,6 +198,7 @@ function Body({ item, kind }: { item: FolderItem; kind: FileKind }) {
         <div className="grid h-full place-items-center bg-surface">
           <div className="flex flex-col items-center gap-6">
             <FileGlyph kind="audio" size={96} />
+            {/* biome-ignore lint/a11y/useMediaCaption: a file the user opened from their own folder: there is no caption track to offer */}
             <audio src={url} controls className="w-[min(420px,80vw)]" />
           </div>
         </div>
@@ -258,20 +276,20 @@ export function FilePreview({ item, siblings, onNavigate, onClose }: FilePreview
               </p>
             </div>
             {notice && <span className="hidden max-w-[320px] text-right sm:inline text-[12px] text-danger">{notice}</span>}
-            <button aria-label="Previous file" disabled={!prev} onClick={() => prev && onNavigate(prev)} className={iconBtn}>
+            <button type="button" aria-label="Previous file" disabled={!prev} onClick={() => prev && onNavigate(prev)} className={iconBtn}>
               <CaretLeft size={16} />
             </button>
-            <button aria-label="Next file" disabled={!next} onClick={() => next && onNavigate(next)} className={iconBtn}>
+            <button type="button" aria-label="Next file" disabled={!next} onClick={() => next && onNavigate(next)} className={iconBtn}>
               <CaretRight size={16} />
             </button>
-            <button onClick={openInApp} className="press flex h-8 items-center gap-1.5 rounded-full bg-field px-3.5 text-[13px] font-medium hover:bg-line">
+            <button type="button" onClick={openInApp} className="press flex h-8 items-center gap-1.5 rounded-full bg-field px-3.5 text-[13px] font-medium hover:bg-line">
               <ArrowSquareOut size={14} />
               {appName ? `Open in ${appName}` : "Open in app"}
             </button>
-            <button aria-label="Show in folder" title="Show in folder" onClick={() => vaultApi.revealPath(item.path)} className={iconBtn}>
+            <button type="button" aria-label="Show in folder" title="Show in folder" onClick={() => vaultApi.revealPath(item.path)} className={iconBtn}>
               <FolderOpen size={16} />
             </button>
-            <button aria-label="Close preview" onClick={close} className={iconBtn}>
+            <button type="button" aria-label="Close preview" onClick={close} className={iconBtn}>
               <X size={16} />
             </button>
           </header>
@@ -286,7 +304,7 @@ export function FilePreview({ item, siblings, onNavigate, onClose }: FilePreview
                 <div className="flex flex-col items-center gap-4 text-center">
                   <FileGlyph kind={kind} size={88} />
                   <p className="text-[14px] text-ink-2">KAPEVault can't show this file type here.</p>
-                  <button onClick={openInApp} className="press flex h-10 items-center gap-2 rounded-full bg-accent px-5 text-[14px] font-medium text-on-accent hover:brightness-110">
+                  <button type="button" onClick={openInApp} className="press flex h-10 items-center gap-2 rounded-full bg-accent px-5 text-[14px] font-medium text-on-accent hover:brightness-110">
                     <ArrowSquareOut size={16} />
                     {appName ? `Open in ${appName}` : "Open in default app"}
                   </button>

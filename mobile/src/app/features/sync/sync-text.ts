@@ -13,6 +13,21 @@ export function deviceNames(list: string[]): string {
 
 const items = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
 
+// Whether the button syncs, or only backs up: a phone apart, removed or without Pro backs up and nothing more.
+export const syncsNow = (status: SyncStatus) => !status.apart && !status.removed && !status.backupOnly;
+
+// When this phone last synced; a phone that only backs up shows its own newest backup in the bucket, once a
+// listing has shown it.
+export const lastTime = (status: SyncStatus) => (syncsNow(status) ? status.lastAt : status.devices.find((d) => d.thisDevice)?.lastSyncAt);
+
+// What Sync now / Back up now says once done. null: something waits for the user (review, new master
+// password, a device problem), and the sync line or the Sync sheet shows it.
+export function afterSyncToast(after: SyncStatus): string | null {
+  if (!syncsNow(after)) return "Backed up";
+  if (after.review || after.newMaster || after.problems.length) return null;
+  return `Synced with ${after.peer ?? "your devices"}`;
+}
+
 // The line under the item count, most urgent first. ago: the page's relative time ("2 min ago").
 export function syncLineText(status: SyncStatus, ago: (ms: number) => string): SyncLineText {
   if (status.state === "off") return { text: "No backup yet", tone: "quiet" };
@@ -20,8 +35,14 @@ export function syncLineText(status: SyncStatus, ago: (ms: number) => string): S
   if (status.removed) return { text: "This phone was removed from sync", tone: "warn" };
   if (status.review) return { text: `Changes from ${deviceNames(status.review.from)} wait for you`, tone: "warn" };
   if (status.newMaster) return { text: `${status.newMaster} has a new master password`, tone: "warn" };
-  if (status.state === "error") return { text: "Sync did not finish · tap to see why", tone: "warn" };
+  if (status.state === "error") return { text: `${status.backupOnly ? "Backup" : "Sync"} did not finish · tap to see why`, tone: "warn" };
   if (status.problems.length) return { text: status.problems[0], tone: "warn" };
+  // No Pro: the button says Back up now, and the time is this phone's own backup.
+  if (status.backupOnly) {
+    const at = lastTime(status);
+    const manual = status.manual ? " · only on Back up now" : "";
+    return at ? { text: `Backed up · ${ago(at)}${manual}`, tone: "ok" } : { text: `Backs up to your bucket${manual}`, tone: "quiet" };
+  }
   const manual = status.manual ? " · only on Sync now" : "";
   if (status.lastAt) return { text: `Synced with ${status.peer ?? "your devices"} · ${ago(status.lastAt)}${manual}`, tone: "ok" };
   return { text: `Not synced yet${manual}`, tone: "quiet" };

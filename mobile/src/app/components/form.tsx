@@ -5,6 +5,7 @@ import { Eye, EyeSlash } from "@phosphor-icons/react";
 
 export function Label({ text, children }: { text: string; children: ReactNode }) {
   return (
+    // biome-ignore lint/a11y/noLabelWithoutControl: Label wraps the field passed in as children (a TextInput, TextArea or Select), which is the control
     <label className="block">
       <span className="mb-1.5 block text-[12.5px] font-medium text-ink-2">{text}</span>
       {children}
@@ -91,6 +92,7 @@ export function Segmented<T extends string | number>({ label, options, value, on
         />
       )}
       {options.map((o) => (
+        // biome-ignore lint/a11y/useSemanticElements: a segmented radio drawn as buttons on one sliding track; a native radio input cannot be styled as this control
         <button
           key={o.value}
           type="button"

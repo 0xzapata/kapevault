@@ -19,6 +19,7 @@ function messages(masterEveryMs) {
   const days = Math.max(1, Math.round(masterEveryMs / DAY_MS));
   return {
     unsupported: "Windows Hello is not set up on this PC.",
+    blocked: "This PC's policy blocks Windows Hello for KAPEVault.",
     "not-enabled": "Windows Hello is off for KAPEVault.",
     canceled: "Windows Hello was cancelled.",
     "master-required": `Enter your master password - KAPEVault asks for it every ${days} days.`,
@@ -36,7 +37,7 @@ const B64 = /^[A-Za-z0-9+/]*={0,2}$/;
 // Resolves with the script's JSON result. Rejects only on spawn failure, timeout, or unreadable output.
 async function runScript(op, challenge = "") {
   if (!Object.hasOwn(OPS, op) || !B64.test(challenge)) throw new Error("Bad Hello request");
-  // Electron's fs reads inside app.asar; powershell.exe cannot, so the script travels inline.
+  // Electron's fs reads inside app.asar; powershell.exe cannot, so the script travels as command text.
   const body = fs.readFileSync(path.join(__dirname, "windows-hello.ps1"), "utf8").replace(/^\uFEFF/, "");
   const script = `$Op = '${op}'; $Challenge = '${challenge}'\n${body}`;
   try {
@@ -87,15 +88,17 @@ function validRecord(r) {
   return true;
 }
 
-function createWindowsHello({ dataDir, fake, now = () => Date.now(), masterEveryMs = MASTER_EVERY_MS }) {
+// backend: a stand-in for the PowerShell bridge (tests); fake: the approve|cancel stand-in for Hello.
+function createWindowsHello({ dataDir, fake, backend = fake ? fakeBackend(fake) : realBackend, now = () => Date.now(), masterEveryMs = MASTER_EVERY_MS }) {
   const file = path.join(dataDir, "hello.json");
-  const backend = fake ? fakeBackend(fake) : realBackend;
   const MSG = messages(masterEveryMs);
   const fail = (code) => new HelloError(code, MSG[code]);
-  const { remove, read, needsMaster, masterAt, writeSealed, status, isStale, touchMaster } = createBiometricRecord({ file, sealed: SEALED, valid: validRecord, fail, now, masterEveryMs });
+  const { remove, read, needsMaster, masterAt, writeSealed, status: recordStatus, isStale, touchMaster } = createBiometricRecord({ file, sealed: SEALED, valid: validRecord, fail, now, masterEveryMs });
   let busy = false;
+  let blocked = false; // the last answer was "Constrained": this PC's policy stops the PowerShell bridge
 
   function statusError(status, op) {
+    if (status === "Constrained") return fail("blocked");
     if (status === "UserCanceled" || status === "UserPrefersPassword") return fail("canceled");
     if (status === "SecurityDeviceLocked") return fail("locked-out");
     if (status === "Unsupported") return fail("unsupported");
@@ -114,6 +117,7 @@ function createWindowsHello({ dataDir, fake, now = () => Date.now(), masterEvery
     busy = true;
     try {
       const result = await backend[op](challenge.toString("base64"));
+      blocked = result.status === "Constrained";
       if (result.status !== "Success" || typeof result.signature !== "string") throw statusError(result.status, op);
       const signature = Buffer.from(result.signature, "base64");
       if (signature.length < KEY_BYTES) {
@@ -133,6 +137,7 @@ function createWindowsHello({ dataDir, fake, now = () => Date.now(), masterEvery
     if (process.platform !== "win32") return false;
     try {
       const result = await backend.supported();
+      blocked = result.status === "Constrained";
       return result.status === "Success" && result.supported === true;
     } catch {
       return false;
@@ -224,6 +229,10 @@ function createWindowsHello({ dataDir, fake, now = () => Date.now(), masterEvery
       // best-effort: a credential already gone in Windows settings is fine
     }
   }
+
+  // Once Hello was asked and this PC's policy (Constrained Language Mode) blocked the bridge, the status
+  // says so (blockedByPolicy), and Settings can tell that from "not set up". Touch ID has no such state.
+  const status = () => ({ ...recordStatus(), ...(blocked && { blockedByPolicy: true }) });
 
   return { status, isSupported, enable, unlock, disable, touchMaster, isStale, masterAt };
 }

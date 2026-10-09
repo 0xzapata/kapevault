@@ -53,6 +53,7 @@ export function FolderBrowser({ root }: FolderBrowserProps) {
       <div className="flex items-center gap-1 px-1 text-[13px]">
         {trail.length > 0 && (
           <button
+            type="button"
             aria-label="Back"
             onClick={() => setTrail(trail.slice(0, -1))}
             className="press mr-1 grid size-7 place-items-center rounded-full text-ink-2 hover:bg-accent-soft hover:text-accent"
@@ -63,9 +64,11 @@ export function FolderBrowser({ root }: FolderBrowserProps) {
         {[rootName, ...trail].map((name, i) => {
           const last = i === trail.length;
           return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a path trail: the position is the identity, and a folder name can repeat
             <span key={`${i}-${name}`} className="flex min-w-0 items-center gap-1">
               {i > 0 && <CaretRight size={11} className="shrink-0 text-ink-3" />}
               <button
+                type="button"
                 disabled={last}
                 onClick={() => setTrail(trail.slice(0, i))}
                 className={`truncate rounded px-1 ${last ? "font-semibold text-ink" : "text-ink-3 hover:text-accent"}`}
@@ -86,6 +89,7 @@ export function FolderBrowser({ root }: FolderBrowserProps) {
           {listing.items.map((item) => (
             <li key={item.name}>
               <button
+                type="button"
                 onClick={() => open(item)}
                 title={item.name}
                 className="press row flex h-[124px] w-full flex-col items-center justify-center gap-2 rounded-[14px] px-2 hover:bg-hover"

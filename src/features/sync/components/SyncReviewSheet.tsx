@@ -14,8 +14,10 @@ function TitleList({ label, titles }: { label: string; titles: string[] }) {
       <h3 className="mb-1.5 text-[12.5px] font-medium text-ink-2">
         {label} ({titles.length})
       </h3>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable list takes the focus so the arrow keys can scroll it */}
       <ul aria-label={label} tabIndex={0} className="max-h-36 overflow-y-auto rounded-[12px] bg-field px-3.5 py-2 text-[13px] text-ink focus-ring focus-ring-inset">
         {titles.map((title, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: plain titles that can repeat, shown read-only and replaced whole
           <li key={i} className="truncate py-0.5">
             {title}
           </li>

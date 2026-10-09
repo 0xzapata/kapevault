@@ -24,6 +24,9 @@ class KapeAutofillService : AutofillService() {
         val compat = request.flags and FillRequest.FLAG_COMPATIBILITY_MODE_REQUEST != 0
         val form = LoginForm.parse(structure, compat)
         if (form == null || !LoginForm.mayFill(this, structure.activityComponent)) return callback.onSuccess(null)
+        // An app whose signers are not the ones it had when first filled gets no suggestion (AppSigners);
+        // AutofillAuthActivity checks again before the vault opens.
+        if (AppSigners.refuses(this, form.packageName)) return callback.onSuccess(null)
         callback.onSuccess(FillResponse.Builder().addDataset(locked(form, compat)).build())
     }
 

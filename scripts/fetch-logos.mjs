@@ -42,7 +42,7 @@ function download(source) {
 const existing = (slug) => fs.readdirSync(outDir).find((f) => f.replace(/\.\w+$/, "") === slug);
 
 for (const brand of brands) {
-  if (brand.source.local) continue;
+  if (brand.logo === false || brand.source.local) continue; // "logo": false = shown by name only, never fetched (NOTICE)
   if (existing(brand.slug) && !force) continue;
   try {
     const { type, body } = await download(brand.source);

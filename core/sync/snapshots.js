@@ -3,10 +3,10 @@
 // newest is decided by R2's own LastModified, never the name.
 import { MAX_VAULT_BYTES } from "../vault-format.js";
 
-// kapevault/snapshots/[<install id>/]<time>[-before-restore].kapevault, and the same under bovault/
-// from before the app was renamed. No install id folder = made before install ids.
+// kapevault/snapshots/[<install id>/]<time>[-before-restore|-backup-only].kapevault, and the same under
+// bovault/ from before the app was renamed. No install id folder = made before install ids.
 const SNAPSHOT_KEYS = ["kapevault", "bovault"].map(
-  (n) => new RegExp(`^${n}/snapshots/(?:([0-9a-f-]{36})/)?(\\d{4}-\\d{2}-\\d{2})T(\\d{2})-(\\d{2})-(\\d{2})-(\\d{3})Z(-before-restore)?\\.${n}$`),
+  (n) => new RegExp(`^${n}/snapshots/(?:([0-9a-f-]{36})/)?(\\d{4}-\\d{2}-\\d{2})T(\\d{2})-(\\d{2})-(\\d{2})-(\\d{3})Z(-before-restore|-backup-only)?\\.${n}$`),
 );
 
 // Where snapshots are listed: under the current name, and under the name from before the rename
@@ -22,16 +22,23 @@ const KEEP_UNDO_DAYS = 30; // every -before-restore snapshot, so a restore can b
 // ranked as the newest (names dated 2099 pushed the real ones out).
 const FUTURE_MS = DAY_MS;
 const TRIES = 3; // a device whose three newest snapshots cannot be opened is an error
+// Devices the vault has never seen, read per run: anyone with write access to the bucket can plant
+// device folders, and each costs up to TRIES downloads. Known devices are never capped.
+export const MAX_NEWCOMERS = 8;
+
+/** One listed object as it is now: a host remembers an unopenable one by this, and retries when it changes. */
+export const snapshotStamp = (/** @type {{ key: string, lastModified: number | null, size?: number }} */ o) => JSON.stringify([o.key, o.lastModified, o.size ?? null]);
 
 /**
  * A snapshot's key, read: who made it (null before install ids), its name time, whether it is the copy a
- * restore replaced, and whether it predates the rename. Null for any other object.
- * @param {string} key @returns {{ owner: string | null, time: number, beforeRestore: boolean, legacy: boolean } | null}
+ * restore replaced, whether it is a backup only (a phone without Pro: restorable, never synced), and
+ * whether it predates the rename. Null for any other object.
+ * @param {string} key @returns {{ owner: string | null, time: number, beforeRestore: boolean, backupOnly: boolean, legacy: boolean } | null}
  */
 export function readSnapshotKey(key) {
   for (const [i, pattern] of SNAPSHOT_KEYS.entries()) {
     const m = pattern.exec(key);
-    if (m) return { owner: m[1] ?? null, time: Date.parse(`${m[2]}T${m[3]}:${m[4]}:${m[5]}.${m[6]}Z`), beforeRestore: Boolean(m[7]), legacy: i === 1 };
+    if (m) return { owner: m[1] ?? null, time: Date.parse(`${m[2]}T${m[3]}:${m[4]}:${m[5]}.${m[6]}Z`), beforeRestore: m[7] === "-before-restore", backupOnly: m[7] === "-backup-only", legacy: i === 1 };
   }
   return null;
 }
@@ -39,7 +46,7 @@ export function readSnapshotKey(key) {
 /**
  * A new snapshot's key: kapevault/snapshots/<install id>/<UTC time>[-<note>].kapevault. No install id
  * (settings could not be read this run): no folder, like snapshots from before install ids.
- * @param {Date} now @param {string} [installId] @param {string} [note] "before-restore", or none
+ * @param {Date} now @param {string} [installId] @param {string} [note] "before-restore", "backup-only", or none
  */
 export function snapshotKey(now, installId = "", note = "") {
   return `${SNAPSHOT_PREFIXES[0]}${installId ? `${installId}/` : ""}${now.toISOString().replace(/[:.]/g, "-")}${note ? `-${note}` : ""}.kapevault`;
@@ -71,31 +78,33 @@ export function snapshotsToPrune(keys, now) {
 /**
  * The other devices' snapshots sync may read, per device, newest first by LastModified (the first
  * three: an older one is a safe subset when the newest will not open). Never this install's own, a
- * restore's undo copy, an un-named or pre-rename one, or a revoked device's. dead: nothing new in 180
- * days - read only by an explicit Sync now.
- * @param {{ key: string, lastModified: number | null }[]} objects
- * @param {{ installId: string, devices: Record<string, { revokedAt?: unknown }>, now: number }} context
+ * restore's undo copy, a backup-only one, an un-named or pre-rename one, or a revoked device's. dead:
+ * nothing new in 180 days - read only by an explicit Sync now. Every device in `devices`, and only the
+ * MAX_NEWCOMERS newest of the others. failed: snapshotStamp()s of objects that would not open - skipped.
+ * @param {{ key: string, lastModified: number | null, size?: number }[]} objects
+ * @param {{ installId: string, devices: Record<string, { revokedAt?: unknown }>, now: number, failed?: Set<string> }} context
  * @returns {{ device: string, keys: string[], lastSeen: number, dead: boolean }[]}
  */
-export function pickSnapshots(objects, { installId, devices, now }) {
+export function pickSnapshots(objects, { installId, devices, now, failed = new Set() }) {
   const byDevice = new Map();
   for (const object of objects) {
     const info = readSnapshotKey(object.key);
-    if (!info?.owner || info.legacy || info.beforeRestore || info.owner === installId || devices[info.owner]?.revokedAt) continue;
+    if (!info?.owner || info.legacy || info.beforeRestore || info.backupOnly || info.owner === installId || devices[info.owner]?.revokedAt) continue;
     // Bigger than any vault can be: never downloaded. The phone reads a reply whole, and a planted 2 GB
     // object crashed every sync (SECURITY-AUDIT-2026-09-28.md, L9).
-    if (Number(object.size) > MAX_VAULT_BYTES) continue;
+    if (Number(object.size) > MAX_VAULT_BYTES || failed.has(snapshotStamp(object))) continue;
     if (!byDevice.has(info.owner)) byDevice.set(info.owner, []);
     byDevice.get(info.owner).push(object);
   }
   const when = (object) => object.lastModified ?? 0;
-  return [...byDevice]
-    .map(([device, list]) => {
-      list.sort((a, b) => when(b) - when(a) || compareText(b.key, a.key));
-      const lastSeen = when(list[0]);
-      return { device, keys: list.slice(0, TRIES).map((o) => o.key), lastSeen, dead: now - lastSeen > DEAD_AFTER_MS };
-    })
-    .sort((a, b) => compareText(a.device, b.device));
+  const picks = [...byDevice].map(([device, list]) => {
+    list.sort((a, b) => when(b) - when(a) || compareText(b.key, a.key));
+    const lastSeen = when(list[0]);
+    return { device, keys: list.slice(0, TRIES).map((o) => o.key), lastSeen, dead: now - lastSeen > DEAD_AFTER_MS };
+  });
+  const newcomers = picks.filter((p) => !devices[p.device]).sort((a, b) => b.lastSeen - a.lastSeen || compareText(a.device, b.device));
+  const over = new Set(newcomers.slice(MAX_NEWCOMERS).map((p) => p.device));
+  return picks.filter((p) => !over.has(p.device)).sort((a, b) => compareText(a.device, b.device));
 }
 
 const compareText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);

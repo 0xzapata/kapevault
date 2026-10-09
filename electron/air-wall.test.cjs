@@ -109,8 +109,18 @@ test("set reads the rule back; a cancelled prompt changes nothing and says so", 
   deps.runElevated = async () => 1223;
   await assert.rejects(wall.set(false), /prompt was cancelled, so nothing changed/);
   assert.deepEqual(await wall.status(), { available: true, state: "on" });
+  deps.runElevated = async () => 1260;
+  await assert.rejects(wall.set(false), /This PC's policy blocks KAPEVault from changing the firewall/);
   deps.runElevated = async () => 5;
   await assert.rejects(wall.set(false), /did not remove/);
+});
+
+test("the launcher gives up with the policy code in Constrained Language Mode, before touching .NET", () => {
+  const { launcherScript, BLOCKED_BY_POLICY } = require("./air-wall.cjs");
+  const lines = launcherScript("exit 0").split("\n");
+  assert.equal(BLOCKED_BY_POLICY, 1260);
+  assert.match(lines[0], /LanguageMode -ne 'FullLanguage'\) \{ exit 1260 \}/);
+  assert.ok(lines.findIndex((l) => l.includes("New-Object")) > 0, "the check comes first");
 });
 
 test("the probe connects once and sends nothing; EACCES reads as a Windows block", async () => {

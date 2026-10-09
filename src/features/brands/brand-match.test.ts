@@ -39,7 +39,7 @@ const cases: [string, string | null][] = [
   ["https://www.bpi.com.ph", "bpi"],
   ["https://online.metrobank.com.ph", "metrobank"],
   ["https://www.unionbankph.com", "unionbank"],
-  ["https://www.landbank.com", "landbank"],
+  ["https://www.landbank.com", "landbank"], // a brand with no logo file ("logo": false): it still matches
   ["https://www.pnb.com.ph", "pnb"],
   ["https://www.securitybank.com", "security-bank"],
   ["https://www.rcbc.com", "rcbc"],
@@ -67,7 +67,8 @@ const cases: [string, string | null][] = [
   ["https://www.union.com", null],
   ["Sea view condo", null],
   ["Express delivery", null],
-  // PH government: the portals and the names people type
+  // PH government agencies have no logo here (their marks need the agency's approval to use, see
+  // NOTICE) but are still brands: the portals and the names people type match, and show the letter tile.
   ["https://member.sss.gov.ph/members/", "sss"],
   ["My.SSS", "sss"],
   ["SSS contribution", "sss"],
@@ -95,3 +96,20 @@ const cases: [string, string | null][] = [
 for (const [text, want] of cases) {
   test(`${text} -> ${want}`, () => assert.equal(detect(text), want));
 }
+
+// A brand is in the app (BRANDS) when the catalog says "logo": false or a file in assets/logos has its slug.
+const logoFiles = new Set(fs.readdirSync(new URL("../../assets/logos/", import.meta.url)).map((f) => f.replace(/\.\w+$/, "")));
+const inApp = (slug: string) => {
+  const b = catalog.find((x: { slug: string }) => x.slug === slug);
+  return b !== undefined && (b.logo === false || logoFiles.has(slug));
+};
+
+test("brands shown by name only have no logo file", () => {
+  const nameOnly = ["landbank", "remitly", "sss", "philhealth", "pag-ibig", "bir"];
+  for (const slug of nameOnly) {
+    assert.equal(catalog.find((x: { slug: string }) => x.slug === slug)?.logo, false, `${slug} is "logo": false`);
+    assert.equal(logoFiles.has(slug), false, `${slug} has no file in assets/logos`);
+    assert.ok(inApp(slug), `${slug} is still a brand`);
+  }
+});
+

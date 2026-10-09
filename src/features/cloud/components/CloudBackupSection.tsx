@@ -37,7 +37,7 @@ export function CloudBackupSection() {
 
       {cloud.status && !settings && (
         <div className="mt-4">
-          <CredentialsForm submitLabel="Connect" busyLabel="Connecting..." busy={cloud.busy === "connect"} error={cloud.error} onSubmit={cloud.connect} />
+          <CredentialsForm uploads submitLabel="Connect"busyLabel="Connecting..." busy={cloud.busy === "connect"} error={cloud.error} onSubmit={cloud.connect} />
         </div>
       )}
 

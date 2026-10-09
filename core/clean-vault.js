@@ -10,6 +10,7 @@
 // value it does not know. `photo` is the one exception: only a JPEG data URL is ever drawn.
 import { KINDS } from "./entries.js";
 import { cleanPhoto } from "./devices.js";
+import { parseR2Url } from "./r2.js";
 /** @import { VaultData } from "./entries.js" */
 
 // Deeper than any vault KAPEVault writes (entries > item > backup codes > paper copy is 5).
@@ -17,6 +18,7 @@ export const MAX_DEPTH = 24;
 const MAX_ID = 128;
 const RESERVED = new Set(["__proto__", "constructor", "prototype"]);
 
+/** @param {unknown} v @returns {v is Record<string, any>} */
 const isRecord = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v) => typeof v === "string";
 const isId = (v) => isText(v) && v.length > 0 && v.length <= MAX_ID && !RESERVED.has(v);
@@ -35,7 +37,9 @@ const photo = (v) => {
 };
 
 // Copies `value` with every known field checked; unknown fields ride along as they are.
+/** @param {any} value @param {Record<string, (v: any) => any>} fields @returns {Record<string, any>} */
 function keep(value, fields) {
+  /** @type {Record<string, any>} */
   const out = {};
   for (const [name, field] of Object.entries(value)) {
     if (RESERVED.has(name)) continue;
@@ -52,6 +56,7 @@ const recoveryCodes = (v) => {
   const set = recordOf({ codes: listOf(row("code", { code: text, used: (u) => (typeof u === "boolean" ? u : undefined) })), setAt: text, paper: listOf(row("where", { where: text, printedAt: text, outdatedAt: text })) })(v);
   return set?.codes ? set : undefined;
 };
+const genHistory = listOf(row("value", { value: text, at: text })); // core/generated.js
 const questions = listOf(row("question", { question: text, answer: text }));
 const lifecycle = (v) => (isRecord(v) && isText(v.state) ? keep(v, { state: text, requestedAt: text, followUpAt: text, goneAt: text }) : undefined);
 
@@ -65,13 +70,13 @@ const COMMON = {
   lastUsedAt: (v) => (Number.isFinite(v) ? v : undefined),
   brand: text,
   heldFor: text,
+  trashedAt: text,
 };
 const BY_KIND = {
   login: { username: text, password: text, url: text, signIn: text, viaEntryId: text, totp: text, passwordChangedAt: text, history, recoveryCodes, questions, lifecycle },
   note: { body: text },
   key: { keyId: text, secret: text, url: text, expires: text },
   link: { linkType: text, location: text },
-  payee: { who: text, relation: text, provider: text, number: text, accountName: text, confirmedAt: text },
   thing: { room: text, spot: text, grab: smallInt, expires: text },
   device: { type: text, model: text, serial: text, imei: text, mac: text, adminUrl: text, adminUser: text, adminPassword: text, ssid: text, wifiPassword: text, photo },
   id: { idType: text, idNumber: text, photo },
@@ -79,9 +84,10 @@ const BY_KIND = {
 
 // How deep a value nests, counted without recursion (a crafted file can nest 200,000 levels).
 function tooDeep(value) {
+  /** @type {[unknown, number][]} */
   const stack = [[value, 0]];
   while (stack.length) {
-    const [v, depth] = stack.pop();
+    const [v, depth] = /** @type {[unknown, number]} */ (stack.pop());
     if (typeof v !== "object" || v === null) continue;
     if (depth >= MAX_DEPTH) return true;
     for (const child of Object.values(v)) stack.push([child, depth + 1]);
@@ -89,21 +95,37 @@ function tooDeep(value) {
   return false;
 }
 
+// The R2 connection rides inside the vault, so a hostile backup could point every auto-backup (ciphertext
+// plus the key ID) at its own host. Kept only when it is a real R2 bucket with both keys as text.
+const cloud = (v) => {
+  const target = isRecord(v) ? parseR2Url(`${v.endpoint}/${v.bucket}`) : null;
+  return target && target.endpoint === v.endpoint && target.bucket === v.bucket && isText(v.accessKeyId) && isText(v.secretAccessKey) ? v : undefined;
+};
+
 /**
  * A decrypted vault, made safe to use. Throws when it is not a vault at all or nests too deeply.
  * @param {unknown} data @returns {VaultData}
  */
 export function cleanVault(data) {
   if (!isRecord(data) || !Array.isArray(data.entries) || !Array.isArray(data.spaces) || tooDeep(data)) throw new Error("That vault's contents are damaged.");
+  /** @type {any[]} */
   const spaces = data.spaces.filter((s) => isRecord(s) && isId(s.id) && isText(s.name)).map((s) => keep(s, { kind: text }));
   const seen = new Set();
+  /** @type {any[]} */
   const entries = [];
   for (const e of data.entries) {
     if (!isRecord(e) || !isId(e.id) || !isText(e.kind) || seen.has(e.id)) continue;
     seen.add(e.id);
     entries.push(keep(e, { ...COMMON, ...(KINDS.includes(e.kind) ? BY_KIND[e.kind] : {}) }));
   }
+  /** @type {Record<string, any>} */
   const out = {};
   for (const [name, value] of Object.entries(data)) if (!RESERVED.has(name)) out[name] = value;
+  if (Object.hasOwn(out, "cloud") && cloud(out.cloud) === undefined) delete out.cloud;
+  if (Object.hasOwn(out, "genHistory")) {
+    const kept = genHistory(out.genHistory);
+    if (kept === undefined) delete out.genHistory;
+    else out.genHistory = kept;
+  }
   return { ...out, spaces, entries };
 }

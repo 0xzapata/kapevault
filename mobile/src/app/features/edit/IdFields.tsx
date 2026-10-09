@@ -6,15 +6,14 @@ import { ErrorText, Label, Select, TextInput } from "../../components/form";
 import { PhotoTile } from "../../components/photo";
 import { preparePhoto } from "../../lib/photo";
 import { SecretInput } from "./inputs";
-import { SpaceField, TitleField } from "./OtherFields";
+import { SpaceField, TitleField, type SpaceChoice } from "./OtherFields";
 import type { Draft, SetDraft } from "./use-item-form";
-import type { Space } from "../../host/types";
 
 const OTHER = "Other";
 
 // The PC's ID fields: which ID (Other: typed), its number, a photo of it, then the title, which left
 // empty follows the ID.
-export function IdFields({ draft, set, spaces, autoTitle, showPhoto }: { draft: Draft; set: SetDraft; spaces: Space[]; autoTitle: string; showPhoto: () => void }) {
+export function IdFields({ draft, set, spaces, autoTitle, showPhoto }: { draft: Draft; set: SetDraft; spaces: SpaceChoice[]; autoTitle: string; showPhoto: () => void }) {
   return (
     <>
       <Label text="ID">
@@ -36,7 +35,7 @@ export function IdFields({ draft, set, spaces, autoTitle, showPhoto }: { draft: 
       </Label>
       {draft.idOther && (
         <Label text="Which ID">
-          <TextInput autoFocus value={draft.idType} onChange={(e) => set("idType", e.target.value)} placeholder="Barangay ID" autoComplete="off" />
+          <TextInput autoFocus value={draft.idType} onChange={(e) => set("idType", e.target.value)} placeholder="Driver's license" autoComplete="off" />
         </Label>
       )}
       <SecretInput label="ID number" value={draft.idNumber} onChange={(v) => set("idNumber", v)} />

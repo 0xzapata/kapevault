@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newSync, readSync, validSync, addKey, registerDevice, newEpoch, revokeDevice, SHARED_FIELDS } from "./shape.js";
+import { newSync, readSync, checkReader, isNewerData, validSync, addKey, registerDevice, newEpoch, revokeDevice, SHARED_FIELDS } from "./shape.js";
 import { ZERO } from "./hlc.js";
+import { NewerVaultError } from "../vault-format.js";
 
 const SALT = "AAAAAAAAAAAAAAAAAAAAAA==";
 const PC = "0b8c8e52-1b7e-4d8e-9a53-6f0c1d2e3f40";
@@ -63,7 +64,27 @@ test("a sync object with no readable identity is refused whole", () => {
   for (const bad of [null, undefined, [], "sync", 7, {}, { ...good, v: 2 }, { ...good, vaultId: "" }, { ...good, vaultId: 5 }, { ...good, epoch: null }, { ...good, epoch: { id: "x", at: [1] } }]) {
     assert.equal(validSync(bad), null, JSON.stringify(bad));
   }
-  assert.deepEqual(readSync({ ...oldVault(), sync: { v: 2 } }, SALT), newSync(oldVault(), SALT), "an unreadable one is replaced like a vault saved before sync");
+  for (const sync of [{ v: 0 }, { v: "2" }, { v: null }, { v: 1 }, "sync", 7]) {
+    assert.deepEqual(readSync({ ...oldVault(), sync }, SALT), newSync(oldVault(), SALT), `${JSON.stringify(sync)}: an unreadable one is replaced like a vault saved before sync`);
+  }
+});
+
+test("a sync object from a newer version is refused, never replaced by an empty one", () => {
+  const good = newSync(oldVault(), SALT);
+  for (const v of [2, 3, 1.5]) assert.throws(() => readSync({ ...oldVault(), sync: { ...good, v } }, SALT), NewerVaultError, `sync.v ${v}`);
+  assert.throws(() => readSync({ ...oldVault(), sync: { v: 2 } }, SALT), NewerVaultError, "even when nothing else in it is readable");
+});
+
+test("a vault whose minReader is above this app's reader version is refused", () => {
+  const good = newSync(oldVault(), SALT);
+  for (const minReader of [2, 7]) assert.throws(() => readSync({ ...oldVault(), minReader, sync: good }, SALT), NewerVaultError, `minReader ${minReader}`);
+  // Malformed or missing values keep today's behaviour: read as a vault without one.
+  for (const minReader of [undefined, 1, 0, "2", null, 1.5, Number.NaN]) assert.deepEqual(readSync({ ...oldVault(), minReader, sync: good }, SALT), good, `minReader ${minReader}`);
+});
+
+test("checkReader refuses a vault whose minReader or sync.v is above this app's, and nothing else", () => {
+  for (const data of [{ minReader: 2 }, { sync: { v: 2 } }, { minReader: 9, sync: { v: 1 } }]) assert.throws(() => checkReader(data), NewerVaultError, JSON.stringify(data));
+  for (const data of [{}, { minReader: 1 }, { minReader: "2" }, { minReader: 1.5 }, { sync: {} }, { sync: { v: 1 } }]) assert.doesNotThrow(() => checkReader(data), JSON.stringify(data));
 });
 
 test("the clock is never behind a time the object holds", () => {
@@ -111,4 +132,11 @@ test("an install registers once; a new name is a newer record; a revoked one sta
   const revoked = { ...registered, devices: { [PC]: { ...registered.devices[PC], revokedAt: [1500, 0, PHONE] } } };
   assert.equal(registerDevice(revoked, { ...me, name: "Mock PC renamed" }), revoked);
   assert.deepEqual(sync.devices, {}, "the old object is not edited");
+});
+
+test("isNewerData is checkReader as a yes or no", () => {
+  assert.equal(isNewerData({ minReader: 2 }), true);
+  assert.equal(isNewerData({ sync: { v: 2 } }), true);
+  assert.equal(isNewerData({ minReader: 1, sync: { v: 1 } }), false);
+  assert.equal(isNewerData({}), false);
 });

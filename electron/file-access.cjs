@@ -11,9 +11,10 @@ const HIDDEN = new Set(["desktop.ini", "thumbs.db", ".ds_store"]);
 // format that can carry macros (.docm, .xlsm, old .doc/.xls/.ppt, OpenDocument's Basic): of Office
 // files only .docx/.xlsx/.pptx open, which Office refuses to run macros from. .rtf (a common Office
 // exploit carrier), .svg and .xml (they open in a browser, scripts on) are only revealed too.
+// So are .csv and .tsv: Excel runs a =formula from a file someone else put in the folder (the in-app table preview reads them).
 const OPENABLE = new Set(
   (
-    "docx xlsx csv tsv pptx pdf txt md markdown log json " +
+    "docx xlsx pptx pdf txt md markdown log json " +
     "png jpg jpeg gif webp bmp avif heic tif tiff mp4 webm mov m4v mkv avi mp3 wav ogg m4a flac aac opus zip"
   )
     .split(" ")

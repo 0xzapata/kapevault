@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    /* Strict, except noImplicitAny: ~1,300 unannotated parameters and destructures would need JSDoc
+       on every function. Everything else strict (null checks, call arity, property access) is on. */
+    "strict": true,
+    "noImplicitAny": false,
+    /* `catch (e) { e.code }` is the Node error idiom used in ~40 places. */
+    "useUnknownInCatchVariables": false,
+    "types": ["node"]
+  },
+  "include": ["core/**/*.js", "electron/**/*.cjs"],
+  "exclude": ["electron/fixtures", "**/*.test.js", "**/*.test.cjs", "core/sync/test-helpers.js"]
+}

@@ -1,6 +1,9 @@
 // Dates and times the way the PC says them (src/lib/local-date.ts and src/lib/format.ts).
 
-import { plural } from "./plural";
+import { plural } from "@core";
+
+// Days from today is a rule, not a format: one function in core/dates.js, the PC uses it too.
+export { daysFromToday } from "@core";
 
 const DAY_MS = 86400000;
 
@@ -8,12 +11,6 @@ const DAY_MS = 86400000;
 function parseDay(value: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
-}
-
-export function daysFromToday(value: string): number | null {
-  const date = parseDay(value);
-  if (!date) return null;
-  return Math.round((date.getTime() - new Date().setHours(0, 0, 0, 0)) / DAY_MS);
 }
 
 export function formatDay(value: string | Date): string {
@@ -42,23 +39,17 @@ export function relativeTime(ms: number): string {
 // "Just now" at the start of a line.
 export const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-// "Today, 9:12 AM", "Yesterday, 6:40 PM", "Sep 24, 8:05 PM".
+// "Today, 9:12 AM", "Yesterday, 6:40 PM", "Sep 24, 8:05 PM" - in the phone's own language and 12/24-hour setting.
 export function dayAndTime(ms: number): string {
-  const time = new Date(ms).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", hour12: true });
+  const time = new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(ms).setHours(0, 0, 0, 0)) / DAY_MS);
   const day = days === 0 ? "Today" : days === 1 ? "Yesterday" : new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return `${day}, ${time}`;
 }
 
-export const clockTime = (ms: number) => new Date(ms).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", hour12: true });
+export const clockTime = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
 export const hoursText = (hours: number) => (hours === 0 ? "Off" : plural(hours, "hour"));
 
 // "123456" -> "123 456", "12345678" -> "1234 5678".
 export const groupCode = (code: string) => `${code.slice(0, Math.ceil(code.length / 2))} ${code.slice(Math.ceil(code.length / 2))}`;
-
-// A payee number: "0917 555 0142".
-export function formatNumber(number: string): string {
-  if (/^09\d{9}$/.test(number)) return `${number.slice(0, 4)} ${number.slice(4, 7)} ${number.slice(7)}`;
-  return number.replace(/(\d{4})(?=\d)/g, "$1 ");
-}

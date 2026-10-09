@@ -3,11 +3,11 @@
 // Run: npm run design   -> PNGs in %TEMP%\kapevault-design\ (lock, main, oauth, oauth-form, folder, form, ...)
 // plus the Forever Opener page in Chromium (opener-unlock/list, light + dark, phone width)
 const { _electron: electron, chromium } = require("./playwright.cjs");
-const { execFileSync } = require("child_process");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-const { pathToFileURL } = require("url");
+const { execFileSync } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const { openerHtml } = require("../electron/opener.cjs");
 const { openFile, encryptWithKey } = require("../electron/vault-crypto.cjs");
 const { renderIdCard, renderSticker } = require("./mock-sticker.cjs");
@@ -35,18 +35,9 @@ async function screen(app, name, quick = false) {
     px(b.x), px(b.y), px(b.width), px(b.height), path.join(OUT, name)]);
 }
 
-async function waitForQuick(app) {
-  for (let i = 0; i < 40; i++) {
-    const quick = app.windows().find((w) => w.url().includes("#quick"));
-    if (quick) return quick;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error("quick search window did not open");
-}
-
 (async () => {
   const app = await electron.launch({
-    executablePath: require(APP + "/node_modules/electron"),
+    executablePath: require(`${APP}/node_modules/electron`),
     args: [APP],
     env: { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "ELECTRON_RUN_AS_NODE")), KAPEVAULT_DATA_DIR: dataDir, KAPEVAULT_AUTO_LOCK_SECONDS: "86400", KAPEVAULT_AIRWALL_FAKE: "on", KAPEVAULT_OCR_FAKE: "label", KAPEVAULT_ALLOW_CAPTURE: "1" },
   });
@@ -55,10 +46,10 @@ async function waitForQuick(app) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   // firstWindow() can return the window still on about:blank (same race as e2e-harness.cjs).
-  await page.waitForURL((u) => u.protocol === "file:" || u.protocol === "http:", { waitUntil: "domcontentloaded" });
+  await page.waitForURL((u) => u.protocol === "app:" || u.protocol === "http:", { waitUntil: "domcontentloaded" });
 
-  await page.getByPlaceholder("Master password", { exact: true }).fill("design kettle harbor pass");
-  await page.getByPlaceholder("Confirm master password").fill("design kettle harbor pass");
+  await page.getByPlaceholder("Master password", { exact: true }).fill("design kettle harbor pass orbit gazelle");
+  await page.getByPlaceholder("Confirm master password").fill("design kettle harbor pass orbit gazelle");
   await page.keyboard.press("Enter");
   await page.getByText("Nothing here yet").waitFor({ timeout: 15000 });
 
@@ -84,7 +75,7 @@ async function waitForQuick(app) {
   await page.getByRole("button", { name: "Lock vault" }).click();
   await page.waitForTimeout(500);
   await screen(app, "lock.png");
-  await page.getByPlaceholder("Master password").fill("design kettle harbor pass");
+  await page.getByPlaceholder("Master password").fill("design kettle harbor pass orbit gazelle");
   await page.keyboard.press("Enter");
   await page.locator("section li").first().waitFor({ timeout: 15000 });
 
@@ -185,35 +176,6 @@ async function waitForQuick(app) {
   await screen(app, "v2-client-menu.png");
   await page.keyboard.press("Escape");
 
-  // Payee Check: detail (confirmed + not yet), the form with its provider grid, the verdict in main search.
-  await page.evaluate(async () => {
-    const b = window.kapevault;
-    const personal = (await b.view()).spaces.find((s) => s.kind === "personal").id;
-    const base = { tags: [], favorite: false, notes: "", kind: "payee", spaceId: personal };
-    const rosa = await b.saveEntry({ ...base, title: "Mock Tita Rosa GCash", who: "Mock Tita Rosa", relation: "Tita", provider: "GCash", number: "09171234567", accountName: "MO** T*** R." });
-    await b.confirmPayee(rosa.id, "09171234567");
-    await b.saveEntry({ ...base, title: "Mock Tito Lito BDO", who: "Mock Tito Lito", provider: "BDO", number: "001234567890" });
-  });
-  await open("Mock Tita Rosa GCash", "payee-detail.png");
-  await theme("dark");
-  await screen(app, "payee-detail-dark.png");
-  await theme("classic");
-  await open("Mock Tito Lito BDO", "payee-detail-unconfirmed.png");
-  await page.getByRole("button", { name: "New" }).click();
-  await page.waitForTimeout(400); // a click during the sheet's entrance makes Playwright scroll it
-  await page.getByRole("dialog").getByRole("button", { name: "Payee", exact: true }).click();
-  await page.waitForTimeout(400);
-  await screen(app, "payee-form.png");
-  await theme("dark");
-  await screen(app, "payee-form-dark.png");
-  await theme("classic");
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(400);
-  await page.locator("aside [data-search]").fill("0917 123 4576");
-  await page.waitForTimeout(400);
-  await screen(app, "payee-main-near-miss.png");
-  await page.locator("aside [data-search]").fill("");
-
   // Held-For: the sidebar section, a person's list with its chip, and the Hand back sheet.
   await page.evaluate(async () => {
     const b = window.kapevault;
@@ -303,11 +265,11 @@ async function waitForQuick(app) {
   await page.getByRole("button", { name: "Lock vault" }).click();
   await page.waitForTimeout(500);
   const vaultFile = path.join(dataDir, "vault.kapevault");
-  const plain = await openFile("design kettle harbor pass", JSON.parse(fs.readFileSync(vaultFile, "utf8")));
+  const plain = await openFile("design kettle harbor pass orbit gazelle", JSON.parse(fs.readFileSync(vaultFile, "utf8")));
   const yesterday = new Date(new Date().setDate(new Date().getDate() - 1)).toLocaleDateString("en-CA");
   plain.data.entries.find((e) => e.title === "Mock Old Forum").lifecycle.followUpAt = yesterday;
   fs.writeFileSync(vaultFile, JSON.stringify(encryptWithKey(plain.key, plain.kdf, plain.salt, plain.data)));
-  await page.getByPlaceholder("Master password").fill("design kettle harbor pass");
+  await page.getByPlaceholder("Master password").fill("design kettle harbor pass orbit gazelle");
   await page.keyboard.press("Enter");
   await page.locator("section li").first().waitFor({ timeout: 15000 });
   await page.locator("aside").getByRole("button", { name: /^Closing/ }).click();
@@ -440,20 +402,6 @@ async function waitForQuick(app) {
   await page.waitForTimeout(400);
   await resize(1440, 900);
 
-  // Quick search last: every verdict card, light and dark, captured from its own window.
-  await app.evaluate(() => globalThis.__kapevaultToggleQuick());
-  const quick = await waitForQuick(app);
-  const qInput = quick.getByRole("combobox");
-  await qInput.waitFor({ timeout: 8000 });
-  for (const scheme of ["classic", "dark"]) {
-    await theme(scheme);
-    for (const [name, query] of [["match", "0917 123 4567"], ["new-number", "Mock Tita Rosa 0999 888 7777"], ["near-miss", "0917 123 4568"], ["not-payee", "0999 888 7777"]]) {
-      await qInput.fill(query);
-      await screen(app, `payee-quick-${name}${scheme === "dark" ? "-dark" : ""}.png`, true);
-    }
-  }
-  await theme("classic");
-
   await app.close();
 
   // The Forever Opener page in a plain browser, light and dark, opening this seeded vault.
@@ -466,7 +414,7 @@ async function waitForQuick(app) {
     await web.goto(pathToFileURL(opener).href);
     await web.screenshot({ path: path.join(OUT, `opener-unlock-${scheme}.png`) });
     await web.locator("#file").setInputFiles(path.join(dataDir, "vault.kapevault"));
-    await web.getByRole("textbox", { name: "Master password" }).fill("design kettle harbor pass");
+    await web.getByRole("textbox", { name: "Master password" }).fill("design kettle harbor pass orbit gazelle");
     await web.keyboard.press("Enter");
     await web.getByRole("button", { name: /GHL agency login/ }).click({ timeout: 20000 });
     await web.getByRole("button", { name: /GitHub/ }).click();

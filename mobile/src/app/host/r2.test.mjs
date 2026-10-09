@@ -71,9 +71,9 @@ test("snapshot keys: the phone names them as the PC does, and the PC reads the p
   assert.equal(key, `kapevault/snapshots/${id}/2026-09-27T07-15-02-123Z.kapevault`);
   assert.equal(pc.cloud.snapshotOwner(key), id);
   assert.equal(pc.cloud.snapshotTime(key), at.getTime());
-  assert.deepEqual(readSnapshotKey(key), { owner: id, time: at.getTime(), beforeRestore: false, legacy: false });
+  assert.deepEqual(readSnapshotKey(key), { owner: id, time: at.getTime(), beforeRestore: false, backupOnly: false, legacy: false });
   const pcKey = pc.cloud.snapshotKey(at, id, "before-restore");
-  assert.deepEqual(readSnapshotKey(pcKey), { owner: id, time: at.getTime(), beforeRestore: true, legacy: false });
+  assert.deepEqual(readSnapshotKey(pcKey), { owner: id, time: at.getTime(), beforeRestore: true, backupOnly: false, legacy: false });
   assert.equal(readSnapshotKey("bovault/snapshots/2025-01-01T00-00-00-000Z.bovault").legacy, true);
   assert.equal(readSnapshotKey("kapevault/opener/kapevault-opener-0.1.0.html"), null);
 });

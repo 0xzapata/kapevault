@@ -30,9 +30,6 @@ function searchText(entry: Entry, spaceName: string): string {
     case "note":
       specific = ["secure note"];
       break;
-    case "payee":
-      specific = [entry.who, entry.relation, entry.provider, entry.number, entry.accountName, "payee"];
-      break;
     case "thing":
       // "bedroom" lists what is kept there; "blue folder" finds the spot.
       specific = [entry.room, entry.spot, "thing"];
@@ -52,6 +49,7 @@ function searchText(entry: Entry, spaceName: string): string {
 
 // A closed account's tombstone shows only in Closed - never in other lists, counts or search.
 export function matchesView(entry: Entry, view: ViewFilter): boolean {
+  if (view === "trash") return entry.trashedAt !== undefined; // the Trash view reads VaultView.trash; no other view ever sees such an item
   if (view === "closed") return isGone(entry);
   if (isGone(entry)) return false;
   switch (view) {
@@ -114,5 +112,5 @@ export function filterEntries({ entries, spaces, view, spaceId, heldFor, query, 
   if (!q) return sorted;
   // Searching: best title match first, the chosen order breaks ties (stable sort keeps it).
   const scores = new Map(sorted.map((e) => [e.id, titleScore(e.title, words, q)]));
-  return sorted.sort((a, b) => scores.get(b.id)! - scores.get(a.id)!);
+  return sorted.sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
 }

@@ -20,7 +20,7 @@ const remote = (data) => ({ device: PHONE, key: "k", data, salt: SALT });
 
 test("a conflict copy's title reads back as the title, the device and the day", () => {
   assert.deepEqual(readCopyTitle("Mock Portal (conflict copy, Mock Phone (work), 2026-09-27)"), { title: "Mock Portal", device: "Mock Phone (work)", day: "2026-09-27" });
-  assert.deepEqual(readCopyTitle("Mama (changed after closing, Mock PC, 2026-09-27) (check this number)"), { title: "Mama", device: "Mock PC", day: "2026-09-27" });
+  assert.deepEqual(readCopyTitle("Mama (changed after closing, Mock PC, 2026-09-27)"), { title: "Mama", device: "Mock PC", day: "2026-09-27" });
   assert.equal(readCopyTitle("Mock Portal"), null);
 });
 
@@ -35,6 +35,14 @@ test("a remote merges in, and this install joins the device list on the first ru
   assert.equal(result.data.sync.devices[ME.installId].name, "Mock PC");
   const again = mergeRemotes(result.data, [], ME);
   assert.equal(again.data, result.data, "an install already listed writes nothing");
+});
+
+test("a remote still holding a payee merges in as a note", () => {
+  const local = vault();
+  const payee = { id: "e1", spaceId: local.spaces[0].id, kind: "payee", title: "Mock Tita", who: "Mock Tita", provider: "GCash", number: "09171234567" };
+  const result = mergeRemotes(local, [remote({ ...local, entries: [payee] })], ME);
+  assert.deepEqual(result.problems, []);
+  assert.deepEqual(result.data.entries.map((e) => [e.kind, e.body]), [["note", "Name: Mock Tita\nWallet or bank: GCash\nNumber: 09171234567"]]);
 });
 
 test("a remote that cannot be merged is left out and named: clock ahead, another vault, an older restore", () => {
@@ -77,4 +85,22 @@ test("a review names the devices and the items by title; a deleted item by its t
   const changes = { added: ["new"], changed: ["kept"], deleted: ["gone"], copies: [], secretItems: 1 };
   assert.deepEqual(reviewView(before, result, changes, ["deletes"]), { from: ["Mock Phone"], reasons: ["deletes"], added: ["Mock new"], changed: ["Mock kept"], deleted: ["Mock gone"], copies: [], secretItems: 1 });
   assert.equal(nameOf({}, "x"), "Another device");
+});
+
+test("a remote from a newer version is skipped and named, never merged and never read as damaged", () => {
+  const local = vault();
+  const note = { id: "e1", spaceId: local.spaces[0].id, kind: "note", title: "Mock note", body: "b" };
+  const newerSync = { ...remote({ ...local, entries: [note] }), data: { ...local, entries: [note], sync: { ...local.sync, v: 2 } } };
+  const newerReader = remote({ ...local, entries: [note], minReader: 2 });
+  const fine = { ...remote({ ...local, entries: [{ ...note, id: "e2", title: "Mock other" }] }), device: "55555555-5555-4555-8555-555555555555" };
+  const before = JSON.stringify(local);
+  const result = mergeRemotes(local, [newerSync, newerReader, fine], ME);
+  assert.deepEqual(result.problems, ["Mock Phone runs a newer KAPEVault. Update this app.", "Mock Phone runs a newer KAPEVault. Update this app."]);
+  assert.deepEqual(result.merged.map((r) => r.device), [fine.device], "a device that can be read still merges");
+  assert.deepEqual(result.data.entries.map((e) => e.id), ["e2"]);
+  assert.deepEqual(result.data.sync.gone, local.sync.gone, "the sync record keeps what it had");
+  assert.equal(JSON.stringify(local), before, "the local vault is not changed in place");
+  assert.equal(mergeRemotes(local, [newerSync], ME).problems.length, 1);
+  assert.equal(nameOf({}, "x"), "Another device");
+  assert.deepEqual(mergeRemotes(local, [{ ...newerSync, device: "66666666-6666-4666-8666-666666666666" }], ME).problems, ["Another device runs a newer KAPEVault. Update this app."]);
 });

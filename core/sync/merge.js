@@ -4,12 +4,10 @@ import { compare, max, ZERO } from "./hlc.js";
 import { splitGroups, SPACE_GROUP } from "./groups.js";
 import { canonical, contentHash, spaceGroups, spaceKey } from "./stamp.js";
 import { HISTORY_LIMIT } from "../entries.js";
+/** @import { Hlc } from "./hlc.js" */
+/** @import { VersionVector, GroupStamp, ItemMeta } from "./shape.js" */
 
 /**
- * @typedef {import("./hlc.js").Hlc} Hlc
- * @typedef {import("./shape.js").VersionVector} VersionVector
- * @typedef {import("./shape.js").GroupStamp} GroupStamp
- * @typedef {import("./shape.js").ItemMeta} ItemMeta
  * @typedef {{ item: any, meta: ItemMeta, groups: Record<string, any>, floor?: Hlc }} Side one version of an item as the merge reads it
  * @typedef {{ item: any, meta: ItemMeta, copies: { item: any, meta: ItemMeta }[] }} Merged
  * @typedef {{ devices: Record<string, { name: string }>, sha256: (text: string) => string }} Context
@@ -19,11 +17,11 @@ import { HISTORY_LIMIT } from "../entries.js";
  */
 
 const NO_META = /** @type {ItemMeta} */ ({ vv: {}, g: {} });
-// Groups a stolen device could use to hurt (SYNC.md 3.9 mass-change gate): the secrets, and a payee's number.
-export const SECRET_GROUPS = ["pw", "totp", "qa", "secret", "body", "dpw", "wifi", "photo", "codes", "pay", "idnum"];
-// Nobody types these: a star, a move, an account state and the history list. A closed account drops a
-// concurrent change to them instead of copying the item for it.
-const NOT_TYPED = new Set(["fav", "space", "life", "history"]);
+// Groups a stolen device could use to hurt (SYNC.md 3.9 mass-change gate): the secrets.
+export const SECRET_GROUPS = ["pw", "totp", "qa", "secret", "body", "dpw", "wifi", "photo", "codes", "idnum"];
+// Nobody types these: a star, a move, an account state, the Trash and the history list. A closed account
+// drops a concurrent change to them instead of copying the item for it.
+const NOT_TYPED = new Set(["fav", "space", "life", "history", "trash"]);
 
 /** Two vaults from different lineages: never merged (SYNC.md 3.5). */
 export class VaultMismatchError extends Error {
@@ -209,6 +207,7 @@ function mergeSpace(L, R) {
 function mergeEntry(L, R, context) {
   if (isClosed(L.item) !== isClosed(R.item)) return isClosed(L.item) ? closeOver(L, R, context) : closeOver(R, L, context);
   const fields = { id: L.item.id };
+  /** @type {Record<string, GroupStamp>} */
   const g = {};
   const lostGroups = new Map();
   const lostPasswords = [];
@@ -219,7 +218,7 @@ function mergeEntry(L, R, context) {
     if (!loser) continue;
     if (name === "pw") {
       if (loser.item.password) lostPasswords.push({ password: loser.item.password, changedAt: new Date(loser.meta.g.pw.at[0]).toISOString() });
-    } else if (name !== "life") {
+    } else if (name !== "life" && name !== "trash") {
       lostGroups.set(loser, [...(lostGroups.get(loser) ?? []), name]);
     }
   }
@@ -300,9 +299,7 @@ function conflictCopy(side, names, label, { devices, sha256 }) {
   const stamp = names.map((name) => side.meta.g[name]).reduce((a, b) => (compare(a.at, b.at) >= 0 ? a : b));
   const [device, n] = stamp.dot;
   const { id, lastUsedAt, ...content } = side.item;
-  const payee = content.kind === "payee";
-  if (payee) delete content.confirmedAt; // nobody called to confirm the number in a copy
-  content.title = `${content.title} (${label}, ${devices[device]?.name ?? "another device"}, ${day(stamp.at)})${payee ? " (check this number)" : ""}`;
+  content.title = `${content.title} (${label}, ${devices[device]?.name ?? "another device"}, ${day(stamp.at)})`;
   const item = { id: copyId(canonical([id, stamp.dot, content]), sha256), ...content };
   const groups = new Set([...Object.keys(splitGroups(item)), ...Object.keys(side.meta.g)]);
   return { item, meta: { vv: { [device]: n }, g: Object.fromEntries([...groups].map((name) => [name, stamp])) } };

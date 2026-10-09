@@ -5,7 +5,7 @@ import type { Entry } from "../types";
 // all derive from this list. Every copy goes through the main process, which clears copied secrets
 // after 30s and records the use.
 //   secret   - mod+Shift+C: a password, a key's secret, a note, a Wi-Fi password, an ID number
-//   username - mod+C: a username, a key ID, a payee's number, a thing's spot, a Wi-Fi name
+//   username - mod+C: a username, a key ID, a thing's spot, a Wi-Fi name
 //   totp     - mod+Alt+C: a login's 2FA code
 //   imei     - a phone's IMEI (detail pills only)
 export type CopySlot = "secret" | "username" | "totp" | "imei";
@@ -37,9 +37,6 @@ export function entryCopies(entry: Entry): EntryCopy[] {
       break;
     case "note":
       if (entry.hasBody) add("secret", "Copy note", `Note copied${CLEARS}`, () => vaultApi.copySecret(id, "body"));
-      break;
-    case "payee":
-      add("username", "Copy number", "Number copied", text(entry.number));
       break;
     case "thing":
       add("username", "Copy spot", "Spot copied", text(entry.spot));

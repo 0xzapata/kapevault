@@ -3,6 +3,7 @@ import { ArrowsDownUp, MagnifyingGlass, Plus, SidebarSimple } from "@phosphor-ic
 import { barIcon } from "../../components/buttons";
 import { issueSummary } from "../../lib/entries";
 import { SORT_LABELS, type SortOrder } from "../../lib/filter";
+import { MasterIssueRow } from "../security/MasterIssueRow";
 import { EntryRow } from "./EntryRow";
 import { SortMenu } from "./SortMenu";
 import type { Entry } from "../../host/types";
@@ -11,6 +12,8 @@ interface ItemListProps {
   title: string;
   entries: Entry[] | null; // null while the vault loads
   issuesView: boolean; // the Security list: issue lines and a summary count
+  masterWeak: boolean; // the Security list also holds the master password
+  onFixMaster: () => void; // opens the Change master password sheet
   query: string;
   sort: SortOrder;
   selectedId: string | null;
@@ -23,12 +26,13 @@ interface ItemListProps {
 }
 
 // The PC compact list: toolbar, large title, count line, grey search, the white card of rows.
-export function ItemList({ title, entries, issuesView, query, sort, selectedId, syncLine, onQuery, onSort, onOpen, onNew, onDrawer }: ItemListProps) {
+export function ItemList({ title, entries, issuesView, masterWeak, onFixMaster, query, sort, selectedId, syncLine, onQuery, onSort, onOpen, onNew, onDrawer }: ItemListProps) {
   const [sorting, setSorting] = useState(false);
   const n = entries?.length ?? 0;
   const security = issuesView && !query;
+  const fixes = n + (security && masterWeak ? 1 : 0);
   let count = `${n} ${query ? (n === 1 ? "match" : "matches") : n === 1 ? "item" : "items"} · ${query ? "Best first" : SORT_LABELS[sort]}`;
-  if (security) count = n ? `${n} ${n === 1 ? "item needs" : "items need"} attention: ${issueSummary(entries ?? [])}` : "Nothing to fix. Every password is unique, strong and fresh.";
+  if (security) count = fixes ? `${fixes} ${fixes === 1 ? "item needs" : "items need"} attention: ${[masterWeak && "weak master password", issueSummary(entries ?? [])].filter(Boolean).join(" · ")}` : "Nothing to fix. Every password is unique, strong and fresh.";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -67,13 +71,15 @@ export function ItemList({ title, entries, issuesView, query, sort, selectedId, 
           {entries === null ? (
             <Skeleton />
           ) : (
+            // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role listbox on a ul
             <ul role="listbox" aria-label={query ? "Search results" : title}>
+              {security && masterWeak && <MasterIssueRow onFix={onFixMaster} />}
               {entries.map((e) => (
                 <EntryRow key={e.id} entry={e} selected={e.id === selectedId} issues={security} onOpen={onOpen} />
               ))}
             </ul>
           )}
-          {entries?.length === 0 && <Empty query={query} security={security} onNew={onNew} />}
+          {entries?.length === 0 && !(security && masterWeak) && <Empty query={query} security={security} onNew={onNew} />}
         </div>
       </div>
       {sorting && <SortMenu value={sort} onChange={onSort} onClose={() => setSorting(false)} />}

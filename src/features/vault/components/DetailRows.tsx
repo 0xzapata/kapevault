@@ -14,7 +14,7 @@ import { signInOption, usesPassword } from "../lib/sign-in";
 import type { Entry, KeyEntry, LoginEntry, NoteEntry } from "../types";
 
 // The detail pane's rows for a login and an API key, and a secure note's card. The other kinds
-// keep theirs in their own feature (PayeeRows, ThingRows, DeviceRows, IdRows).
+// keep theirs in their own feature (ThingRows, DeviceRows, IdRows).
 
 interface RowHelpers {
   copyText: (text: string) => () => Promise<void>;
@@ -44,6 +44,7 @@ export function LoginRows({ entry, entries, copyText, openButton, copyLink, onRe
           actions={
             account && (
               <button
+                type="button"
                 onClick={() => onReveal(account.id)}
                 className="press h-8 rounded-full bg-accent-soft px-3 text-[12.5px] font-semibold text-accent transition-colors hover:bg-accent hover:text-on-accent focus-ring"
               >
@@ -135,6 +136,7 @@ export function NoteCard({ entry }: { entry: NoteEntry }) {
         {entry.hasBody && (
           <>
             <button
+              type="button"
               onClick={toggle}
               aria-expanded={body !== null}
               aria-controls="note-body"

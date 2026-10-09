@@ -18,7 +18,9 @@ export function OlderBackupsNotice() {
 
   const forget = () =>
     run(() => vaultApi.cloudForgetOlder(), (result) =>
-      setMessage(result.ok ? `Deleted ${result.deleted} older ${result.deleted === 1 ? "backup" : "backups"}. A fresh one is saved under the new password.` : result.error),
+      setMessage(!result.ok ? result.error : result.refused > 0
+        ? `Deleted ${result.deleted}. ${result.refused} older ${result.refused === 1 ? "backup is" : "backups are"} still locked by your bucket's lock rule and will go when it allows; try again then.`
+        : `Deleted ${result.deleted} older ${result.deleted === 1 ? "backup" : "backups"}. A fresh one is saved under the new password.`),
     );
 
   if (!connected) return null;

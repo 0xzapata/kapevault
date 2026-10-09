@@ -77,6 +77,15 @@ no sharing. A real phone has neither problem.
 
 ## Prove it
 
+The Kotlin's pure decisions have JVM unit tests (`android/app/src/test`, JUnit 4, no emulator, no
+Robolectric): `node scripts/gradle.mjs :app:testDebugUnitTest` runs them for both flavors. They cover
+`AppSigners.judge` (first fill recorded, same signers, changed signers refused, a rotation lineage
+accepted only when it holds every recorded certificate, several signers with no lineage refused, unreadable
+signers counted as changed), `LoginForm.kindOf` (which field is the password or the username) and
+`onePage`, `DurableFilePlugin`'s file-name check and atomic replace, and that the two replaced Capacitor
+plugins keep their names, the WebView one offers no method and the HTTP one accepts R2 hosts only. What reads the phone itself (`PackageManager`,
+`AssistStructure`, the WebView) is proven on the emulator by `npm run proof`.
+
 `npm run proof` (with the KAPEVault emulator running, headless: `npm run sim -- --no-window`)
 checks that the app opens on the vault, the manifest and the CSP of both pages, FLAG_SECURE (black
 adb screenshot, blank recent-apps card), the background and resume events, the sensitive clip, its
@@ -115,15 +124,22 @@ keeps drawing), `pill-shots` (the pill frozen mid-flight, light and dark: seams,
 `backup-list-check` (30 backups: the list scrolls, Use this backup stays on screen), `id-check` (the ID form, its
 photo large and the detail, light and dark; `UI_PORT` when another checkout already serves 5199), `restore-file-check`
 (Restore from a file from first run and Settings, light and dark: junk refused at the pick, the password
-step, and the No backup yet line and row). The mock takes
-`?mock` plus `firstrun`, `nofingerprint`, `backups=N`; its master password is `demo`.
+step, and the No backup yet line and row), `pro-check` (KAPEVault Pro, light and dark: backup only without Pro, the
+`+` on Clients and the Space field send to the Pro sheet, Buy turns sync on; no Google Play, a pending payment, a
+closed Play sheet), `trash-check` (Trash and Undo, light and dark: Move to Trash from the edit sheet,
+the toast's Undo, the drawer's Trash count, days left, Restore, a read-only trashed item, Delete now and
+Empty Trash; a trashed item is in no list and no search). The mock takes `?mock` plus `firstrun`, `nofingerprint`, `backups=N`, `free` (no Pro yet)
+and `store=unavailable|pending|cancel` (what Google Play does on Buy); its master password is `demo`.
 
 ## Vault host
 
 `src/app/host/real-host.ts` is the vault host (contract: `src/app/host/types.ts`); the platform is
 injected (`native.ts`). Files live in the app's private folder: `vault.kapevault`, `settings.json`
 (install id + phone settings), `unlock-throttle.json`, `fingerprint.json` (14-day dates, sealed),
-`backup-pending`, `replaced.kapevault`. Restore from a file (first run's Restore from backup > Use a
+`backup-pending`, `replaced.kapevault`, `pro.json` (KAPEVault Pro, below). Writes go through the
+`DurableFile` plugin (`DurableFilePlugin.kt`): the text to `<name>.tmp`, fsync, an atomic rename over the target,
+then an fsync of the folder; reads stay with `@capacitor/filesystem` (its `Directory.Data` is the same
+`context.filesDir`). Restore from a file (first run's Restore from backup > Use a
 file instead, or Settings > Restore from a file) picks a `.kapevault` file through Android's document
 picker (Google Drive, Files, a USB drive: the WebView's file input, no plugin), refuses anything that is
 not a vault file before any key derivation, and opens it with its own master password. A phone with
@@ -144,6 +160,68 @@ PC's real session, backup and sync code as the other device; `node src/app/host/
 does the same against the headless emulator (output `proof/two-device/`). `@capacitor/filesystem`'s rename deletes the target first, so `storage.ts` reads each new
 file back before the swap and finishes an interrupted swap on the next read.
 
+## KAPEVault Pro
+
+A one-time Google Play purchase (in-app product `pro`) that unlocks two things: syncing this phone with
+the other devices, and client folders. Everything else stays free: backup, restore (a PC backup too),
+autofill, fingerprint. The Windows app is free. The rule lives in one place, `src/app/host/pro.ts`:
+
+- Without Pro every snapshot goes up as `-backup-only` (`core/sync/snapshots.js`): every device on this
+  version or later can restore it (older PC builds do not list it), no device merges it - the PC's own
+  sync skips it too. The phone never merges another device's
+  snapshot (`sync.ts` `offReason()` "free": Sync now only backs up, the status says `backupOnly`).
+- Without Pro no client folder is added and a new item goes to Personal; an item already in a client
+  folder stays there and stays editable, and client folders from a restore, "Use the vault from your PC"
+  or a sync stay visible and filterable (`real-host.ts` saveEntry / addSpace, the page greys the rest).
+- `pro.json` keeps what Google Play last said, so Pro works offline. It is this phone's alone: not in the
+  vault, never synced. Play's answer "not owned" (a refund) clears it; no answer keeps it.
+- Google Play is contacted only when the user opens the Pro sheet (price and purchase), taps Buy or
+  Restore purchase, or once `pro.json` records a purchase or a pending payment (then on start and resume,
+  so a refund still lands). A fresh install never binds the Billing service; after a reinstall the owner
+  taps Restore purchase. KAPEVault learns only the price and whether Pro is bought or pending: no
+  server, no account. Once that billing code has run, Google's Play Billing library may send Google its
+  own diagnostic logs (its datatransport job); KAPEVault's own code sends no telemetry, and a free user
+  who never opens Pro never runs it.
+- Buying Pro sends the vault up again as a normal snapshot at once, so the PC merges it without waiting
+  for an edit.
+- The `Billing` plugin (`BillingPlugin.kt` in `src/play`, Play Billing Library 9.1.0) makes its client on the first
+  call, never at start. The foss flavor has none of this (see Two builds). The library merges `com.android.vending.BILLING`, `ACCESS_NETWORK_STATE` (from its
+  `com.google.android.datatransport` dependency), two `<queries>` intents (the Play Store's billing
+  service and Google's billing test companion), `ProxyBillingActivity` and `ProxyBillingActivityV2`,
+  Play services' `GoogleApiActivity`, and datatransport's `TransportBackendDiscovery`,
+  `JobInfoSchedulerService` and `AlarmManagerSchedulerBroadcastReceiver` (Google's log uploader, idle
+  until the billing code has run); its tree also brings Play services base/basement/location. While Play's
+  purchase sheet is open, `MainActivity.ownDialog` keeps the pause from locking the vault.
+- On the emulator (debug builds only): `files/billing-fake` holding `approve` (Buy succeeds), `owned`,
+  `pending`, `refuse` (Buy closed) or `unavailable` stands in for Google Play, e.g.
+  `adb shell run-as com.brewedops.kapevault sh -c 'echo approve > files/billing-fake'`. A release build is
+  not debuggable, so it never reads the file (`npm run proof -- --release` checks that). `ownPro()` in
+  `scripts/lib/device.mjs` writes `pro.json` + the fake for the device proofs.
+- Only a Play test track (license testers) proves a real purchase, a pending payment, the acknowledge, a
+  refund clearing Pro, the website APK buying through Play, and Play's sheet not locking the vault.
+
+## Two builds: play and foss
+
+One source tree, two product flavors (`android/app/build.gradle`):
+
+| | play | foss |
+|---|---|---|
+| Google Play Billing, `com.google.android.gms`, datatransport | in the APK | none: no `com.android.billingclient` and no `com.google.android.gms` class |
+| `BillingPlugin` | `src/play`, the real one | `src/foss`, a stub with no method; the Pro sheet says "Pro is not available in this build of KAPEVault" |
+| Extra permissions | `com.android.vending.BILLING`, `ACCESS_NETWORK_STATE` | none |
+| For | the Play and website APKs | building it yourself, F-Droid |
+
+- Debug: `node scripts/gradle.mjs assembleDebug` builds both (`android/app/build/outputs/apk/play/debug/app-play-debug.apk`
+  and `.../foss/debug/app-foss-debug.apk`); `assemblePlayDebug` or `assembleFossDebug` builds one. `npm run sim` and
+  `npm run proof` use the play build.
+- Release: `npm run apk:release` is the play APK (`release/KAPEVault-<version>.apk`), `npm run aab:release` the play
+  bundle, `npm run apk:release:foss` the foss APK (`release/KAPEVault-<version>-foss.apk`). There is no foss bundle.
+- Before a release, `npm run notices:android` resolves both flavors' libraries with Gradle and fails when
+  `legal/android-libraries.json` (the Open source licences screen) or `NOTICE` has fallen behind a dependency;
+  `node scripts/android-notices.mjs --write` rewrites the list, then review the diff.
+- To see what is in a build: unzip its `classes*.dex` and run `dexdump -f` (Android SDK build-tools) on each; the
+  foss build lists no `com.android.billingclient` and no `com.google.android.gms` class.
+
 ## Release APK
 
 `npm run apk:release` builds the signed APK into `release/KAPEVault-<version>.apk` (gitignored) and
@@ -157,16 +235,21 @@ so it installs over the debug build). The script refuses to build without the ke
 a debug-signed APK. Version: `version` in `package.json`; versionCode = major x 10000 + minor x 100 +
 patch (minor and patch under 100) - bump it for every release.
 
+`npm run aab:release` builds `release/KAPEVault-<version>.aab`, the file that goes to Google Play, with
+the same key and checks. In Play App Signing choose "Use my own key" and upload this release key, so
+Play installs and the website's APK can update each other.
+
 Handing an APK over: first run `npm run reinstall` at the repo root, from the same branch. The phone
 connects through the PC's Settings > Backup > Add a phone and syncs with the PC's sync code; an
 older installed PC app has neither, and the phone's first screen points at a button that is not there.
 
-The brand catalog, matcher and logos are the PC's: `node scripts/brands-sync.mjs` copies them
+The brand catalog, matcher and logos are the PC's: `node scripts/sync-shared.mjs` copies them
 (`--check` lists drift) and `npm test` fails when they differ. The same script writes `lib/brands.ts`,
-`lib/sign-in.ts`, `lib/payee-providers.ts`, `lib/photo.ts`, `lib/generate-password.ts`, `lib/plural.ts`,
-`lib/issues.ts` and `lib/search.ts` from the PC's `brands.ts`, `sign-in.ts`, the payee picker's `GROUPS`,
-`lib/photo.ts`, the generator, `lib/local-date.ts`'s `plural`, `issues.ts` and `filter-entries.ts` (its search text and sort only; `lib/filter.ts` keeps
+`lib/sign-in.ts`, `lib/photo.ts`, `lib/generate-password.ts`,
+`lib/issues.ts` and `lib/search.ts` from the PC's `brands.ts`, `sign-in.ts`,
+`lib/photo.ts`, the generator, `issues.ts` and `filter-entries.ts` (its search text and sort only; `lib/filter.ts` keeps
 the phone's views around them), changing only the imports; edit those on the PC, never on the phone.
+Pure rules do not get a copy: `plural`, `daysFromToday` and scrypt live in `core/` and both apps import them.
 
 ## Security choices
 
@@ -179,9 +262,29 @@ the phone's views around them), changing only the imports; edit those on the PC,
   Screen "Hide from screen capture" off clears it (`ScreenCapturePlugin`, applied once the page reads
   settings.json); Android 13+ keeps the recent-apps preview blank anyway (`setRecentsScreenshotEnabled`).
 - Capacitor's logging is off: in debug builds it prints every plugin call's arguments to logcat.
+- Capacitor's own `WebView` plugin is replaced by one with no methods, and `CapacitorHttp` by `R2OnlyHttpPlugin`
+  (`DisabledCorePlugins.kt`; Capacitor registers both whatever the app needs and lets an app plugin of the same
+  name win: `Bridge.registerAllPlugins`, `Bridge.registerPlugin`). Without that, script that got into the page could
+  write an `index.html` with `@capacitor/filesystem` and call `WebView.setServerBasePath` + `persistServerBasePath`
+  so every later launch loads it with every plugin, and `CapacitorHttp` is a native HTTP client the CSP does not
+  govern. The phone's own R2 requests need `CapacitorHttp`, so `R2OnlyHttpPlugin` keeps Capacitor's request
+  code and refuses any URL that is not https on a host under `.r2.cloudflarestorage.com` (default port, no
+  user info; parsed with `java.net.URL`, as Capacitor parses it) before a connection is made. A debuggable
+  build also accepts `http://localhost`, for the device tests' fake bucket. `MainActivity` also drops a persisted server path (`CapWebViewSettings`) before the bridge is built, which
+  is where `Bridge` reads it, so one planted some other way is not loaded either. `npm run proof` plants one and checks
+  the bundled page opens.
+- Accessibility services: the vault's WebView is marked `ACCESSIBILITY_DATA_SENSITIVE_YES` (Android 14+), so a
+  service that does not declare `isAccessibilityTool` (the kind banking trojans use) gets no nodes or events from it,
+  while TalkBack and other tools keep working. Earlier Androids have no such switch.
+- Keyboard learning: `VaultWebView` (declared in `res/layout/capacitor_bridge_layout_main.xml`, which replaces
+  Capacitor's layout) adds `IME_FLAG_NO_PERSONALIZED_LEARNING` to every field's input connection, so Gboard, SwiftKey
+  and Samsung Keyboard are asked not to learn what is typed. A WebView cannot do this per field: it is on for every
+  field of the vault, secret or not.
 - WebView debugging only in debug builds (Capacitor's default, left alone).
-- Permissions: `INTERNET` (R2 sync), `USE_BIOMETRIC`, `CAMERA` (the QR scan, asked for when a
-  scan starts; a phone without a camera still installs), and `HIDE_OVERLAY_WINDOWS` (below).
+- Permissions: `INTERNET` (R2 backup and sync; Google's billing library log upload once Pro was opened), `USE_BIOMETRIC`, `CAMERA` (the QR scan, asked for when a
+  scan starts; a phone without a camera still installs), `HIDE_OVERLAY_WINDOWS` (below), and
+  `com.android.vending.BILLING` + `ACCESS_NETWORK_STATE`, merged from the Play Billing library (KAPEVault Pro; the
+  play flavor only - the foss manifest has neither).
 - Overlays and task hijacking: other apps' floating windows are hidden over the vault and the fill
   screen (Android 12+), and a tap that came through one is dropped (`filterTouchesWhenObscured`, every
   version; an Android 11 screen-dimmer app blocks taps in the vault while it runs). `MainActivity` has an
@@ -200,8 +303,9 @@ the phone's views around them), changing only the imports; edit those on the PC,
     kept when the app can see it, and cleared when it cannot tell.
   - `QrScanner` - `scan({ purpose: "setup" | "totp" })` reads one QR code: the camera view is laid
     over the app in the same FLAG_SECURE window, and CameraX frames are decoded on the phone by
-    ZXing's core library. No ML Kit or Play services (their barcode artifacts carry Google's usage
-    logging; the code scanner downloads a module), no network, no picture kept. Rejects `canceled`
+    ZXing's core library. The scanner uses no ML Kit and no Play services (their barcode artifacts
+    carry Google's usage logging; the code scanner downloads a module; Play services reach the app only
+    through the Billing library, above), no network, no picture kept. Rejects `canceled`
     (Cancel, Back, leaving the app), `denied`, `unavailable` (no camera), `failed`.
   - Edge to edge (`MainActivity`): the page draws behind the status and navigation bars on every
     WebView version and gets their sizes as `--safe-area-inset-*`; only the keyboard pads the
@@ -216,7 +320,11 @@ the phone's views around them), changing only the imports; edit those on the PC,
     a browser only when its signing certificate matches the pinned one (`TrustedBrowsers.kt`, from
     Google's privileged-apps list), and then by registrable domain from the Public Suffix List (so
     `evil.pages.dev` is not `example.pages.dev`; refresh the list with `node
-    scripts/public-suffix-sync.mjs`); any other app only for a login saved as `androidapp://<package>`.
+    scripts/public-suffix-sync.mjs`); any other app only for a login saved as `androidapp://<package>`, and only while its
+    signing certificates are the ones it had when KAPEVault first filled it (`AppSigners.kt`: trust on first
+    use, SHA-256 hashes of the public certificates in `noBackupFilesDir/autofill-app-signers.json`, never
+    backed up or synced; a signer rotation proven by the app's signing lineage is accepted, anything else
+    gets no suggestion at all; uninstalling KAPEVault clears the record).
     The page is named from the document the login fields sit in (`LoginForm.kt` reads each field's
     nearest web domain, so a login form in a cross-origin frame names nothing). A browser Android
     reads through its accessibility bridge (compatibility mode, `autofill_service.xml`) names the page
@@ -234,6 +342,11 @@ the phone's views around them), changing only the imports; edit those on the PC,
     The callback is always on: left to Android, Back on the first screen finishes the activity on
     Android 17 (even from the launcher) and the page with it. The cost is Android's back-to-home
     preview animation. The camera view's own Back sits above it.
+  - `Billing` - `status()` and `buy()` for KAPEVault Pro (see KAPEVault Pro above). Rejects
+    `unavailable` (no Play Store, not signed in, the product not offered), `canceled`, `failed`. In the foss
+    flavor the plugin has no method, so both reject `UNIMPLEMENTED` and the page says Pro is not available.
+  - `DurableFile` - `replace({ name, text })` saves a file in the app's folder that a power cut leaves whole
+    (see Vault host). `name` is one plain file name.
   - The page gets a `kapevault:background` window event on pause, to lock, and
     `kapevault:resume` on resume, to check the grace period. The fingerprint prompt and the camera
     permission dialog fire neither; leaving the app from that dialog still fires background.

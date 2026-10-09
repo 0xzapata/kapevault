@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Replaces Capacitor's layout of the same name (capacitor-android/src/main/res/layout): the same
+     CoordinatorLayout and the same @+id/webview the bridge looks up, with VaultWebView in place of
+     CapacitorWebView (it is a subclass, so Bridge.Builder.create still finds a CapacitorWebView). -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context="com.getcapacitor.BridgeActivity">
+
+    <com.brewedops.kapevault.VaultWebView
+        android:id="@+id/webview"
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

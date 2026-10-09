@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- INTERNET: R2 backup sync only. USE_BIOMETRIC: fingerprint unlock (granted at install, no prompt).
+    <!-- INTERNET: R2 backup sync; also, once the Pro billing code has run, Google's Play Billing
+         library's own log uploader (datatransport). The purchase itself goes through the Play Store app.
+         USE_BIOMETRIC: fingerprint unlock (granted at install, no prompt).
          CAMERA: the QR scan (QrScannerPlugin), asked for when a scan starts. A phone without a camera
-         still installs the app: the keys are typed or pasted there. -->
+         still installs the app: the keys are typed or pasted there.
+         The Play Billing library (BillingPlugin, KAPEVault Pro; the play flavor only) merges in BILLING, ACCESS_NETWORK_STATE,
+         two <queries> intents, its proxy activities, GoogleApiActivity and datatransport's log uploader:
+         the full list is in app/build.gradle. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -85,6 +90,7 @@
             android:name=".AutofillAuthActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:excludeFromRecents="true"
+            android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false" />
     </application>

@@ -9,8 +9,8 @@ import { canonical } from "./stamp.js";
 export const REVIEW_LIMITS = { deletes: 5, deleteShare: 0.1, deleteShareMin: 3, secretItems: 20 };
 
 // The title merge.js gives a conflict copy: "<title> (conflict copy, <device>, <YYYY-MM-DD>)", or
-// "changed after closing" for a closed account, and a payee's " (check this number)" after it.
-const COPY_TITLE = / \((?:conflict copy|changed after closing), (.+), (\d{4}-\d{2}-\d{2})\)(?: \(check this number\))?$/;
+// "changed after closing" for a closed account.
+const COPY_TITLE = / \((?:conflict copy|changed after closing), (.+), (\d{4}-\d{2}-\d{2})\)$/;
 
 /** An item a sync made from the losing side of a conflict, until the user renames or deletes it. */
 export const isConflictCopy = (/** @type {string} */ title) => COPY_TITLE.test(title);
@@ -27,12 +27,13 @@ export function readCopyTitle(title) {
 
 /**
  * What a sync would do to this device's items, by id. A use elsewhere (lastUsedAt) is not a change.
- * secretItems: changed items whose secrets changed (a password, a 2FA key, a payee's number...).
+ * secretItems: changed items whose secrets changed (a password, a 2FA key...).
  * @param {{ entries: any[] }} before @param {{ entries: any[] }} after
  * @returns {{ added: string[], changed: string[], deleted: string[], copies: string[], secretItems: number }}
  */
 export function syncChanges(before, after) {
   const was = new Map(before.entries.map((e) => [e.id, e]));
+  /** @type {{ added: string[], changed: string[], deleted: string[], copies: string[], secretItems: number }} */
   const out = { added: [], changed: [], deleted: [], copies: [], secretItems: 0 };
   for (const entry of after.entries) {
     const old = was.get(entry.id);
@@ -59,6 +60,7 @@ export function syncChanges(before, after) {
  * @returns {("deletes" | "secrets" | "epoch" | "key")[]}
  */
 export function reviewReasons(changes, entryCount, { epoch = false, key = false } = {}) {
+  /** @type {("deletes" | "secrets" | "epoch" | "key")[]} */
   const reasons = [];
   const deleted = changes.deleted.length;
   const bigShare = deleted >= REVIEW_LIMITS.deleteShareMin && deleted > entryCount * REVIEW_LIMITS.deleteShare;

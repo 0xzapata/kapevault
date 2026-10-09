@@ -79,15 +79,6 @@ export interface KeyEntry extends EntryBase {
   expires?: string;
   hasSecret: boolean;
 }
-export interface PayeeEntry extends EntryBase {
-  kind: "payee";
-  who: string;
-  relation: string;
-  provider: string;
-  number: string;
-  accountName: string;
-  confirmedAt?: string;
-}
 export type GrabPriority = 1 | 2 | 3;
 export interface ThingEntry extends EntryBase {
   kind: "thing";
@@ -120,12 +111,18 @@ export interface IdEntry extends EntryBase {
   hasPhoto: boolean;
 }
 
-export type Entry = LoginEntry | LinkEntry | NoteEntry | KeyEntry | PayeeEntry | ThingEntry | DeviceEntry | IdEntry;
+export type Entry = LoginEntry | LinkEntry | NoteEntry | KeyEntry | ThingEntry | DeviceEntry | IdEntry;
 export type EntryKind = Entry["kind"];
+
+// An item in the Trash: its public fields and when it went there (UTC ISO). Core keeps these out of
+// `entries`, so every list and count is blind to them; only the Trash screen reads this.
+export type TrashedEntry = Entry & { trashedAt: string; daysLeft: number };
 
 export interface VaultView {
   spaces: Space[];
   entries: Entry[];
+  trash: TrashedEntry[];
+  masterWeak?: boolean; // the last master-password unlock found the master easy to guess (the session keeps only this flag)
 }
 
 // What a save sends (core upsertEntry). A secret left undefined keeps the stored one.
@@ -151,11 +148,6 @@ export interface EntryInput {
   keyId?: string;
   secret?: string;
   expires?: string;
-  who?: string;
-  relation?: string;
-  provider?: string;
-  number?: string;
-  accountName?: string;
   room?: string;
   spot?: string;
   grab?: GrabPriority;
@@ -175,6 +167,11 @@ export interface EntryInput {
 }
 
 // core secretOf: history / code / answer take an index. photo (an ID's, a JPEG data URL) is never copied.
+// One generated password as the page sees it: when it was made (a UTC ISO time), never the value.
+export interface GeneratedRow {
+  at: string;
+}
+
 export type SecretField = "password" | "body" | "secret" | "history" | "code" | "answer" | "adminPassword" | "wifiPassword" | "idNumber" | "photo";
 
 export interface TotpCode {
@@ -261,6 +258,7 @@ export interface SyncReview {
 export interface SyncStatus {
   state: "off" | "idle" | "syncing" | "error"; // off: no R2 connection
   apart?: boolean; // "Keep this phone's vault": backing up to a bucket that holds another vault, no sync
+  backupOnly?: boolean; // no KAPEVault Pro: this phone backs up, and syncing with the other devices waits for Pro
   removed?: boolean; // another device removed this phone from sync: it never merges again
   manual?: boolean; // automatic backup is off: nothing syncs by itself, only on Sync now
   lastAt?: number; // the last good sync, ms
@@ -295,6 +293,14 @@ export interface PhoneSettings {
   hideFromCapture: boolean; // FLAG_SECURE; off: screenshots, recordings and screen sharing see the app
 }
 
+// --- KAPEVault Pro (host/pro.ts; this phone only, never synced) -----------------------------------
+
+export interface ProStatus {
+  owned: boolean;
+  pending: boolean; // bought, the payment not through yet
+  price?: string; // Google Play's, "US$9.99", once the Pro sheet asked
+}
+
 // --- The host -----------------------------------------------------------------------------------------
 
 export interface VaultHost {
@@ -326,10 +332,20 @@ export interface VaultHost {
   onChanged(listener: (view: VaultView) => void): Unsubscribe;
   getSecret(id: string, field: SecretField, index?: number): Promise<string>; // reveal: one value
   saveEntry(input: EntryInput): Promise<Result<{ id: string }>>;
-  deleteEntry(id: string): Promise<void>;
+  deleteEntry(id: string): Promise<void>; // moves the item to the Trash (a closed account's tombstone goes outright)
+  restoreEntry(id: string): Promise<void>; // out of the Trash
+  deleteForever(id: string): Promise<void>; // "Delete now": only an item already in the Trash
+  emptyTrash(): Promise<void>;
   toggleFavorite(id: string): Promise<void>;
-  confirmPayee(id: string, number: string): Promise<void>; // today, by the host's clock
   clearHistory(id: string): Promise<void>;
+  // Generated passwords (core/generated.js): the generator's recent values, this phone's own. The page
+  // sends a value once, as it leaves the generator, and gets only the times back; one value is read or
+  // copied (sensitive clipboard) by its place in that list.
+  recordGenerated(value: string): Promise<GeneratedRow[]>;
+  generatedList(): Promise<GeneratedRow[]>;
+  getGenerated(index: number): Promise<string>;
+  copyGenerated(index: number): Promise<void>;
+  clearGenerated(): Promise<GeneratedRow[]>;
   setRecoveryCodes(id: string, codes: string[]): Promise<Result>;
   addSpace(name: string): Promise<Result<{ id: string }>>;
 
@@ -362,6 +378,14 @@ export interface VaultHost {
 
   settings(): Promise<PhoneSettings>;
   setSettings(patch: Partial<PhoneSettings>): Promise<PhoneSettings>;
+
+  // KAPEVault Pro: sync with the other devices, and client folders. proStatus is what this phone last
+  // heard, with no call to Google Play. restorePro asks Play (the Pro sheet opened, or Restore purchase):
+  // the price, and whether this Google account owns Pro. buyPro opens Play's purchase sheet.
+  proStatus(): Promise<ProStatus>;
+  onPro(listener: (status: ProStatus) => void): Unsubscribe;
+  restorePro(): Promise<Result<ProStatus>>;
+  buyPro(): Promise<Result<ProStatus> | { ok: false; canceled: true; error: string }>;
 
   // Restore from a file picked on the phone (Drive, Files, USB). checkBackupFile says at once whether the
   // text is a vault file (the same checks as before any key derivation); restoreFile then works as

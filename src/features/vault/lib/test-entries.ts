@@ -1,5 +1,5 @@
 // Test fixtures, imported only by *.test.ts: one item of each kind, with overrides. Mock data only.
-import type { DeviceEntry, IdEntry, KeyEntry, LinkEntry, LoginEntry, NoteEntry, PayeeEntry, Space, ThingEntry } from "../types";
+import type { DeviceEntry, IdEntry, KeyEntry, LinkEntry, LoginEntry, NoteEntry, Space, ThingEntry } from "../types";
 
 const base = (id: string, title: string) => ({ id, spaceId: "mine", title, tags: [], favorite: false, notes: "", updatedAt: "2026-01-01T00:00:00.000Z", issues: [] });
 
@@ -26,17 +26,6 @@ export const note = (o: Partial<NoteEntry> = {}): NoteEntry => ({ ...base("note-
 export const key = (o: Partial<KeyEntry> = {}): KeyEntry => ({ ...base("key-1", "Example API"), kind: "key", keyId: "pk_mock_123", hasSecret: true, url: "https://api.example.com", ...o });
 
 export const link = (o: Partial<LinkEntry> = {}): LinkEntry => ({ ...base("link-1", "Brand assets"), kind: "link", linkType: "web", location: "https://drive.example.com/assets", ...o });
-
-export const payee = (o: Partial<PayeeEntry> = {}): PayeeEntry => ({
-  ...base("payee-1", "Mama GCash"),
-  kind: "payee",
-  who: "Mama",
-  relation: "Mother",
-  provider: "GCash",
-  number: "09171234567",
-  accountName: "MA*** D*** C.",
-  ...o,
-});
 
 export const thing = (o: Partial<ThingEntry> = {}): ThingEntry => ({ ...base("thing-1", "Passport"), kind: "thing", room: "Bedroom", spot: "blue folder, top shelf", grab: 1, ...o });
 

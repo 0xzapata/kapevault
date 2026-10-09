@@ -31,6 +31,7 @@ export interface RowMenuActions {
 
 // A list row's right-click / "..." menu: its copies and Open, then Edit, favorite and Move.
 export function rowMenu(entry: Entry, { act, onEdit, onToggleFavorite, onMove, canMove }: RowMenuActions): MenuItem[] {
+  if (entry.trashedAt) return []; // in the Trash: nothing copies, opens or changes it
   const items: MenuItem[] = [];
   for (const copy of entryCopies(entry)) {
     if (copy.slot === "imei") continue; // the IMEI is copied from the detail pane only

@@ -8,6 +8,7 @@ import { DEVICE, isMac } from "@/lib/platform";
 import { relativeTime } from "@/lib/local-date";
 import { deviceNames } from "../lib/sync-line";
 import { NewMasterCard } from "./NewMasterCard";
+import { LockOutCard } from "./LockOutCard";
 import { RestoreQuestion } from "./RestoreQuestion";
 import { SyncCard } from "./SyncCard";
 
@@ -35,7 +36,7 @@ function DeviceRow({ name, platform, note, onRemove }: { name: string; platform:
       </div>
       {asking && (
         <div className="settle mt-2 flex flex-wrap items-center justify-end gap-2">
-          <p className="min-w-0 flex-1 text-[12.5px] text-ink-2">Its changes will never sync again. For a lost or sold device.</p>
+          <p className="min-w-0 flex-1 text-[12.5px] text-ink-2">Its changes will never sync again. For a lost or sold device. Two steps to lock it out for good follow.</p>
           <Button type="button" autoFocus className="h-8 shrink-0 bg-raised" onClick={() => setAsking(false)}>
             Cancel
           </Button>
@@ -55,6 +56,7 @@ interface SyncSheetProps {
   onAnswerRestore: (everywhere: boolean) => void;
   onAdoptKey: (master: string) => Promise<string>; // "" when it opened; the review follows
   onRevoke: (ref: string) => void;
+  onMasterChanged: () => void; // the master password was changed from the lock-out card
   onReview: () => void; // opens the held merge's review on top
   onShow: (id: string) => void; // a conflict copy, in the list
   onClose: () => void;
@@ -62,8 +64,11 @@ interface SyncSheetProps {
 
 // The devices on this bucket, what needs a look, and Sync now. Portaled: the list it opens from
 // moves with the sidebar, and a moving parent would carry a fixed sheet with it.
-export function SyncSheet({ status, busy, onSyncNow, onAnswerRestore, onAdoptKey, onRevoke, onReview, onShow, onClose }: SyncSheetProps) {
+export function SyncSheet({ status, busy, onSyncNow, onAnswerRestore, onAdoptKey, onRevoke, onMasterChanged, onReview, onShow, onClose }: SyncSheetProps) {
   const problems = [status.error, ...status.problems].filter(Boolean);
+  // Set once the master password was changed from the lock-out card: the names it was for, and whether quick unlock went off.
+  const [finished, setFinished] = useState<{ names: string[]; biometricOff: boolean } | null>(null);
+  const lockOut = status.lockOut.map((d) => d.name);
 
   return createPortal(
     <Sheet title="Sync" onClose={onClose} width="w-[480px]">
@@ -81,6 +86,18 @@ export function SyncSheet({ status, busy, onSyncNow, onAnswerRestore, onAdoptKey
               {problem}
             </p>
           ))}
+
+          {(lockOut.length > 0 || finished) && (
+            <LockOutCard
+              names={finished?.names ?? lockOut}
+              masterDone={finished !== null}
+              biometricOff={finished?.biometricOff ?? false}
+              onMasterChanged={(biometricOff) => {
+                setFinished({ names: lockOut, biometricOff });
+                onMasterChanged();
+              }}
+            />
+          )}
 
           {status.review && (
             <div className="flex items-center gap-3 rounded-[12px] bg-warn-soft px-3.5 py-3">

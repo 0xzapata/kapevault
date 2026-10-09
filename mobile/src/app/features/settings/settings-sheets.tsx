@@ -84,6 +84,7 @@ export function LockAfterSheet({ value, onPick, onClose }: { value: LockAfterHou
           <p className="mt-2 text-[13px] leading-relaxed text-ink-2">Locks this long after you unlock, even while you use it.</p>
           <div role="radiogroup" aria-label="Lock after" className="mt-4 overflow-hidden rounded-2xl border border-line">
             {LOCK_AFTER.map((h) => (
+              // biome-ignore lint/a11y/useSemanticElements: a radio drawn as a button tile; a native radio input cannot be styled as this control
               <button
                 key={h}
                 type="button"
@@ -128,6 +129,7 @@ export function ThemeSheet({ value, onPick, onClose }: { value: ThemeChoice; onP
           {(Object.keys(THEME_LABELS) as ThemeChoice[]).map((t) => {
             const on = t === value;
             return (
+              // biome-ignore lint/a11y/useSemanticElements: a radio drawn as a button tile; a native radio input cannot be styled as this control
               <button key={t} type="button" role="radio" aria-checked={on} onClick={() => onPick(t)} className="flex min-h-11 flex-col items-center gap-1.5 rounded-[10px] focus-ring">
                 <span className={`press relative block aspect-[3/4] w-full overflow-hidden rounded-[8px] border border-line ${on ? "ring-2 ring-accent ring-offset-2 ring-offset-raised" : ""}`}>
                   {t === "system" ? (

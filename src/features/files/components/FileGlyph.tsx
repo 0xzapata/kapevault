@@ -1,5 +1,6 @@
 import { File, FileAudio, FileCode, FileCsv, FileHtml, FileImage, FileMd, FilePdf, FileText, FileVideo, FileZip } from "@phosphor-icons/react";
 import { brandBySlug } from "@/features/brands/brands";
+import { BrandLogo } from "@/features/brands/BrandLogo";
 import type { FileKind } from "../lib/file-kinds";
 
 const ICONS = {
@@ -23,7 +24,7 @@ const OFFICE_LOGO: Partial<Record<FileKind, string>> = { word: "word", excel: "e
 export function FileGlyph({ kind, size }: { kind: FileKind; size: number }) {
   const logoSlug = OFFICE_LOGO[kind];
   const logo = logoSlug ? brandBySlug(logoSlug) : null;
-  if (logo) return <img src={logo.logo} alt="" draggable={false} style={{ width: size, height: size }} className="object-contain" />;
+  if (logo) return <BrandLogo brand={logo} size={size} />;
 
   const Icon = ICONS[kind as keyof typeof ICONS] ?? File;
   const tone = kind === "pdf" ? "text-danger" : "text-accent";

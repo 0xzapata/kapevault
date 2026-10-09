@@ -1,6 +1,8 @@
 // Local calendar dates as YYYY-MM-DD, the one place the page makes or compares them. Never
 // toISOString().slice(0, 10): that is UTC, a day behind in the morning east of UTC.
 
+import { plural } from "../../core/index.js";
+
 // Today, local.
 export const localToday = (now: Date = new Date()) => now.toLocaleDateString("en-CA");
 
@@ -10,18 +12,8 @@ export function parseDay(ymd: string): Date | null {
   return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
 }
 
-// Whole calendar days from `from` to `to` (both YYYY-MM-DD): 3 = three days on, -2 = two days before.
-// Counted on UTC midnights so a daylight-saving change never makes a day 23 hours long.
-export function daysBetween(from: string, to: string): number {
-  const utc = (ymd: string) => Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1, Number(ymd.slice(8, 10)));
-  return Math.round((utc(to) - utc(from)) / 86400000);
-}
-
-// Whole calendar days from today: 20 = in 20 days, -3 = 3 days ago. Null for a bad date.
-export const daysFromToday = (ymd: string, today: string = localToday()): number | null => (parseDay(ymd) ? daysBetween(today, ymd) : null);
-
-// "1 day", "3 days": a count and its word, plural when it is not 1.
-export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+// The rules the phone shares (core/dates.js, core/plural.js): days between two dates, "1 day" / "3 days".
+export { daysBetween, daysFromToday, plural } from "../../core/index.js";
 
 // "Sep 26, 2026" in the viewer's own format. A YYYY-MM-DD is its local day, never UTC; a UTC
 // timestamp (password history) shows its local day; anything else comes back as it is.

@@ -25,6 +25,7 @@ export function syncLine(status: SyncStatus, ago: (ms: number) => string): SyncL
   if (status.state === "running") return { text: "Syncing...", tone: "quiet" };
   if (status.review) return { text: `Changes from ${deviceNames(status.review.from)} wait for you`, tone: "warn" };
   if (status.newMaster) return { text: `${status.newMaster} has a new master password`, tone: "warn" };
+  if (status.lockOut.length) return { text: `Finish locking out ${deviceNames(status.lockOut.map((d) => d.name))}`, tone: "warn" };
   if (status.error) return { text: `Not synced: ${status.error}`, tone: "warn" };
   if (status.problems.length) return { text: status.problems[0], tone: "warn" };
   const manual = status.manual ? " · only on Sync now" : "";

@@ -23,6 +23,7 @@ function signRequest({ method, url, headers = {}, body = "", accessKeyId, secret
 // allowHttp: the fake R2 on 127.0.0.1 of an unpacked test run. transport: a stand-in courier for tests.
 function createR2Client({ endpoint, bucket, accessKeyId, secretAccessKey, allowHttp = false, transport = carry }) {
   // Resolves the whole reply body, read up to maxBytes. missing: what a 404 resolves to (default: an error).
+  /** @param {string} method @param {string} key @param {{ query?: string, body?: any, maxBytes?: number, tooLarge?: string, missing?: any }} [options] */
   async function send(method, key, { query = "", body, maxBytes = MAX_REPLY_BYTES, tooLarge = "R2 sent an unexpectedly large reply.", missing } = {}) {
     const url = `${endpoint}/${bucket}${key ? `/${key}` : ""}${query ? `?${query}` : ""}`;
     const headers = signRequest({ method, url, body: body ?? "", accessKeyId, secretAccessKey });

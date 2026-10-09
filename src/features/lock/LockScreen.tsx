@@ -52,6 +52,7 @@ function Pill({ label, value, onChange, autoFocus, withSubmit, busy }: {
     <div className="flex h-11 w-[300px] items-center rounded-full bg-glass pl-5 pr-1.5 shadow-[inset_0_1px_0_var(--color-glass-edge),var(--shadow-float)] backdrop-blur-xl focus-within:outline-2 focus-within:outline-accent focus-within:ring-4 focus-within:ring-accent-soft">
       <input
         type="password"
+        // biome-ignore lint/a11y/noAutofocus: the lock screen's password field is ready to type in as it appears
         autoFocus={autoFocus}
         aria-label={label}
         placeholder={label}
@@ -161,10 +162,11 @@ export function LockScreen({ isNew, reason, onOpen }: LockScreenProps) {
             Use {bioName}
           </button>
         )}
-        <p className="mt-6 flex items-center gap-1.5 text-[12px] text-ink-3">
+        <p className="mt-6 flex items-center gap-1.5 text-[12.5px] font-medium text-ink-2">
           <LockSimple size={12} weight="bold" />
-          AES-256 encrypted on this {DEVICE}
+          No account. No server.
         </p>
+        <p className="mt-0.5 text-[12px] text-ink-3">Your vault stays AES-256 encrypted on this {DEVICE}.</p>
         <div className="mt-2 flex items-center gap-4">
           <button type="button" onClick={() => setRestoring(true)} className="text-[12px] font-medium text-accent hover:underline">
             Restore from backup

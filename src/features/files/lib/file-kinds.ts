@@ -18,7 +18,9 @@ export type FileKind =
   | "other";
 
 const BY_EXT: Record<string, FileKind> = {};
-const add = (kind: FileKind, exts: string) => exts.split(" ").forEach((e) => (BY_EXT[e] = kind));
+const add = (kind: FileKind, exts: string) => {
+  for (const e of exts.split(" ")) BY_EXT[e] = kind;
+};
 
 add("image", "png jpg jpeg gif webp svg bmp ico avif");
 add("video", "mp4 webm mov m4v ogv");

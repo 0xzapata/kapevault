@@ -60,7 +60,7 @@ export function ScanPrompt({ entry, onScan }: { entry: DeviceEntry; onScan: () =
     <Card>
       <div className="flex flex-col items-center px-6 py-7 text-center">
         <p className="text-[14px] text-ink-3">Nothing from the sticker yet</p>
-        <button onClick={onScan} className="press mt-3.5 flex h-9 items-center gap-2 rounded-full bg-accent px-4 text-[13.5px] font-semibold text-on-accent shadow-accent hover:brightness-110 focus-ring">
+        <button type="button" onClick={onScan} className="press mt-3.5 flex h-9 items-center gap-2 rounded-full bg-accent px-4 text-[13.5px] font-semibold text-on-accent shadow-accent hover:brightness-110 focus-ring">
           <Scan size={16} weight="bold" />
           Scan a label
         </button>

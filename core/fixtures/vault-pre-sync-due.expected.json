@@ -1,0 +1,96 @@
+{
+  "spaces": [
+    {
+      "id": "a1b3c252-51e4-4caf-bb1c-3c031f02caca",
+      "name": "Personal",
+      "kind": "personal"
+    }
+  ],
+  "entries": [
+    {
+      "id": "b8245177-cee2-4127-ac68-bccc6d789794",
+      "spaceId": "a1b3c252-51e4-4caf-bb1c-3c031f02caca",
+      "title": "Mock Mail",
+      "tags": [
+        "mock"
+      ],
+      "favorite": true,
+      "notes": "mock note",
+      "updatedAt": "2026-10-09",
+      "kind": "login",
+      "username": "mock.user@example.com",
+      "password": "mock-old-pass-2",
+      "url": "mail.example.com",
+      "signIn": "password",
+      "history": [
+        {
+          "password": "mock-old-pass-1",
+          "changedAt": "2026-10-09"
+        }
+      ],
+      "passwordChangedAt": "2026-10-09"
+    },
+    {
+      "id": "ae2459cd-dc20-4eaa-9ac5-5768458660f4",
+      "spaceId": "a1b3c252-51e4-4caf-bb1c-3c031f02caca",
+      "title": "Mock Note",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "note",
+      "body": "mock secret body"
+    },
+    {
+      "id": "65700589-d90c-4ac1-8b05-1836ad6d431a",
+      "spaceId": "a1b3c252-51e4-4caf-bb1c-3c031f02caca",
+      "title": "Mock API Key",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "key",
+      "keyId": "mock-key-id",
+      "secret": "mock-secret-token",
+      "url": "",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "93f6239b-fdf4-46df-ab9d-5adfbdbfe3cc",
+      "spaceId": "a1b3c252-51e4-4caf-bb1c-3c031f02caca",
+      "title": "Mock Docs",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "link",
+      "linkType": "web",
+      "location": "https://example.com/docs"
+    },
+    {
+      "id": "61951579-af76-4f0d-959e-c5a2d606050a",
+      "spaceId": "a1b3c252-51e4-4caf-bb1c-3c031f02caca",
+      "title": "Mock Water Bill",
+      "tags": [],
+      "favorite": false,
+      "notes": "",
+      "updatedAt": "2026-10-09",
+      "kind": "due",
+      "agency": "custom",
+      "schedule": {
+        "every": "month",
+        "day": 15
+      },
+      "nextDue": "2026-11-15",
+      "amount": "1250.50",
+      "receipts": [
+        {
+          "paidAt": "2026-10-09",
+          "dueDate": "2026-10-15",
+          "reference": "MOCK-REF-1",
+          "amount": "1250.50"
+        }
+      ]
+    }
+  ]
+}

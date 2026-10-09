@@ -1,4 +1,4 @@
-// Made from the PC's src/lib/photo.ts by scripts/brands-sync.mjs - change it there, then run the script.
+// Made from the PC's src/lib/photo.ts by scripts/sync-shared.mjs - change it there, then run the script.
 // A photo (a device's label, an ID), made in the page from a picked or pasted image: a JPEG small
 // enough to live in the vault (and in every cloud snapshot), plus, for a label, a sharper copy for
 // Windows to read the text from, which is never stored.
@@ -43,7 +43,8 @@ export async function preparePhoto(image: Blob, withScan = true): Promise<{ phot
   const longest = Math.max(bitmap.width, bitmap.height);
   const draw = (factor: number, quality: number) => {
     const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * factor)), Math.max(1, Math.round(bitmap.height * factor)));
-    const g = canvas.getContext("2d")!;
+    const g = canvas.getContext("2d");
+    if (!g) throw new Error("This device cannot prepare photos.");
     g.fillStyle = "white"; // a transparent screenshot would turn black in a JPEG
     g.fillRect(0, 0, canvas.width, canvas.height);
     g.drawImage(bitmap, 0, 0, canvas.width, canvas.height);

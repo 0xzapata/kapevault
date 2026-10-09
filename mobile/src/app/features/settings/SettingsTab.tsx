@@ -1,15 +1,19 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowsClockwise, CaretRight, CloudCheck, Desktop, EyeSlash, FileArrowUp, Fingerprint, Key, Password, Sun, Timer } from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretRight, CloudCheck, Crown, Desktop, EyeSlash, FileArrowUp, Fingerprint, Key, Password, Scroll, ShieldCheck, Sun, Timer } from "@phosphor-icons/react";
 import { Segmented, Switch } from "../../components/form";
 import { useNow } from "../../components/fields";
 import { useToast } from "../../components/Toast";
 import { useHost } from "../../host/host-context";
-import { useSync } from "../../hooks/use-vault";
+import { usePro, useSync } from "../../hooks/use-vault";
 import { autofill } from "../../host/autofill";
 import { AutofillSheet, autofillValue, useAutofillStatus } from "../autofill/AutofillSetting";
 import { capital, hoursText, relativeTime } from "../../lib/format";
 import { useSettings } from "./settings-context";
+import { ProSheet } from "../pro/ProSheet";
+import { ProTag } from "../pro/ProTag";
+import { afterSyncToast, lastTime, syncsNow } from "../sync/sync-text";
 import { ConnectSheet } from "./ConnectSheet";
+import { LicencesSheet } from "./LicencesSheet";
 import { ChangeMasterSheet, CloudSheet, LockAfterSheet, THEME_LABELS, ThemeSheet } from "./settings-sheets";
 import type { BiometricStatus, CloudStatus, LockGrace } from "../../host/types";
 
@@ -20,8 +24,10 @@ const GRACE: { value: LockGrace; label: string }[] = [
   { value: 30, label: "30 seconds" },
   { value: 60, label: "1 minute" },
 ];
+// Google Play asks for it inside the app too.
+const PRIVACY_URL = "https://kapevault.brewedops.cloud/privacy/";
 
-type Open = "master" | "lock-after" | "theme" | "cloud" | "connect" | "autofill" | null;
+type Open = "master" | "lock-after" | "theme" | "cloud" | "connect" | "autofill" | "pro" | "licences" | null;
 
 const groupTitle = "mx-5 mb-1.5 mt-[22px] text-[13px] font-semibold text-ink-2";
 const card = "mx-4 overflow-hidden rounded-2xl border border-line bg-raised shadow-card";
@@ -52,6 +58,7 @@ export function SettingsTab({ onRestoreFile }: { onRestoreFile: () => void }) {
   const toast = useToast();
   const { settings, update } = useSettings();
   const sync = useSync();
+  const pro = usePro();
   const [bio, setBio] = useState<BiometricStatus | null>(null);
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
   const [open, setOpen] = useState<Open>(null);
@@ -88,10 +95,10 @@ export function SettingsTab({ onRestoreFile }: { onRestoreFile: () => void }) {
     setSyncing(false);
     if (!result.ok) return toast(result.error, "error");
     // A review, a new master password or a device problem is not "synced": say where to look.
-    const after = await host.syncStatus();
-    const waiting = after.review || after.newMaster || after.removed || after.problems.length > 0;
-    toast(waiting ? "Sync needs a look: open the sync line" : `Synced with ${after.peer ?? "your devices"}`, waiting ? "error" : "ok");
+    const done = afterSyncToast(await host.syncStatus());
+    toast(done ?? "Sync needs a look: open the sync line", done ? "ok" : "error");
   }
+  const last = sync && lastTime(sync);
 
   return (
     <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4">
@@ -131,7 +138,7 @@ export function SettingsTab({ onRestoreFile }: { onRestoreFile: () => void }) {
           <span className="flex-1">
             Hide from screen capture
             <small className="mt-px block text-[12.5px] text-ink-3">
-              {settings?.hideFromCapture === false ? "Screenshots, recordings and screen sharing show the vault" : "Screenshots, recordings and screen sharing show a blank screen"}
+              {settings?.hideFromCapture === false ? "Screenshots, recordings and screen sharing show the vault. On Android 11 and 12 it also shows in Recents" :"Screenshots, recordings and screen sharing show a blank screen"}
             </small>
           </span>
           <Switch label="Hide from screen capture" checked={settings?.hideFromCapture ?? true} disabled={!settings} onChange={(v) => void update({ hideFromCapture: v })} />
@@ -164,10 +171,11 @@ export function SettingsTab({ onRestoreFile }: { onRestoreFile: () => void }) {
           <Icon tone="--color-sys-green">
             <ArrowsClockwise size={15} weight="bold" />
           </Icon>
-          <span className="flex-1">Sync now</span>
-          {syncing || sync?.state === "syncing" ? <span className="shimmer accent inline-block h-[3px] w-20 rounded-[3px] bg-line" aria-label="Syncing" /> : <span key={sync?.state} className="settle text-[13px] text-ink-3">{sync?.lastAt ? capital(relativeTime(sync.lastAt)) : ""}</span>}
+          <span className="flex-1">{sync && !syncsNow(sync) ? "Back up now" : "Sync now"}</span>
+          {syncing || sync?.state === "syncing" ? <span className="shimmer accent inline-block h-[3px] w-20 rounded-[3px] bg-line" role="img" aria-label="Syncing" /> : <span key={sync?.state} className="settle text-[13px] text-ink-3">{last ? capital(relativeTime(last)) : ""}</span>}
         </button>
         <NavRow icon={<Icon tone="--color-sys-gray"><FileArrowUp size={15} weight="fill" /></Icon>} label="Restore from a file" onClick={onRestoreFile} />
+        <NavRow icon={<Icon tone="--color-sys-orange"><Crown size={15} weight="fill" /></Icon>} label="KAPEVault Pro" value={pro?.owned ? "On" : pro?.pending ? "Pending" : <ProTag />} onClick={() => setOpen("pro")} />
       </div>
 
       <p className={groupTitle}>Appearance</p>
@@ -188,11 +196,20 @@ export function SettingsTab({ onRestoreFile }: { onRestoreFile: () => void }) {
         ))}
       </div>
 
+      <p className={groupTitle}>About</p>
+      <div className={card}>
+        {/* The way an item's website opens (native.ts openUrl): Capacitor hands the page to the phone's browser. */}
+        <NavRow icon={<Icon tone="--color-sys-gray"><ShieldCheck size={15} weight="fill" /></Icon>} label="Privacy policy" onClick={() => void window.open(PRIVACY_URL, "_blank", "noopener")} />
+        <NavRow icon={<Icon tone="--color-sys-gray"><Scroll size={15} weight="fill" /></Icon>} label="Open source licences" onClick={() => setOpen("licences")} />
+      </div>
+
       {open === "master" && <ChangeMasterSheet onClose={() => setOpen(null)} onBiometricOff={() => host.biometricStatus().then(setBio)} />}
       {open === "lock-after" && settings && <LockAfterSheet value={settings.lockAfterHours} onPick={(v) => void update({ lockAfterHours: v })} onClose={() => setOpen(null)} />}
       {open === "theme" && settings && <ThemeSheet value={settings.theme} onPick={(v) => void update({ theme: v })} onClose={() => setOpen(null)} />}
       {open === "cloud" && cloud && <CloudSheet status={cloud} onStatus={setCloud} onClose={() => setOpen(null)} />}
       {open === "autofill" && <AutofillSheet onStatus={setFill} onClose={() => setOpen(null)} />}
+      {open === "pro" && <ProSheet onClose={() => setOpen(null)} />}
+      {open === "licences" && <LicencesSheet onClose={() => setOpen(null)} />}
       {open === "connect" && <ConnectSheet onClose={() => setOpen(null)} onConnected={() => void host.cloudStatus().then(setCloud)} />}
     </div>
   );

@@ -77,7 +77,9 @@ function inertAround(dialog: HTMLElement) {
     made.push(sibling);
   }
   for (const parent of parents) for (const sibling of parent.children) quiet(sibling, false);
-  const watcher = new MutationObserver((changes) => changes.forEach((c) => c.addedNodes.forEach((node) => quiet(node, true))));
+  const watcher = new MutationObserver((changes) => {
+    for (const c of changes) for (const node of c.addedNodes) quiet(node, true);
+  });
   for (const parent of parents) watcher.observe(parent, { childList: true });
   return () => {
     watcher.disconnect();
@@ -142,6 +144,7 @@ export function Sheet({ title, onClose, children, width = "w-[540px]", bare = fa
   const body = typeof children === "function" ? children(close) : children;
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the scrim is a mouse shortcut for Done; Escape and the Done button are the keyboard way out
     <div
       data-closing={closing || undefined}
       className="scrim fixed inset-0 z-50 grid place-items-center bg-scrim px-3 pb-3 pt-[52px]"

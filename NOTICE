@@ -2,9 +2,15 @@ KAPEVault
 Copyright (C) 2026 BrewedOps.
 
 KAPEVault's own code is licensed under the GNU General Public License,
-version 3 (see LICENSE). It ships with, or is built from, the third-party
-material below, which keeps its own licence. Each licence text is in the
-package named (under node_modules/ after `npm ci`, or in the Maven artifact).
+version 3 only (see LICENSE, the unmodified GPL text), plus one additional
+permission for the phone app's Google libraries (see LICENSE-EXCEPTION and
+"Proprietary libraries in the phone app" below). It ships with, or is built
+from, the third-party material below, which keeps its own licence. Each
+licence text is in the package named (under node_modules/ after `npm ci`, or
+in the Maven artifact). The installed PC app carries LICENSE, LICENSE-EXCEPTION,
+this NOTICE and THIRD-PARTY-NOTICES.txt (the licence text of every npm package
+it ships, including the SIL OFL for the fonts, made by
+scripts/third-party-notices.mjs at build time) in its resources\legal folder.
 
 
 Fonts
@@ -39,6 +45,30 @@ jsQR 1.4.0 (https://github.com/cozmo/jsQR) - Apache License, Version 2.0.
 marked 18 - Copyright (c) 2018+, MarkedJS; Copyright (c) 2011-2018,
   Christopher Jeffrey. MIT. Includes the Markdown notice: Copyright (c) 2004,
   John Gruber (BSD-style licence, text in the package's LICENSE).
+QR Code generator library (Nayuki) - electron/qr-encode.cjs, the QR code in
+  Settings > Backup > Add a phone, follows its steps (byte mode, error
+  correction, mask penalty). MIT asks for its notice with any derived work,
+  so it is kept here.
+  https://www.nayuki.io/page/qr-code-generator-library
+
+    Copyright (c) Project Nayuki. (MIT License)
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the
+    "Software"), to deal in the Software without restriction, including
+    without limitation the rights to use, copy, modify, merge, publish,
+    distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to the
+    following conditions:
+    - The above copyright notice and this permission notice shall be included
+      in all copies or substantial portions of the Software.
+    - The Software is provided "as is", without warranty of any kind, express
+      or implied, including but not limited to the warranties of
+      merchantability, fitness for a particular purpose and noninfringement.
+      In no event shall the authors or copyright holders be liable for any
+      claim, damages or other liability, whether in an action of contract,
+      tort or otherwise, arising from, out of or in connection with the
+      Software or the use or other dealings in the Software.
 
 
 Libraries in both apps
@@ -56,6 +86,9 @@ Libraries in the phone app (Android)
 Capacitor (@capacitor/core, @capacitor/android 8.5.2) - Copyright (c)
   2017-present Drifty Co. MIT.
 @capacitor/filesystem 8.1.3 - Copyright (c) 2025 Ionic. MIT.
+Ionic Filesystem for Android 1.1.0 (io.ionic.libs:ionfilesystem-android,
+  https://github.com/ionic-team/ion-android-filesystem), the native half of
+  @capacitor/filesystem - Copyright (c) 2025 Ionic. MIT.
 ZXing core 3.5.4 (com.google.zxing:core, https://github.com/zxing/zxing) -
   Apache License, Version 2.0.
 AndroidX (androidx.appcompat, androidx.camera) - The Android Open Source
@@ -68,21 +101,72 @@ Apache Cordova Android 14.0.1 (org.apache.cordova:framework), pulled in by
   - Copyright The Apache Software Foundation. Apache License, Version 2.0.
   This product includes software developed at The Apache Software Foundation
   (http://www.apache.org/).
+Google datatransport 3.x (com.google.android.datatransport:transport-api,
+  transport-runtime, transport-backend-cct) and Firebase encoders
+  (com.google.firebase:firebase-encoders, -json, -proto), pulled in by the Play
+  Billing Library - Copyright Google LLC. Apache License, Version 2.0.
+
+
+Proprietary libraries in the phone app
+--------------------------------------
+
+The Android app is built with these libraries from Google, which are NOT free
+software. Their licence is the Android Software Development Kit License
+(https://developer.android.com/studio/terms.html). They are in the phone app
+because of KAPEVault Pro, a one-time Google Play purchase, and they are
+fetched at build time from Google's Maven repository, not kept in this repo.
+
+  com.android.billingclient:billing 9.1.0 (Google Play Billing Library)
+  com.google.android.gms:play-services-base 18.5.0
+  com.google.android.gms:play-services-basement 18.9.0
+  com.google.android.gms:play-services-tasks 18.2.0
+  com.google.android.gms:play-services-location 19.0.0
+  com.google.android.gms:play-services-places-placereport 17.0.0
+
+The GPL alone would not let KAPEVault's code be distributed together with them.
+LICENSE-EXCEPTION is the permission KAPEVault's copyright holder gives, under
+section 7 of the GPL, to link and convey the phone app with exactly these
+libraries. The PC app does not use them. A phone build without Google Play
+Billing: see mobile/README.md.
 
 
 Brand logos
 -----------
 
-The logos in src/assets/logos/ and mobile/src/app/assets/logos/ are
-trademarks of their owners, including the marks of Philippine government
-agencies (SSS, PhilHealth, Pag-IBIG Fund, BIR). They are NOT covered by the
-GPL or by any licence in this repository. They are shown only to identify
-the user's own accounts in the user's own vault, and no endorsement by any
-owner is implied.
+The 121 logos in src/assets/logos/ and mobile/src/app/assets/logos/ are
+trademarks (and, for some, copyrighted artwork) of their owners. They are NOT
+covered by the GPL or by any licence in this repository. They are shown only
+to identify the user's own accounts in the user's own vault, and no
+endorsement by, or affiliation with, any owner is implied. Anyone
+redistributing KAPEVault is responsible for their own use of these marks and
+may remove any of them: a brand without a logo shows the normal letter tile.
 
-They were taken from svgl (https://svgl.app; the svgl code is MIT), Simple
-Icons (https://simpleicons.org; its SVG data is CC0-1.0) or the brand's own
-website, as recorded per logo in src/features/brands/brands.json (see
-scripts/fetch-logos.mjs). A few were cut or redrawn from those sources
-("source": local). Anyone redistributing KAPEVault is responsible for their
-own use of these marks and may remove any of them.
+Where each came from, as recorded per logo in src/features/brands/brands.json
+(a "source" key; scripts/fetch-logos.mjs downloads the first three kinds):
+
+- 76 from svgl (https://svgl.app). The svgl code is MIT, which says nothing
+  about the logos: svgl hosts each owner's artwork without granting rights to
+  it, and asks its contributors to make sure they may use what they add.
+- 21 from Simple Icons (https://simpleicons.org). Its icon data is CC0-1.0, but
+  its DISCLAIMER says that does not mean every icon is CC0 or free of
+  trademark rights.
+- 5 downloaded from the brand's own website: Apify and CIMB (an icon file the
+  site serves) and Kie, Lightspeed and Blotato (the icon the site declares).
+- 19 cut, recoloured or drawn here ("source": local):
+  - 10 from Wikimedia Commons file pages whose status there is public domain
+    (simple shapes) with a trademark restriction: GCash, SeaBank, BDO,
+    Metrobank, UnionBank, PNB, Security Bank, China Bank, EastWest Bank,
+    Payoneer.
+  - 5 from the brand's own website: Maya, GoTyme, BPI, RCBC, M Lhuillier.
+  - Wise: the Simple Icons mark, recoloured. GoHighLevel: cut from the SVG on
+    their website.
+  - Palawan Express and Cebuana Lhuillier: drawn here to look like the mark.
+    There is no source file.
+
+Logos of Philippine government agencies (SSS, PhilHealth, Pag-IBIG Fund, BIR)
+and two taken from non-free uploads on the English Wikipedia (Landbank,
+Remitly) were removed before the first release. These six brands are shown
+by name only, with no logo: they stay in the catalog ("logo": false in
+brands.json), so they are still offered and still recognised by name, and
+they show a letter tile. A government agency's mark is not ours to ship in a paid product without
+its approval, and KAPEVault Pro is a paid product.

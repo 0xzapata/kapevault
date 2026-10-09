@@ -7,9 +7,10 @@ import { EntryIcon } from "../../components/icons";
 import { useToast } from "../../components/Toast";
 import { useHost } from "../../host/host-context";
 import { capital, relativeTime } from "../../lib/format";
+import { ProSheet } from "../pro/ProSheet";
 import { NewMasterForm } from "../sync/NewMasterForm";
 import { SyncReviewSheet } from "../sync/SyncReviewSheet";
-import { deviceNames, syncLineText } from "../sync/sync-text";
+import { afterSyncToast, deviceNames, syncLineText, syncsNow } from "../sync/sync-text";
 import type { Entry, SyncReview, SyncStatus } from "../../host/types";
 
 // One quiet line under the item count ("Synced with DESKTOP-4F2A · 2 min ago"); it opens
@@ -30,7 +31,7 @@ export function SyncLine({ status, onOpen }: { status: SyncStatus | null; onOpen
       >
         {warn ? <WarningCircle size={14} weight="fill" className="shrink-0" /> : status.state === "off" ? <CloudSlash size={14} className="shrink-0" /> : <CloudCheck size={14} weight="fill" className={`shrink-0 ${line.tone === "ok" ? "text-ok" : ""}`} />}
         {/* Keyed on the state, not the text: "Syncing" -> "Synced" settles in, the "2 min ago" refresh does not replay. */}
-        {status.state === "syncing" ? <span className="shimmer accent inline-block h-[3px] w-20 rounded-[3px] bg-line" aria-label="Syncing" /> : <span key={status.state} className="settle truncate">{line.text}</span>}
+        {status.state === "syncing" ? <span className="shimmer accent inline-block h-[3px] w-20 rounded-[3px] bg-line" role="img" aria-label="Syncing" /> : <span key={status.state} className="settle truncate">{line.text}</span>}
         <CaretRight size={10} weight="bold" className="shrink-0" />
       </button>
       {reviewing && <SyncReviewSheet review={reviewing} onClose={() => setReviewing(null)} />}
@@ -42,26 +43,29 @@ const note = "mt-3 text-[13px] leading-relaxed text-ink-2";
 
 // Devices, what needs a look, and Sync now: the PC Sheet, centred. With no R2 it says the vault is only
 // on this phone, and offers Connect.
-export function SyncSheet({ status, entries, onOpenItem, onConnect, onClose }: { status: SyncStatus; entries: Entry[]; onOpenItem: (id: string) => void; onConnect: () => void; onClose: () => void }) {
+export function SyncSheet({ status, owned, entries, onOpenItem, onConnect, onClose }: { status: SyncStatus; owned: boolean; entries: Entry[]; onOpenItem: (id: string) => void; onConnect: () => void; onClose: () => void }) {
   const host = useHost();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [reviewing, setReviewing] = useState<SyncReview | null>(null);
+  const [showPro, setShowPro] = useState(false);
   useNow();
 
   async function syncNow() {
     setBusy(true);
     const result = await host.syncNow();
     setBusy(false);
-    const after = await host.syncStatus();
-    if (!result.ok) toast(result.error, "error");
-    else if (after.apart) toast("Backed up");
-    else if (!after.review && !after.newMaster && !after.removed && !after.problems.length) toast(`Synced with ${after.peer ?? "your devices"}`);
+    if (!result.ok) return toast(result.error, "error");
+    const done = afterSyncToast(await host.syncStatus());
+    if (done) toast(done); // else the sheet shows what waits
   }
 
   const copies = status.conflicts.map((c) => entries.find((e) => e.id === c.id)).filter((e): e is Entry => Boolean(e));
   const syncing = busy || status.state === "syncing";
   const off = status.state === "off";
+  const noSync = !syncsNow(status);
+  // Without Pro this phone meets no other device: only its own row, its own backup.
+  const devices = status.backupOnly ? status.devices.filter((d) => d.thisDevice) : status.devices;
   const problems = [status.error, ...status.problems].filter((p): p is string => Boolean(p));
 
   return (
@@ -83,7 +87,7 @@ export function SyncSheet({ status, entries, onOpenItem, onConnect, onClose }: {
           ) : (
             <Button variant="primary" onClick={syncNow} disabled={syncing} className="min-w-[120px]">
               <ArrowsClockwise size={15} weight="bold" />
-              {syncing ? <span className="shimmer inline-block h-[3px] w-14 rounded-[3px] bg-on-accent-2" aria-label="Syncing" /> : status.apart || status.removed ? "Back up now" : "Sync now"}
+              {syncing ? <span className="shimmer inline-block h-[3px] w-14 rounded-[3px] bg-on-accent-2" role="img" aria-label="Syncing" /> : noSync ? "Back up now" : "Sync now"}
             </Button>
           )}
           <span className="flex-1" />
@@ -93,11 +97,19 @@ export function SyncSheet({ status, entries, onOpenItem, onConnect, onClose }: {
     >
       {(close) => (
         <>
-          {off && <p className={note}>Backup is off, so this vault is only on this phone. Connect your own Cloudflare R2 bucket to back it up and sync it with your PC.</p>}
-          {!off && !status.apart && !status.removed && <p className="mt-1 text-[13px] text-ink-3">Your devices share their changes through your own R2 bucket, encrypted.</p>}
+          {off && <p className={note}>Backup is off, so this vault is only on this phone. Connect your own Cloudflare R2 bucket to back it up{owned ? " and sync it with your PC." : ". Syncing with your PC is part of Pro."}</p>}
+          {!off && !noSync && <p className="mt-1 text-[13px] text-ink-3">Your devices share their changes through your own R2 bucket, encrypted.</p>}
+          {status.backupOnly && (
+            <p className={note}>
+              This phone backs up. Syncing with your PC is part of Pro.{" "}
+              <button type="button" onClick={() => setShowPro(true)} className="press hit font-medium text-accent focus-ring">
+                See Pro
+              </button>
+            </p>
+          )}
           {status.apart && <p className={note}>This phone backs up to R2 but does not sync: the bucket holds another vault. To sync, use that vault in Settings &gt; Backup and sync.</p>}
           {status.removed && <p className={note}>This phone was removed from sync on another device, so it no longer shares changes with your other devices. It still backs up. To sync again, clear KAPEVault's data in Android Settings (or reinstall it) and restore from your backup: it then joins as a new device.</p>}
-          {status.manual && !off && !status.apart && !status.removed && <p className="mt-2 text-[12.5px] text-ink-3">Automatic backup is off: this phone syncs only when you tap Sync now.</p>}
+          {status.manual && !off && !noSync && <p className="mt-2 text-[12.5px] text-ink-3">Automatic backup is off: this phone syncs only when you tap Sync now.</p>}
 
           {status.newMaster && !status.review && <NewMasterForm device={status.newMaster} onOpened={() => void host.syncStatus().then((s) => s.review && setReviewing(s.review))} />}
 
@@ -119,7 +131,7 @@ export function SyncSheet({ status, entries, onOpenItem, onConnect, onClose }: {
 
           {!off && (
             <Card className="mt-5">
-              {status.devices.map((d) => (
+              {devices.map((d) => (
                 <div key={d.id} className="flex min-h-14 items-center gap-3 border-b border-line py-2 pl-4 pr-4 last:border-b-0">
                   {d.platform === "android" || d.platform === "ios" ? <DeviceMobile size={20} className="shrink-0" /> : <Desktop size={20} className="shrink-0" />}
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -131,7 +143,7 @@ export function SyncSheet({ status, entries, onOpenItem, onConnect, onClose }: {
               ))}
             </Card>
           )}
-          {!off && !status.apart && status.fingerprint && status.devices.length > 1 && (
+          {!off && !noSync && status.fingerprint && devices.length > 1 && (
             <p className="mt-2 px-0.5 text-[12.5px] text-ink-3">
               Check code <span className="font-mono text-ink-2">{status.fingerprint}</span> - the same on each device once all have synced.
             </p>
@@ -164,6 +176,7 @@ export function SyncSheet({ status, entries, onOpenItem, onConnect, onClose }: {
             </>
           )}
           {reviewing && <SyncReviewSheet review={reviewing} onClose={() => setReviewing(null)} />}
+          {showPro && <ProSheet onClose={() => setShowPro(false)} />}
         </>
       )}
     </Sheet>

@@ -7,7 +7,9 @@ import { syncChanges } from "./review.js";
 import { SHARED_FIELDS, newEpoch, validSync } from "./shape.js";
 import { repair, stamp } from "./stamp.js";
 import { DEVICES, editor, firstSync, random } from "./test-helpers.js";
-import { clearHistory, confirmPayee, removeEntries, toggleFavorite, touchEntry, upsertEntry } from "../entries.js";
+import { clearHistory, isTrashed, removeEntries, toggleFavorite, touchEntry, upsertEntry } from "../entries.js";
+import { deleteForever, restoreEntry, trashEntry } from "../trash.js";
+import { recordGenerated } from "../generated.js";
 import { confirmGone, setLifecycle } from "../lifecycle.js";
 import { markRecoveryCode, setRecoveryCodes } from "../recovery-codes.js";
 import { addSpace, deleteSpace, renameSpace } from "../spaces.js";
@@ -68,11 +70,10 @@ const covers = (vv, other) => Object.entries(other).every(([d, n]) => (vv[d] ?? 
 const closed = (entry) => entry?.lifecycle?.state === "gone";
 const json = (value) => JSON.stringify(value, (_, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort()) : v));
 
-// A value survives as itself, or inside a copy (whose title gains a suffix, and a payee's confirmation goes).
+// A value survives as itself, or inside a copy (whose title gains a suffix).
 function holds(name, want, got) {
   if (!got) return false;
   if (name === "pw") return got.password === want.password;
-  if (name === "pay") return json({ ...want, confirmedAt: undefined }) === json({ ...got, confirmedAt: undefined });
   if (name === "codes") {
     const [w, g] = [want.recoveryCodes.codes, got.recoveryCodes.codes];
     return json(w.map((c) => c.code)) === json(g.map((c) => c.code)) && w.every((c, i) => !c.used || g[i].used);
@@ -106,7 +107,7 @@ function checkMerge(a, b, result) {
       const theirsDeleted = tombstone && covers(tombstone.vv, theirMeta.vv); // then the item lives on as this version
       const groups = splitGroups(entry);
       for (const [name, stamp] of Object.entries(meta.g)) {
-        if (name === "life" || name === "history") continue;
+        if (name === "life" || name === "history" || name === "trash") continue;
         const successor = theirMeta.g[name];
         if (theirEntry && seen(stamp, theirMeta.vv)) {
           if (!oneClosed && !theirsDeleted && successor && !seen(successor, meta.vv)) assert.deepEqual(result.sync.meta[entry.id].g[name], successor, `${entry.id}.${name}: the later edit that saw this one must win`);
@@ -258,11 +259,11 @@ const later = () => (wall += 60 * 60 * 1000);
 const find = (dev, title) => dev.data.entries.find((e) => e.title === title);
 const copies = (dev) => dev.data.entries.filter((e) => COPY_TITLE.test(e.title));
 
-/** PC, phone and tablet that all hold the same legacy vault: a login, a payee and a note. */
+/** PC, phone and tablet that all hold the same legacy vault: a login, a thing and a note. */
 function devicesWithVault({ phoneSkew = 0 } = {}) {
   const vault = legacyVault((data) => {
     upsertEntry(data, { kind: "login", title: "Mock Bank", spaceId: PERSONAL, username: "mock.user", password: "old-pass" });
-    upsertEntry(data, { kind: "payee", title: "Mock Payee", spaceId: PERSONAL, who: "Mock Person", provider: "GCash", number: "09170000001" });
+    upsertEntry(data, { kind: "thing", title: "Mock Passport", spaceId: PERSONAL, spot: "top drawer" });
     upsertEntry(data, { kind: "note", title: "Mock Note", spaceId: CLIENT, body: "first" });
   });
   wall = T0;
@@ -406,7 +407,8 @@ test("cleared history does not come back from a device that had not seen the cle
   const [pc, phone] = devicesWithVault();
   edit(pc, "Mock Bank", { password: "second-pass" });
   syncBoth(phone, pc);
-  change(pc, (wall += 2 * DAY), (data) => clearHistory(data, find(pc, "Mock Bank").id));
+  wall += 2 * DAY;
+  change(pc, wall, (data) => clearHistory(data, find(pc, "Mock Bank").id));
   edit(phone, "Mock Bank", { username: "phone.user" });
   syncBoth(pc, phone);
   for (const dev of [pc, phone]) assert.equal(find(dev, "Mock Bank").history, undefined);
@@ -431,20 +433,6 @@ test("backup codes: on the same set a code used anywhere stays used; a replaced 
   syncBoth(pc, phone);
   assert.equal(find(pc, "Mock Bank").recoveryCodes.codes[0].code, "eeee-5555");
   assert.deepEqual(copies(pc)[0].recoveryCodes.codes.map((c) => c.used), [true, true, true, false]);
-});
-
-test("a payee conflict copy is never confirmed and says to check the number", () => {
-  const [pc, phone] = devicesWithVault();
-  const id = find(pc, "Mock Payee").id;
-  edit(pc, "Mock Payee", { number: "09170000002" });
-  change(pc, later(), (data) => confirmPayee(data, id, "09170000002"));
-  edit(phone, "Mock Payee", { number: "09170000003" });
-  pull(pc, phone);
-  const [copy] = copies(pc);
-  assert.equal(find(pc, "Mock Payee").number, "09170000003");
-  assert.equal(copy.number, "09170000002");
-  assert.equal(copy.confirmedAt, undefined);
-  assert.match(copy.title, /\(check this number\)$/);
 });
 
 test("a closed account stays closed; a password changed concurrently goes to a copy", () => {
@@ -493,19 +481,74 @@ test("spaces: a rename is last-writer-wins; a deleted space's items stay as they
 test("delete vs edit: a delete that saw the item wins; an edit it never saw keeps the item", () => {
   const [pc, phone] = devicesWithVault();
   const note = find(pc, "Mock Note").id;
-  const payee = find(pc, "Mock Payee").id;
+  const thing = find(pc, "Mock Passport").id;
   change(pc, later(), (data) => removeEntries(data, new Set([note])));
   const stale = phone.data;
   pull(phone, pc);
   assert.equal(find(phone, "Mock Note"), undefined);
   assert.equal(merge(pc.data, stale, HOST).data.entries.some((e) => e.id === note), false, "a stale snapshot resurrected a deleted item");
 
-  change(pc, later(), (data) => removeEntries(data, new Set([payee])));
-  edit(phone, "Mock Payee", { accountName: "Mock Account" });
+  change(pc, later(), (data) => removeEntries(data, new Set([thing])));
+  edit(phone, "Mock Passport", { spot: "safe" });
   const [report] = syncBoth(pc, phone);
-  assert.equal(find(pc, "Mock Payee").accountName, "Mock Account");
-  assert.ok(pc.data.sync.gone[payee], "the tombstone stays for the record");
-  assert.deepEqual(report.added, [payee], "the PC's delete is undone: the gate sees the item come back");
+  assert.equal(find(pc, "Mock Passport").spot, "safe");
+  assert.ok(pc.data.sync.gone[thing], "the tombstone stays for the record");
+  assert.deepEqual(report.added, [thing], "the PC's delete is undone: the gate sees the item come back");
+});
+
+test("trash: a trash reaches the other device, a restore undoes it, and a trash beside an edit keeps both", () => {
+  const [pc, phone] = devicesWithVault();
+  const bank = find(pc, "Mock Bank").id;
+  change(pc, later(), (data) => trashEntry(data, bank, Date.now()));
+  pull(phone, pc);
+  assert.equal(isTrashed(find(phone, "Mock Bank")), true, "trashed on the PC shows as trashed on the phone");
+
+  change(phone, later(), (data) => restoreEntry(data, bank));
+  pull(pc, phone);
+  assert.equal(isTrashed(find(pc, "Mock Bank")), false, "restored on the phone restores it on the PC");
+
+  // Trashed on the PC while the phone changes the password: no copy, the newest password in the Trash.
+  change(pc, later(), (data) => trashEntry(data, bank, Date.now()));
+  edit(phone, "Mock Bank", { password: "new-pass" });
+  syncBoth(pc, phone);
+  for (const dev of [pc, phone]) {
+    assert.equal(find(dev, "Mock Bank").password, "new-pass");
+    assert.equal(isTrashed(find(dev, "Mock Bank")), true);
+    assert.equal(copies(dev).length, 0);
+  }
+});
+
+test("trash: a restore that never saw the purge keeps the item; a purge that saw everything removes it; two trashes make no copy", () => {
+  const [pc, phone] = devicesWithVault();
+  const note = find(pc, "Mock Note").id;
+  change(pc, later(), (data) => trashEntry(data, note, Date.now()));
+  pull(phone, pc);
+  // The PC purges while the phone restores: the restore is a change the purge never saw.
+  change(pc, later(), (data) => deleteForever(data, note));
+  change(phone, later(), (data) => restoreEntry(data, note));
+  syncBoth(pc, phone);
+  for (const dev of [pc, phone]) {
+    assert.equal(isTrashed(find(dev, "Mock Note")), false, "restored wins over a purge made without seeing it");
+    assert.equal(copies(dev).length, 0);
+  }
+
+  // A purge of what both have seen goes everywhere.
+  change(pc, later(), (data) => trashEntry(data, note, Date.now()));
+  pull(phone, pc);
+  change(phone, later(), (data) => deleteForever(data, note));
+  pull(pc, phone);
+  assert.equal(find(pc, "Mock Note"), undefined);
+
+  // Trashed on both devices at once: the later write wins and nothing is copied.
+  const thing = find(pc, "Mock Passport").id;
+  change(pc, later(), (data) => trashEntry(data, thing, Date.now()));
+  change(phone, later(), (data) => trashEntry(data, thing, Date.now()));
+  syncBoth(pc, phone);
+  for (const dev of [pc, phone]) {
+    assert.equal(isTrashed(find(dev, "Mock Passport")), true);
+    assert.equal(copies(dev).length, 0);
+  }
+  assert.equal(sharedState(pc.data), sharedState(phone.data));
 });
 
 test("causal order beats a wrong clock", () => {
@@ -565,8 +608,8 @@ test("a newer epoch replaces this device's items; what it never saw stays as a c
   syncBoth(pc, phone);
   const restored = pc.data; // the backup the PC restores
   // On the phone after that backup: a delete, an edit, and a new item.
-  const payee = find(phone, "Mock Payee").id;
-  change(phone, later(), (data) => removeEntries(data, new Set([payee])));
+  const thing = find(phone, "Mock Passport").id;
+  change(phone, later(), (data) => removeEntries(data, new Set([thing])));
   edit(phone, "Mock Note", { body: "phone body" });
   change(phone, later(), (data) => upsertEntry(data, { kind: "note", title: "Mock Phone Note", spaceId: PERSONAL, body: "new" }));
   mock.timers.setTime(later());
@@ -575,8 +618,8 @@ test("a newer epoch replaces this device's items; what it never saw stays as a c
   const { data, report } = adoptEpoch(phone.data, everywhere, HOST);
   const after = { ...phone, data };
   assert.equal(data.sync.epoch.id, "epoch-2");
-  assert.ok(find(after, "Mock Payee"), "the delete is undone");
-  assert.equal(data.sync.gone[payee], undefined);
+  assert.ok(find(after, "Mock Passport"), "the delete is undone");
+  assert.equal(data.sync.gone[thing], undefined);
   assert.equal(find(after, "Mock Note").body, "first");
   assert.deepEqual(copies(after).map((e) => [e.title.replace(/, \d{4}-\d{2}-\d{2}\)$/, ")"), e.body]).sort(), [
     ["Mock Note (conflict copy, Test Phone)", "phone body"],
@@ -632,6 +675,22 @@ test("device-local keys come from this device; a no-op merge returns this device
   const again = merge(pc.data, phone.data, HOST);
   assert.equal(again.data, pc.data);
   assert.equal(again.report.unchanged, true);
+});
+
+test("a device's generated passwords (genHistory) are its own: never stamped, never merged, never lost to a merge", () => {
+  const [pc, phone] = devicesWithVault();
+  const before = sharedState(pc.data);
+  change(pc, later(), (data) => recordGenerated(data, "mock-pc-Pass-1", Date.now()));
+  change(phone, later(), (data) => recordGenerated(data, "mock-phone-Pass-2", Date.now()));
+  assert.equal(sharedState(pc.data), before, "recording stamps nothing, so nothing for sync to carry");
+  pull(pc, phone);
+  pull(phone, pc);
+  assert.deepEqual(pc.data.genHistory.map((g) => g.value), ["mock-pc-Pass-1"]);
+  assert.deepEqual(phone.data.genHistory.map((g) => g.value), ["mock-phone-Pass-2"]);
+  assert.equal(SHARED_FIELDS.includes("genHistory"), false);
+  // A restored epoch replaces the shared state, not this device's list.
+  const adopted = adoptEpoch(pc.data, { ...phone.data, sync: newEpoch(phone.data.sync, { id: "epoch-2", installId: "dev-b", now: Date.now() }) }, HOST);
+  assert.deepEqual(adopted.data.genHistory.map((g) => g.value), ["mock-pc-Pass-1"]);
 });
 
 test("what the host gates on: the report says only whether anything came in; syncChanges counts", () => {

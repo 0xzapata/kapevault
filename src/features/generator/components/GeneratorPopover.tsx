@@ -1,7 +1,11 @@
-import { useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { ArrowsClockwise } from "@phosphor-icons/react";
 import { Popover } from "@/components/Popover";
 import { Button, Switch } from "@/components/form";
+import { useToast } from "@/components/Toast";
+import { useCopyAction } from "@/hooks/use-copy-action";
+import { vaultApi, type GeneratedRow } from "@/lib/vault-api";
+import { GeneratedRecent } from "./GeneratedRecent";
 import { DEFAULT_GENERATOR, MAX_LENGTH, MIN_LENGTH, generatePassword, type GeneratorOptions } from "../lib/generate-password";
 import { StrengthMeter } from "./StrengthMeter";
 
@@ -56,6 +60,25 @@ export function GeneratorPopover({ anchor, trigger, onUse, onClose }: GeneratorP
   const [options, setOptions] = useState(loadOptions);
   const [password, setPassword] = useState(() => generatePassword(options));
   const classesOn = CLASSES.filter((c) => options[c.key]).length;
+  const toast = useToast();
+  const copy = useCopyAction();
+  const [recent, setRecent] = useState<GeneratedRow[]>([]);
+  const rerollButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    vaultApi.generatedList().then(setRecent, () => {}); // a locked vault shows the lock screen
+  }, []);
+
+  // A value is kept in the vault the moment it leaves the generator (copied, selected and copied, or used),
+  // before the item is saved: a lock while the form is open takes the form, never the only copy of a
+  // password already pasted into a site. A re-roll keeps nothing.
+  async function keep(value: string) {
+    try {
+      setRecent(await vaultApi.recordGenerated(value));
+    } catch {
+      toast("Could not keep this one in Recent", "error");
+    }
+  }
 
   function change(patch: Partial<GeneratorOptions>) {
     const next = { ...options, ...patch };
@@ -67,14 +90,16 @@ export function GeneratorPopover({ anchor, trigger, onUse, onClose }: GeneratorP
   return (
     <Popover anchor={anchor} trigger={trigger} label="Password generator" onClose={onClose} className="w-[340px] rounded-[14px] border border-line bg-raised p-3 shadow-sheet">
       <div className="flex items-start gap-2 rounded-[10px] bg-surface py-2 pl-3 pr-1.5">
-        <p className="selectable min-h-[44px] min-w-0 flex-1 break-all py-0.5 font-mono text-[15px] leading-[22px]">
+        <p onCopy={() => void keep(password)} className="selectable min-h-[44px] min-w-0 flex-1 break-all py-0.5 font-mono text-[15px] leading-[22px]">
           {[...password].map((c, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: one span per character of a string that is replaced whole, never reordered
             <span key={i} className={charClass(c)}>
               {c}
             </span>
           ))}
         </p>
         <button
+          ref={rerollButton}
           type="button"
           aria-label="New password"
           title="New password"
@@ -119,9 +144,38 @@ export function GeneratorPopover({ anchor, trigger, onUse, onClose }: GeneratorP
         </label>
       </div>
 
-      <Button type="button" variant="primary" onClick={() => onUse(password)} className="mt-3.5 w-full">
-        Use password
-      </Button>
+      <div className="mt-3.5 flex gap-2">
+        <Button
+          type="button"
+          onClick={() =>
+            copy.run(async () => {
+              await keep(password);
+              await vaultApi.copyText(password);
+            }, "Password copied - clears in 30s")
+          }
+        >
+          {copy.copied ? "Copied" : "Copy"}
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          onClick={() => {
+            void keep(password);
+            onUse(password);
+          }}
+          className="flex-1"
+        >
+          Use password
+        </Button>
+      </div>
+
+      <GeneratedRecent
+        rows={recent}
+        onClear={async () => {
+          setRecent(await vaultApi.clearGenerated());
+          rerollButton.current?.focus(); // the list and its buttons are gone: focus stays in the popover
+        }}
+      />
     </Popover>
   );
 }

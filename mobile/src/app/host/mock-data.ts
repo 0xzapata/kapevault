@@ -50,7 +50,7 @@ export function mockVault() {
       },
       { ...base("e-gmail", "Gmail", "personal", { favorite: true }), kind: "login", username: "sam.home@example.com", password: "Lantern-Mango-Quiet-47", url: "https://mail.google.com", signIn: "password", totp: TOTP("Google", "sam.home@example.com", "KRSXG5CTMVRXEZLUKN2XAZLS"), passwordChangedAt: day(-30) }, // gitleaks:allow
       { ...base("e-router", "Home Wi-Fi router", "personal", { brand: "tp-link" }), kind: "device", type: "router", model: "Archer AX55", ssid: "Northwind-5G", wifiPassword: "sampaguita-2048", adminUrl: "192.168.0.1", adminUser: "admin", adminPassword: "Rtr!8842" }, // gitleaks:allow
-      { ...base("e-gcash", "Mama GCash", "personal", { heldFor: "Mama" }), kind: "payee", who: "Mama", relation: "Mother", provider: "GCash", number: "09170000000", accountName: "MA*** D*** C.", confirmedAt: day(-20) },
+      { ...base("e-gcash", "Mama GCash", "personal", { heldFor: "Mama" }), kind: "note", body: "Name: Mama\nRelation: Mother\nWallet or bank: GCash\nNumber: 09170000000\nAccount name: MA*** D*** C." },
       { ...base("e-notion", "Notion", "lc"), kind: "login", username: "sam.reyes@example.com", password: "", url: "https://www.notion.so", signIn: "google", viaEntryId: "e-gmail" },
       { ...base("e-umid", "UMID", "personal"), kind: "id", idType: "UMID", idNumber: "0028-1234567-8" },
       { ...base("e-passport", "Passport", "personal"), kind: "thing", room: "Bedroom", spot: "Top drawer, blue folder", grab: 1, expires: day(900) },

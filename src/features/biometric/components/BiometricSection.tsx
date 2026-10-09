@@ -5,8 +5,7 @@ import { vaultApi, type BiometricStatus } from "@/lib/vault-api";
 import { biometricName, isMac } from "@/lib/platform";
 import { Group, SwitchRow } from "@/features/settings/SettingRow";
 import { useAction } from "@/hooks/use-action";
-
-const SETUP_HINT = isMac ? "Touch ID is not available on this Mac." : "Set up Windows Hello first: Windows Settings > Accounts > Sign-in options.";
+import { unsupportedNote } from "../lib/biometric-note";
 
 interface BiometricSectionProps {
   status: BiometricStatus | null;
@@ -38,7 +37,7 @@ export function BiometricSection({ status, onStatus, notice }: BiometricSectionP
   }
 
   let note: ReactNode = `Unlock with ${name} instead of typing your master password. KAPEVault still asks for your master password every 14 days.`;
-  if (status && !status.supported) note = SETUP_HINT;
+  if (status && !status.supported) note = unsupportedNote(status, isMac);
   // Set up for the vault's old key and could not be removed then: it no longer opens this vault.
   if (status?.stale) note = <span className="text-warn">{name} needs to be turned on again.</span>;
   if (busy) note = `Waiting for ${name}...`;

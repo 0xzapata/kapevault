@@ -35,16 +35,16 @@ export function IssueBanner({ entry, onOpen, onEdit, onReplaceCodes }: IssueBann
         {others.length > 0 && <p className="mt-1 text-[12.5px] text-ink-3">Also: {others.map(issueLabel).join(" · ")}</p>}
         <div className="-ml-1 mt-3 flex flex-wrap items-center gap-1">
           {url && (
-            <button onClick={() => onOpen(url)} className={`${cardPrimary} mr-1`}>
+            <button type="button" onClick={() => onOpen(url)} className={`${cardPrimary} mr-1`}>
               {codes ? "Make new codes on website" : isKey ? "Renew on website" : "Change on website"}
             </button>
           )}
           {codes ? (
-            <button onClick={onReplaceCodes} className={fix}>
+            <button type="button" onClick={onReplaceCodes} className={fix}>
               Replace codes
             </button>
           ) : (
-            <button onClick={onEdit} className={fix}>
+            <button type="button" onClick={onEdit} className={fix}>
               {fixLabel}
             </button>
           )}

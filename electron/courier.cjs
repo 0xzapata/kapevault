@@ -155,7 +155,7 @@ function run(args, config, { maxBytes, tooLarge }) {
       if (total > maxBytes + STATUS_LEN) return stop(tooLarge);
       chunks.push(chunk);
     });
-    child.on("error", (e) => stop(e.code === "ENOENT" ? "The system's curl is missing, so KAPEVault cannot reach R2." : UNREACHABLE));
+    child.on("error", (e) => stop(/** @type {NodeJS.ErrnoException} */ (e).code === "ENOENT" ? "The system's curl is missing, so KAPEVault cannot reach R2." : UNREACHABLE));
     child.on("close", (code) => {
       clearTimeout(timer);
       live.children.delete(child);

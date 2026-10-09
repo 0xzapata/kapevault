@@ -34,6 +34,7 @@ async function runOcr(base64) {
 }
 
 // image: a data URL from the page (JPEG or PNG). Returns { status: "ok", text } or { status: "unavailable" }.
+/** @param {string} image @param {{ fake?: any }} [options] */
 async function readLabelText(image, { fake } = {}) {
   const m = /^data:image\/(?:jpeg|png);base64,([A-Za-z0-9+/]+={0,2})$/.exec(typeof image === "string" ? image : "");
   if (!m || (m[1].length * 3) / 4 > MAX_IMAGE_BYTES) throw new Error("That photo could not be read");

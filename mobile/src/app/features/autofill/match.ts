@@ -98,6 +98,16 @@ export function matchesTarget(entry: LoginEntry, target: FillTarget): boolean {
   return Boolean(place.app) && place.app === target.packageName.toLowerCase();
 }
 
+// The confirm sentence for a login that is not saved for who is asking (the picker's "Other logins"), in
+// plain words: the login's own site or app, and who asked. A login with no site saved says so.
+export function mismatchWarning(entry: LoginEntry, target: FillTarget): string {
+  const place = placeOf(entry.url);
+  const own = place.app ?? place.host;
+  const site = targetSite(target);
+  const asker = target.browser && site ? `The page asking is ${site}.` : `The app asking is ${target.packageName}.`;
+  return `${own ? `This login is for ${own}.` : "This login has no site saved."} ${asker} Fill anyway?`;
+}
+
 // Package name words that say nothing about whose app it is.
 const GENERIC = new Set(["com", "org", "net", "io", "co", "app", "apps", "android", "mobile", "client", "www", "prod", "release"]);
 

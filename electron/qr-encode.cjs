@@ -9,7 +9,7 @@ const BLOCKS = [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14
 const LEVEL_M = 0; // its two format bits
 const MASKS = [
   (x, y) => (x + y) % 2 === 0,
-  (x, y) => y % 2 === 0,
+  (_x, y) => y % 2 === 0,
   (x) => x % 3 === 0,
   (x, y) => (x + y) % 3 === 0,
   (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0,
@@ -242,6 +242,7 @@ function encodeQr(text) {
   while (version <= 40 && 4 + (version < 10 ? 8 : 16) + bytes.length * 8 > dataCodewords(version) * 8) version++;
   if (version > 40) throw new Error("Too much text for one QR code.");
   const codewords = withErrorCorrection(dataFor(bytes, version), version);
+  /** @type {{ score: number, modules: boolean[][] } | null} */
   let best = null;
   for (let mask = 0; mask < MASKS.length; mask++) {
     const g = grid(version);
@@ -251,7 +252,7 @@ function encodeQr(text) {
     const score = penalty(g.modules);
     if (!best || score < best.score) best = { score, modules: g.modules };
   }
-  return best.modules;
+  return /** @type {{ modules: boolean[][] }} */ (best).modules;
 }
 
 /**

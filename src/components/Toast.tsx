@@ -6,9 +6,16 @@ interface ToastState {
   id: number;
   text: string;
   tone: "ok" | "error";
+  action?: ToastAction;
 }
 
-const ToastContext = createContext<(text: string, tone?: ToastState["tone"]) => void>(() => {});
+// A button on the toast (Undo). It runs once, then the toast goes.
+export interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
+const ToastContext = createContext<(text: string, tone?: ToastState["tone"], action?: ToastAction) => void>(() => {});
 
 // One toast at a time, bottom centre: a newer message replaces the older one instead of stacking.
 // A longer message wraps to a second line and stays up long enough to read.
@@ -18,11 +25,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const nextId = useRef(0);
 
-  const show = useCallback((text: string, tone: ToastState["tone"] = "ok") => {
+  const show = useCallback((text: string, tone: ToastState["tone"] = "ok", action?: ToastAction) => {
     timers.current.forEach(clearTimeout);
     setLeaving(false);
-    setToast({ id: ++nextId.current, text, tone });
-    const hold = Math.max(tone === "error" ? 3600 : 2200, text.length * 50);
+    setToast({ id: ++nextId.current, text, tone, action });
+    // A toast with a button stays up long enough to reach it.
+    const hold = Math.max(action ? 6000 : tone === "error" ? 3600 : 2200, text.length * 50);
     timers.current = [setTimeout(() => setLeaving(true), hold), setTimeout(() => setToast(null), hold + 200)];
   }, []);
 
@@ -41,6 +49,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         >
           {toast.tone === "ok" ? <Check size={15} weight="bold" className="shrink-0 text-ok-on-dark" /> : <WarningCircle size={15} weight="bold" className="shrink-0 text-danger-on-dark" />}
           <span className="line-clamp-2">{toast.text}</span>
+          {toast.action && (
+            <button
+              type="button"
+              onClick={() => {
+                timers.current.forEach(clearTimeout);
+                setToast(null);
+                toast.action?.run();
+              }}
+              className="press pointer-events-auto -mr-1.5 shrink-0 rounded-full px-2.5 py-0.5 font-semibold underline underline-offset-2 focus-ring"
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
     </div>

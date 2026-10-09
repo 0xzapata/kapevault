@@ -71,12 +71,12 @@ export function TabBar({ tab, issues, onTab }: { tab: Tab; issues: number; onTab
     };
     const place = (edges: Edges) => {
       const p = pose(edges, rest());
-      parts.forEach((el, i) => (el.style.transform = p[i]));
+      for (const [i, el] of parts.entries()) el.style.transform = p[i];
     };
 
     const to = edgesOf(tab);
     const from = now();
-    flight.current?.anims.forEach((a) => a.cancel());
+    for (const a of flight.current?.anims ?? []) a.cancel();
     flight.current = null;
     at.current = to;
     place(to);
@@ -91,7 +91,7 @@ export function TabBar({ tab, issues, onTab }: { tab: Tab; issues: number; onTab
     const resized = new ResizeObserver(() => {
       if (box.clientWidth === width) return; // it also fires once on observe(), mid-flight
       width = box.clientWidth;
-      flight.current?.anims.forEach((a) => a.cancel());
+      for (const a of flight.current?.anims ?? []) a.cancel();
       flight.current = null;
       at.current = edgesOf(tab);
       place(at.current);
@@ -102,12 +102,19 @@ export function TabBar({ tab, issues, onTab }: { tab: Tab; issues: number; onTab
 
   const piece = "tab-pill pointer-events-none absolute left-0 will-change-transform";
   return (
+    // biome-ignore lint/a11y/noNoninteractiveElementToInteractiveRole: ARIA in HTML allows role tablist on a nav
     <nav role="tablist" aria-label="KAPEVault" data-bottom-chrome className="bottom-bar z-20 shrink-0 px-2 pb-[var(--sab)] pt-0.5">
       <div ref={row} className="relative flex">
         {/* The bar first, the caps over it: each end of the scaled bar sits under a solid cap, so no seam shows. */}
-        <span aria-hidden data-pill ref={(el) => void (el && (pieces.current[2] = el))} className={`${piece} origin-left`} style={{ top: PILL_Y, width: MID, height: H }} />
-        <span aria-hidden data-pill ref={(el) => void (el && (pieces.current[0] = el))} className={`${piece} rounded-full`} style={{ top: PILL_Y, width: H, height: H }} />
-        <span aria-hidden data-pill ref={(el) => void (el && (pieces.current[1] = el))} className={`${piece} rounded-full`} style={{ top: PILL_Y, width: H, height: H }} />
+        <span aria-hidden data-pill ref={(el) => {
+          if (el) pieces.current[2] = el;
+        }} className={`${piece} origin-left`} style={{ top: PILL_Y, width: MID, height: H }} />
+        <span aria-hidden data-pill ref={(el) => {
+          if (el) pieces.current[0] = el;
+        }} className={`${piece} rounded-full`} style={{ top: PILL_Y, width: H, height: H }} />
+        <span aria-hidden data-pill ref={(el) => {
+          if (el) pieces.current[1] = el;
+        }} className={`${piece} rounded-full`} style={{ top: PILL_Y, width: H, height: H }} />
         {TABS.map(({ id, label, Icon, weight }) => {
           const on = tab === id;
           return (
@@ -123,7 +130,7 @@ export function TabBar({ tab, issues, onTab }: { tab: Tab; issues: number; onTab
               <Icon size={22} weight={weight} />
               {label}
               {id === "security" && issues > 0 && (
-                <span aria-label={`${issues} to fix`} className="absolute left-[calc(50%+6px)] top-1.5 rounded-full bg-sys-red px-[5px] text-[11px] font-[650] leading-[17px] text-on-accent">
+                <span role="img" aria-label={`${issues} to fix`} className="absolute left-[calc(50%+6px)] top-1.5 rounded-full bg-sys-red px-[5px] text-[11px] font-[650] leading-[17px] text-on-accent">
                   {issues}
                 </span>
               )}

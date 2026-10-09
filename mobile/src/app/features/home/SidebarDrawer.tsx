@@ -1,23 +1,30 @@
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Clock, Code, Devices, Gear, HandCoins, IdentificationCard, Info, Key, Link, Lock, MagnifyingGlass, NotePencil, Package, Plus, ShieldWarning, SquaresFour, Star } from "@phosphor-icons/react";
+import { Clock, Code, Devices, Gear, IdentificationCard, Info, Key, Link, Lock, MagnifyingGlass, NotePencil, Package, Plus, ShieldWarning, SquaresFour, Star, Trash } from "@phosphor-icons/react";
 import { AppIcon, Monogram } from "../../components/icons";
+import { canAddClient } from "../../host/pro";
 import { useBackLayer } from "../../hooks/use-back-layer";
 import { useDragDismiss } from "../../hooks/use-drag-dismiss";
 import { isGone, peopleHeldFor, personKey } from "../../lib/entries";
 import { countIn, type ListScope, type ViewFilter } from "../../lib/filter";
+import { ProSheet } from "../pro/ProSheet";
+import { ProTag } from "../pro/ProTag";
 import type { Entry, Space } from "../../host/types";
 
 interface SidebarDrawerProps {
   open: boolean;
   entries: Entry[];
+  masterWeak: boolean; // counts in Security
   spaces: Space[];
   scope: ListScope;
+  trashCount: number; // items in the Trash (shown beside its row when more than 0)
   query: string;
+  pro: boolean; // KAPEVault Pro owned, from HomeScreen's status
   onQuery: (q: string) => void;
   onScope: (scope: ListScope, title: string) => void;
   onAddClient: (name: string) => Promise<boolean>;
   onLock: () => void;
   onSettings: () => void;
+  onTrash: () => void;
   onAbout: () => void;
   onClose: () => void;
 }
@@ -28,7 +35,6 @@ const SMART: { view: ViewFilter; label: string; tone: string; icon: ReactNode; a
   { view: "login", label: "Logins", tone: "--color-sys-teal", icon: <Key size={13} weight="fill" />, always: true },
   { view: "totp", label: "2FA codes", tone: "--color-sys-indigo", icon: <Clock size={13} weight="bold" />, always: true },
   { view: "note", label: "Notes", tone: "--color-sys-orange", icon: <NotePencil size={13} weight="fill" />, always: true },
-  { view: "payee", label: "Payees", tone: "--color-sys-green", icon: <HandCoins size={13} weight="fill" /> },
   { view: "key", label: "API keys", tone: "--color-sys-purple", icon: <Code size={13} weight="bold" />, always: true },
   { view: "link", label: "File links", tone: "--color-sys-green", icon: <Link size={13} weight="bold" />, always: true },
   { view: "thing", label: "Things", tone: "--color-sys-brown", icon: <Package size={13} weight="fill" /> },
@@ -43,8 +49,9 @@ const section = "track-small mb-1 mt-[22px] px-2 text-[11px] font-semibold text-
 // The PC sidebar as a drawer from the left (the PC's own narrow-window behaviour), rows 44 px tall.
 // Drag it left 1:1 to close; the scrim, a row, or Android's back close it too.
 export function SidebarDrawer(props: SidebarDrawerProps) {
-  const { open, spaces, scope, query, onQuery, onScope, onLock, onSettings, onAbout, onClose } = props;
+  const { open, masterWeak, spaces, scope, query, pro, trashCount, onQuery, onScope, onLock, onSettings, onTrash, onAbout, onClose } = props;
   const entries = props.entries.filter((e) => !isGone(e));
+  const [showPro, setShowPro] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const scrim = useRef<HTMLDivElement>(null);
   const gestures = useDragDismiss(panel, scrim, -1, onClose);
@@ -56,10 +63,12 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
     onClose();
   };
   const people = peopleHeldFor(entries);
-  const issues = countIn(entries, { view: "security" });
+  const issues = countIn(entries, { view: "security" }) + (masterWeak ? 1 : 0);
 
   return (
     <>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the scrim is a touch shortcut for closing the drawer; the back gesture and the drawer's own buttons are the other ways out */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the scrim is a touch shortcut for closing the drawer; the back gesture and the drawer's own buttons are the other ways out */}
       <div ref={scrim} data-open={open || undefined} className="drawer-scrim fixed inset-0 z-40 bg-scrim" onClick={onClose} />
       <aside
         ref={panel}
@@ -85,7 +94,7 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-4">
           <nav aria-label="Smart lists">
             {SMART.map((s) => {
-              const n = countIn(entries, { view: s.view });
+              const n = countIn(entries, { view: s.view }) + (s.view === "security" && masterWeak ? 1 : 0);
               if (!s.always && n === 0) return null;
               const alert = s.view === "security";
               return (
@@ -104,8 +113,11 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
           {spaces.filter((s) => s.kind === "personal").map((s) => <SpaceRow key={s.id} name={s.name} n={countIn(entries, { spaceId: s.id })} on={current({ spaceId: s.id })} onClick={() => pick({ spaceId: s.id }, s.name)} />)}
 
           <div className="relative mt-[22px] mb-1 flex items-center justify-between pl-2">
-            <p className="track-small text-[11px] font-semibold text-ink-3">Clients</p>
-            <AddClient onAdd={props.onAddClient} />
+            <p className="track-small flex items-center gap-1.5 text-[11px] font-semibold text-ink-3">
+              Clients
+              {!pro && <ProTag />}
+            </p>
+            <AddClient pro={pro} onAdd={props.onAddClient} onPro={() => setShowPro(true)} />
           </div>
           {spaces.filter((s) => s.kind === "client").map((s) => <SpaceRow key={s.id} name={s.name} n={countIn(entries, { spaceId: s.id })} on={current({ spaceId: s.id })} onClick={() => pick({ spaceId: s.id }, s.name)} />)}
 
@@ -117,6 +129,15 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
           )}
         </div>
 
+        <div className="px-3 pt-1">
+          <button type="button" onClick={onTrash} className={`${row} active:bg-hover`}>
+            <span className="grid size-[22px] shrink-0 place-items-center rounded-[6px] bg-sys-gray text-on-accent">
+              <Trash size={13} weight="fill" />
+            </span>
+            <span className="flex-1 truncate">Trash</span>
+            {trashCount > 0 && <span className="text-[12px] tabular-nums text-ink-3">{trashCount}</span>}
+          </button>
+        </div>
         <div className="flex gap-1 px-3 pb-2 pt-1">
           <button type="button" onClick={onLock} className="press flex h-11 flex-1 items-center gap-2 rounded-[7px] px-2 text-[13px] font-medium text-ink-2 active:bg-hover focus-ring">
             <Lock size={15} weight="bold" />
@@ -127,6 +148,8 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
           </button>
         </div>
       </aside>
+      {/* Outside the aside: a portal's events still bubble through the React tree into the drag handlers. */}
+      {showPro && <ProSheet onClose={() => setShowPro(false)} />}
     </>
   );
 }
@@ -141,7 +164,8 @@ function SpaceRow({ name, n, on, onClick }: { name: string; n: number; on: boole
   );
 }
 
-function AddClient({ onAdd }: { onAdd: (name: string) => Promise<boolean> }) {
+// Without KAPEVault Pro, + opens the Pro sheet instead (client folders are Pro's).
+function AddClient({ pro, onAdd, onPro }: { pro: boolean; onAdd: (name: string) => Promise<boolean>; onPro: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   async function submit(e: FormEvent) {
@@ -152,7 +176,7 @@ function AddClient({ onAdd }: { onAdd: (name: string) => Promise<boolean> }) {
   }
   if (!open) {
     return (
-      <button type="button" aria-label="Add client" onClick={() => setOpen(true)} className="press -my-2.5 grid size-11 place-items-center rounded-full text-ink-3 focus-ring">
+      <button type="button" aria-label="Add client" onClick={() => (canAddClient(pro) ? setOpen(true) : onPro())} className="press -my-2.5 grid size-11 place-items-center rounded-full text-ink-3 focus-ring">
         <Plus size={13} weight="bold" />
       </button>
     );
@@ -160,6 +184,7 @@ function AddClient({ onAdd }: { onAdd: (name: string) => Promise<boolean> }) {
   return (
     <form onSubmit={submit} className="absolute inset-x-0 top-7 z-10">
       <input
+        // biome-ignore lint/a11y/noAutofocus: the field opens from a tap on Add, so typing is the next step
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}

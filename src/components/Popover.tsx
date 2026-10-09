@@ -95,6 +95,7 @@ export function Popover({ anchor, trigger, label, onClose, className = "", child
   }
 
   return (
+    // biome-ignore lint/a11y/useSemanticElements: the popover is a labelled group floating over the form; a fieldset would add its own box and min-width rules to a fixed-position panel
     <div
       ref={ref}
       role="group"

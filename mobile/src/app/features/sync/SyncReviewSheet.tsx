@@ -16,6 +16,7 @@ function TitleList({ label, titles }: { label: string; titles: string[] }) {
       </h3>
       <ul aria-label={label} className="max-h-36 overflow-y-auto rounded-xl bg-field px-3.5 py-2 text-[13.5px] text-ink">
         {titles.map((title, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: plain titles that can repeat, shown read-only and replaced whole
           <li key={i} className="truncate py-1">
             {title}
           </li>
@@ -52,7 +53,7 @@ export function SyncReviewSheet({ review, onClose }: { review: SyncReview; onClo
           <span className="flex-1" />
           <Button onClick={close}>Not now</Button>
           <Button variant={deletes ? "danger" : "primary"} disabled={busy} onClick={() => apply(close)} className="min-w-[96px]">
-            {busy ? <span className="shimmer inline-block h-[3px] w-12 rounded-[3px] bg-line" aria-label="Applying" /> : "Apply"}
+            {busy ? <span className="shimmer inline-block h-[3px] w-12 rounded-[3px] bg-line" role="img" aria-label="Applying" /> : "Apply"}
           </Button>
         </>
       )}

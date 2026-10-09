@@ -15,7 +15,9 @@ function savedCollapsed(): boolean {
 
 const ease = () => getComputedStyle(document.documentElement).getPropertyValue("--ease-out").trim() || "ease-out";
 
-const cancelSlides = (el: Element) => el.getAnimations().forEach((a) => a.cancel());
+const cancelSlides = (el: Element) => {
+  for (const a of el.getAnimations()) a.cancel();
+};
 
 // A slide that ends off its resting place (the sidebar leaving) holds its last frame: without that
 // it snapped back to x=0, a full sidebar flashing until React removed it.

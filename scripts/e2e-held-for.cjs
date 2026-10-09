@@ -2,9 +2,9 @@
 // the detail, the sidebar section and its filter, search by person, and Hand back - from the list
 // button and the person's menu, with and without passwords. Part of npm run e2e. Throwaway vault,
 // mock names only. Page screenshots (light + dark) in %TEMP%\kapevault-e2e-v2.
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { createHarness, shows, gone, opened, waitFor } = require("./e2e-harness.cjs");
 
 const SHOTS = path.join(os.tmpdir(), "kapevault-e2e-v2");
@@ -12,7 +12,7 @@ fs.mkdirSync(SHOTS, { recursive: true });
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-heldfor-"));
 const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-e2e-heldfor-out-"));
 const { check, launch, report } = createHarness();
-const MASTER = "mock kettle harbor pass";
+const MASTER = "mock kettle harbor pass orbit gazelle";
 const PASSWORD = "Mock-Lola-Bank-Pass-7";
 
 (async () => {
@@ -46,7 +46,7 @@ const PASSWORD = "Mock-Lola-Bank-Pass-7";
     const spaceId = (await b.view()).spaces[0].id;
     const base = { spaceId, tags: [], favorite: false, notes: "" };
     await b.saveEntry({ ...base, kind: "login", title: "Mock Own GitHub", username: "mock.me", password: "mock-own-pass-9", url: "https://github.com" });
-    await b.saveEntry({ ...base, kind: "payee", title: "Mock Lola GCash", who: "Mock Lola", provider: "GCash", number: "09171234567", heldFor: "Mock Lola" });
+    await b.saveEntry({ ...base, kind: "thing", title: "Mock Lola passport", spot: "blue folder", heldFor: "Mock Lola" });
   });
   check("the Held for section shows once one item is held for someone", await shows(aside.getByText("Held for", { exact: true })));
 
@@ -112,7 +112,7 @@ const PASSWORD = "Mock-Lola-Bank-Pass-7";
   check("and opens it, like the Emergency Kit", await waitFor(async () => (await opened(app)).some(([k, p]) => k === "path" && p === plainPdf)));
   check("a toast names the file", await shows(page.getByRole("status").filter({ hasText: "Saved mock-hand-back.pdf" })));
   const plainHtml = (await printed()).at(-1) ?? "";
-  check("the printout lists her items", ["Mock Rural Bank", "Mock Lola GCash", "Mock Lola gate code", "mock.lola", "09171234567"].every((t) => plainHtml.includes(t)));
+  check("the printout lists her items", ["Mock Rural Bank", "Mock Lola passport", "Mock Lola gate code", "mock.lola", "blue folder"].every((t) => plainHtml.includes(t)));
   check("without the tick: no password, no note body", !plainHtml.includes(PASSWORD) && !plainHtml.includes("Mock gate 4321") && plainHtml.includes("Passwords are not on this page."));
   check("never another person's items", !plainHtml.includes("Mock Own GitHub") && !plainHtml.includes("mock-own-pass-9"));
 

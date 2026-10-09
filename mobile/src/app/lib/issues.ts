@@ -1,5 +1,5 @@
-// Made from the PC's src/features/vault/lib/issues.ts by scripts/brands-sync.mjs - change it there, then run the script.
-import { plural } from "./plural";
+// Made from the PC's src/features/vault/lib/issues.ts by scripts/sync-shared.mjs - change it there, then run the script.
+import { plural } from "@core";
 import type { EntryKind, Issue } from "../host/types";
 
 // Months or years read better than "400 days" once a password is past a year old.

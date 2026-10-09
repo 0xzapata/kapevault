@@ -60,7 +60,9 @@ class VaultKeystorePlugin : Plugin() {
         forget() // a cancelled enable leaves it off, never half-replaced
         val cipher = try {
             Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, newWrapKey()) }
-        } catch (e: GeneralSecurityException) {
+        } catch (e: Exception) {
+            // GeneralSecurityException, or ProviderException from the TEE fallback in newWrapKey (a
+            // RuntimeException): either way the key bytes must not outlive the call.
             vaultKey.fill(0)
             return call.reject("This phone cannot make a fingerprint key.", "unsupported")
         }
@@ -180,6 +182,7 @@ class VaultKeystorePlugin : Plugin() {
             .setUserAuthenticationRequired(true)
             .setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG) // 0 = a prompt for every use
             .setInvalidatedByBiometricEnrollment(true)
+            .setUnlockedDeviceRequired(true) // unusable while the phone is locked
             .setIsStrongBoxBacked(strongBox)
             .build()
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE).run {

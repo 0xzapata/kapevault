@@ -3,13 +3,13 @@ name: CI
 # Checks every pushed branch and every PR: the root package on Linux and Windows, and mobile/
 # on Linux (plus Gradle wrapper validation). `npm ci` on a clean Linux machine is the point:
 # a lockfile written by Windows npm that Linux rejects fails in minutes, not at deploy time.
-# CI never deploys and holds no production credentials: releases are built and signed by hand,
-# outside CI.
+# CI never deploys and holds no secrets: it only reads the repo. Releases are built by release.yml
+# on a version tag (RELEASING.md), never here.
 
 on:
   # Every branch, not just main - feature branches are often pushed
-  # without opening a PR, so `branches: [main]` was leaving those
-  # 100+ commits completely unchecked until they landed on main.
+  # without opening a PR, so `branches: [main]` would leave their
+  # commits unchecked until they landed on main.
   push:
   pull_request:
   workflow_dispatch:
@@ -32,18 +32,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       # The exact Node the host will install. .nvmrc must be a full version.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
 
+      # Biome, lint rules only (no formatter). One config covers src/, core/, electron/, scripts/ and
+      # mobile/ (biome.jsonc).
       - name: Lint
-        run: npm run lint --if-present
+        run: npm run lint
+
+      # The app (src/, tsconfig.json) and the shared JavaScript in core/ and electron/ (tsconfig.js.json).
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Production tree only: the dev tree carries build-tooling advisories that never ship.
+      - name: Audit
+        run: npm audit --omit=dev --audit-level=high
+
+      # Electron is a devDependency, so the step above never looks at the runtime that ships
+      # (Chromium and Node included). This audits the exact locked version on its own.
+      - name: Audit Electron
+        run: node scripts/audit-electron.mjs
 
       - name: Test
         run: npm test --if-present
@@ -60,11 +77,13 @@ jobs:
   # here on purpose - those are Linux-covered already and Windows minutes cost more.
   test-windows:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -73,6 +92,16 @@ jobs:
 
       - name: Test
         run: npm test --if-present
+
+      # Every other test runs the app unpacked, where the packaged-only guards never run: from
+      # 2026-10-04 to 2026-10-09 every packaged build exited at startup and nothing saw it. Build the
+      # unpacked app as the installer does, check its fuses, and start it (scripts/packaged-smoke.mjs).
+      - name: Packaged app starts
+        run: |
+          npm run build
+          npx electron-builder --win --dir --publish never
+          node scripts/check-fuses.mjs
+          node scripts/packaged-smoke.mjs
 
   # The phone app (mobile/) has its own package.json and lockfile, so the root job never sees
   # it. Its tests also load the PC's electron/*.cjs and core/ from this checkout (no root npm
@@ -86,20 +115,70 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
-      - uses: gradle/actions/wrapper-validation@v6
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: mobile/package-lock.json
 
+      # Gradle needs a JDK; the phone build is on 21 (mobile/README.md).
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - run: npm ci
+
+      # Linted by the root job (biome.jsonc covers mobile/src and mobile/scripts).
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Audit
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Test
         run: npm test
 
       - name: Build
         run: npm run build
+
+      # Dependabot bumps Gradle libraries weekly. mobile/android/gradle/verification-metadata.xml
+      # pins every artifact by SHA-256, but nothing here ever resolved them, so a bump without
+      # hashes went green and only failed on the next local release build. These tasks resolve the
+      # real release and debug classpaths (the .aar/.jar files, not just the dependency tree) and
+      # fail on any artifact that is missing from, or does not match, the metadata. `cap sync`
+      # writes the generated Capacitor files the Gradle project includes. Never fix a red here
+      # with --write-verification-metadata: it trusts whatever was just downloaded. Check the
+      # new artifacts first.
+      - name: Gradle dependency verification
+        run: |
+          npx cap sync android
+          ./android/gradlew -p android :app:checkPlayReleaseAarMetadata :app:checkPlayDebugAarMetadata :app:checkFossReleaseAarMetadata :app:checkFossDebugAarMetadata
+
+  # Scans the full git history against .gitleaks.toml. gitleaks-action needs no licence key on a
+  # personal account (this repo's owner); if the repo ever moves to an organization, add a
+  # GITLEAKS_LICENSE secret or switch this job to the gitleaks binary.
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The verdict is in the job log; the SARIF upload only failed the scan when the
+          # account's artifact storage quota was full (2026-10-09).
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"

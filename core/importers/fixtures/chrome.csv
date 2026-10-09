@@ -1,0 +1,5 @@
+name,url,username,password,note
+mock.example.com,https://mock.example.com/login,mock.user,mock-pass-1,
+Mock App,android://hash@com.example.mock/,mock.app,mock-pass-2,"two words, a comma"
+,,,,
+No Password Site,https://nopass.example.com,mock.user,,

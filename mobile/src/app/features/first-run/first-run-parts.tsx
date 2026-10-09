@@ -41,8 +41,9 @@ export function useFingerprintOffer(onDone: () => void, fail: (message: string) 
 // The step counter under both flows.
 export function Steps({ step, of }: { step: number; of: number }) {
   return (
-    <div className="track-small mt-5 flex items-center justify-center gap-1.5 text-[12px] font-semibold text-ink-3" aria-label={`Step ${step} of ${of}`}>
+    <div className="track-small mt-5 flex items-center justify-center gap-1.5 text-[12px] font-semibold text-ink-3">
       {Array.from({ length: of }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed row of step dots, never reordered
         <i key={i} className={`h-1 w-5 rounded-[3px] transition-colors duration-300 ease-out ${i < step ? "bg-accent" : "bg-line-strong"}`} />
       ))}
       <span className="ml-1.5">
@@ -75,6 +76,7 @@ export function BackupPicker({ backups, picked, onPick }: { backups: Backup[]; p
       {backups.map((b, i) => {
         const on = b.key === picked;
         return (
+          // biome-ignore lint/a11y/useSemanticElements: a radio drawn as a button row; a native radio input cannot be styled as this control
           <button key={b.key} type="button" role="radio" aria-checked={on} onClick={() => onPick(b.key)} className="press flex min-h-14 w-full items-center gap-3 border-b border-line px-3.5 py-2 text-left last:border-b-0 focus-ring">
             <span className={`grid size-5 shrink-0 place-items-center rounded-full border-2 ${on ? "border-accent" : "border-line-strong"}`}>{on && <span className="swap-in size-2.5 rounded-full bg-accent" />}</span>
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">

@@ -1,8 +1,13 @@
 # Offline text reading for "Scan a label" (Windows PowerShell 5.1, WinRT Windows.Media.Ocr).
 # Node runs this through -EncodedCommand (the file sits inside app.asar in the installed app) and
 # writes the photo to stdin as base64, so the image never touches the disk. Prints exactly ONE JSON line.
+# The script cannot ride stdin itself here: the photo does, and keeping the photo out of the script
+# text keeps it out of PowerShell's script-block log.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# Constrained Language Mode blocks the .NET calls below: no OCR here, and the form lets the user type.
+if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') { Write-Output '{"status":"Unavailable"}'; return }
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Write-Result($obj) { [Console]::Out.WriteLine(($obj | ConvertTo-Json -Compress)) }

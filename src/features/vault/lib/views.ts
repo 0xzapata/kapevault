@@ -18,7 +18,6 @@ export const VIEWS: ViewDef[] = [
   { id: "login", label: "Logins", heading: "Logins", tone: "--color-sys-teal" },
   { id: "totp", label: "2FA codes", heading: "2FA codes", tone: "--color-sys-indigo" },
   { id: "note", label: "Notes", heading: "Secure notes", tone: "--color-sys-orange", newKind: "note" },
-  { id: "payee", label: "Payees", heading: "Payees", tone: "--color-sys-green", hideWhenEmpty: true, newKind: "payee" },
   { id: "key", label: "API keys", heading: "API keys", tone: "--color-sys-purple", newKind: "key" },
   { id: "link", label: "File links", heading: "File links", tone: "--color-sys-green", newKind: "link" },
   { id: "thing", label: "Things", heading: "Things", tone: "--color-sys-brown", hideWhenEmpty: true, newKind: "thing" },
@@ -27,6 +26,7 @@ export const VIEWS: ViewDef[] = [
   { id: "security", label: "Security", heading: "Security", tone: "--color-sys-red" }, // gray while there is nothing to fix
   { id: "closing", label: "Closing", heading: "Closing", tone: "--color-sys-orange", hideWhenEmpty: true },
   { id: "closed", label: "Closed", heading: "Closed", tone: "--color-sys-gray", hideWhenEmpty: true },
+  { id: "trash", label: "Trash", heading: "Trash", tone: "--color-sys-gray", hideWhenEmpty: true }, // its row sits at the foot of the sidebar, not with the smart lists
 ];
 
 const BY_ID = new Map(VIEWS.map((v) => [v.id, v]));
