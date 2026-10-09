@@ -182,3 +182,7 @@ jobs:
           # The verdict is in the job log; the SARIF upload only failed the scan when the
           # account's artifact storage quota was full (2026-10-09).
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          # The action's own default (8.24.3) predates [[allowlists]] in .gitleaks.toml and ignores
+          # it, so the golden fixtures' keySalt fails any scan that reaches them. Pinned to the
+          # version the allowlist was proven on (a planted token in a fixture is still caught).
+          GITLEAKS_VERSION: "8.30.1"
