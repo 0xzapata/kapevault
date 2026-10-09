@@ -1,4 +1,5 @@
 // Spaces: the personal space every vault starts with, plus one per client.
+import { cleanPhoto } from "./devices.js";
 import { cleanText, removeEntries } from "./entries.js";
 /** @import { VaultData } from "./entries.js" */
 
@@ -22,6 +23,21 @@ export function renameSpace(data, id, name) {
   if (!clean) throw new Error("Name is required");
   if (!data.spaces.some((s) => s.id === id)) throw new Error("Unknown space");
   data.spaces = data.spaces.map((s) => (s.id === id ? { ...s, name: clean } : s));
+}
+
+// A space's own picture in place of its initials: a small square JPEG (src/lib/photo.ts prepareAvatar).
+// It syncs with the name (a space is one field group), so it is kept far smaller than an item's photo.
+export const MAX_SPACE_PHOTO_BYTES = 32 * 1024;
+
+/** @param {VaultData} data @param {string} id @param {string} photo "" removes it */
+export function setSpacePhoto(data, id, photo) {
+  if (!data.spaces.some((s) => s.id === id)) throw new Error("Unknown space");
+  const clean = cleanPhoto(photo, MAX_SPACE_PHOTO_BYTES);
+  data.spaces = data.spaces.map((s) => {
+    if (s.id !== id) return s;
+    const { photo: _old, ...rest } = s;
+    return clean ? { ...rest, photo: clean } : rest;
+  });
 }
 
 // Deleting a client either moves its items to another space or deletes them with it.

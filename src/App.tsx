@@ -10,6 +10,7 @@ import { SettingsSheet } from "@/features/settings/SettingsSheet";
 import { ShortcutsSheet } from "@/features/keyboard/ShortcutsSheet";
 import { TrustSheet } from "@/features/trust/TrustSheet";
 import { restoredNote } from "@/features/cloud/lib/restore-note";
+import { DEVICE } from "@/lib/platform";
 import { useShortcuts } from "@/features/keyboard/use-shortcuts";
 import { Sidebar } from "@/features/vault/components/Sidebar";
 import { EntryList } from "@/features/vault/components/EntryList";
@@ -25,9 +26,11 @@ import { personKey } from "@/features/held-for/lib/held-for";
 import { isGone } from "@/features/closing/lib/lifecycle";
 import { useVault } from "@/features/vault/hooks/use-vault";
 import { useInstallFolderWriters } from "@/features/security/hooks/use-install-folder";
+import { useAirWallNotice } from "@/features/air-wall/hooks/use-air-wall-notice";
 import { viewOf } from "@/features/vault/lib/views";
 import { copyCode, copySecretOf, copyUsername, openEntry, primaryAction } from "@/features/vault/lib/entry-actions";
 import { ipcMessage } from "@/lib/ipc-message";
+import { prepareAvatar } from "@/lib/photo";
 import type { Entry, EntryKind, Space, VaultView, ViewFilter } from "@/features/vault/types";
 
 // null = form closed, { kind } = add, an Entry = edit that entry
@@ -56,6 +59,7 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
   const [revision, setRevision] = useState(0);
   const space = vault.spaces.find((s) => s.id === vault.spaceId);
   const selected = vault.selected;
+  useAirWallNotice((text, openSecurity) => toast(text, "error", { label: "Open Settings", run: openSecurity }), () => setSettings({ section: "security" }));
 
   // "Show in KAPEVault" from quick search. reveal only sets state, so the first render's copy is fine.
   const reveal = vault.reveal;
@@ -217,6 +221,13 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
         toast(ipcMessage(e), "error");
       }
     },
+    onSpacePhoto: async (id: string, image: Blob | null) => {
+      try {
+        await vault.setSpacePhoto(id, image ? await prepareAvatar(image) : "");
+      } catch (e) {
+        toast(ipcMessage(e), "error");
+      }
+    },
     onDeleteSpace: setDeleting,
     onMoveEntry: moveEntry,
     onLock: lock,
@@ -370,7 +381,7 @@ function VaultApp({ initial, onLock }: { initial: VaultView; onLock: () => void 
           onRestored={(next, kept) => {
             vault.load(next);
             setSettings(null);
-            toast(restoredNote(kept));
+            toast(restoredNote(kept, DEVICE));
           }}
           onShowShortcuts={() => setShortcutsOpen(true)}
         />

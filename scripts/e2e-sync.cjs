@@ -386,8 +386,43 @@ async function syncNow(page) {
   await syncNow(b.page);
   await b.page.waitForTimeout(1000);
   check("a removed PC's change never reaches B", !(await listed(b.page, "Mock from the removed PC").isVisible()));
-  check("A's line says it was removed", await lineSays(a.page, "This device was removed from sync"));
+  // A learns of its removal through a review first (SYNC.md 3.9): nothing switches it off unseen.
+  // B's snapshot (the removal) is in it; C's joins it or not, depending on which sync caught it.
+  const waiting = /^Changes from Mock PC B( and Mock PC C)? wait for you$/;
+  let lineA = "";
+  const lineWaits = async () => {
+    lineA = ((await line(a.page).textContent().catch(() => "")) ?? "").trim();
+    return waiting.test(lineA);
+  };
+  check("A's line says changes wait for it, not yet that it was removed", await waitFor(lineWaits, 15000), lineA);
+  await line(a.page).click();
+  const removalReview = a.page.getByRole("dialog", { name: "Check before syncing" });
+  check("A's review says it was removed from sync, without blaming C", await shows(removalReview.getByText("This device was removed from sync on another device. After Apply it syncs no more."), 15000));
+  await a.page.screenshot({ path: path.join(SHOTS, "e2e-sync-7c-removed-review.png") });
+  await removalReview.getByRole("button", { name: "Apply" }).click();
+  await gone(removalReview);
+  check("after Apply, A's line says it was removed", await lineSays(a.page, "This device was removed from sync"));
   check("B's line keeps the reminder until the master password changes", await lineSays(b.page, "Finish locking out Mock PC A"));
+
+  // Join again: A types the vault's master password and syncs under a new install id.
+  const oldIdA = installIdOf(dirA);
+  await line(a.page).click();
+  const joinAgain = a.page.getByRole("dialog", { name: "Sync" }).getByRole("form", { name: "Join again" });
+  check("A's Sync sheet offers Join again", await shows(joinAgain.getByText("This device was removed from sync. Type this vault's master password to join again.")));
+  await a.page.screenshot({ path: path.join(SHOTS, "e2e-sync-7d-join-again.png") });
+  await joinAgain.getByLabel("Master password").fill("not the right one");
+  await joinAgain.getByRole("button", { name: "Join again" }).click();
+  check("a wrong master password is refused", await shows(joinAgain.getByText("Wrong master password.")));
+  await joinAgain.getByLabel("Master password").fill(NEW_MASTER);
+  await joinAgain.getByRole("button", { name: "Join again" }).click();
+  check("the right one brings A back: the line no longer says removed", await waitFor(async () => !((await line(a.page).textContent().catch(() => "")) ?? "").includes("removed from sync"), 15000));
+  await a.page.getByRole("dialog", { name: "Sync" }).getByRole("button", { name: "Done" }).click();
+  await gone(a.page.getByRole("dialog"));
+  check("A took a new install id", installIdOf(dirA) !== oldIdA);
+  await bridge(a.page, (api, spaceId) => api.saveEntry({ kind: "note", spaceId, title: "Mock from the PC that joined again", body: "a" }), ids.spaceId);
+  await syncNow(a.page);
+  await syncNow(b.page);
+  check("sync works again: B gets what A saved after joining again", await shows(listed(b.page, "Mock from the PC that joined again"), 15000));
 
   for (const [name, errors] of [["A", a.errors], ...opened, ["B", b.errors]]) check(`no page errors on ${name}`, errors.length === 0, errors.join(" | "));
   await a.app.close();

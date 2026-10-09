@@ -63,7 +63,7 @@ export function SnapshotList({ snapshots, onRestore }: SnapshotListProps) {
     setMaster("");
     if (!result.ok) setError(result.error);
     else {
-      setRestored(restoredNote(result));
+      setRestored(restoredNote(result, DEVICE));
       setConfirming(null);
     }
   }

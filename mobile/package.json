@@ -15,7 +15,7 @@
     "aab:release": "npm run build && cap sync android && node scripts/apk-release.mjs --bundle",
     "notices:android": "node scripts/android-notices.mjs --check",
     "proof": "node scripts/proof.mjs",
-    "test": "node --import ./src/app/host/test/register.mjs --test \"src/app/host/**/*.test.mjs\" \"src/app/hooks/**/*.test.mjs\" \"src/app/features/**/*.test.mjs\" \"scripts/*.test.mjs\""
+    "test": "node --import ./src/app/host/test/register.mjs --test \"src/app/host/**/*.test.mjs\" \"src/app/hooks/**/*.test.mjs\" \"src/app/components/**/*.test.mjs\" \"src/app/features/**/*.test.mjs\" \"scripts/*.test.mjs\""
   },
   "dependencies": {
     "@capacitor/android": "8.5.2",

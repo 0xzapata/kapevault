@@ -15,6 +15,7 @@ export interface Space {
   id: string;
   name: string;
   kind: SpaceKind;
+  photo?: string; // set on the PC: a small square JPEG data URL, shown in place of the initials
 }
 
 export type Issue =
@@ -247,7 +248,7 @@ export interface ConflictCopy {
 // this vault to another device's newer master password (key). Titles only, never a secret.
 export interface SyncReview {
   from: string[]; // device names
-  reasons: ("deletes" | "secrets" | "epoch" | "key")[];
+  reasons: ("deletes" | "secrets" | "epoch" | "key" | "removed")[];
   added: string[];
   changed: string[];
   deleted: string[];

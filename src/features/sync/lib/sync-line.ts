@@ -33,6 +33,9 @@ export function syncLine(status: SyncStatus, ago: (ms: number) => string): SyncL
   return { text: `Not synced yet${manual}`, tone: "quiet" };
 }
 
+// A device that was removed from sync can join again with the vault's master password (SYNC.md 3.9).
+export const canRejoin = (status: SyncStatus) => status.off === "removed";
+
 // Why a sync waits for the user, one sentence per reason.
 export function reviewSentences(review: SyncReview): string[] {
   const who = deviceNames(review.from);
@@ -40,6 +43,8 @@ export function reviewSentences(review: SyncReview): string[] {
     if (reason === "deletes") return `${who} wants to delete ${items(review.deleted.length)}.`;
     if (reason === "secrets") return `${who} changed passwords or other secrets on ${items(review.secretItems)}.`;
     if (reason === "epoch") return `${who} restored a backup and made it the vault on all devices.`;
+    // Not `who`: a review gathers every device it merges, and nothing records which one did the removal.
+    if (reason === "removed") return "This device was removed from sync on another device. After Apply it syncs no more.";
     return `${who} set a new master password. After Apply it unlocks this vault too.`;
   });
 }

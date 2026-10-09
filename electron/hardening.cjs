@@ -4,7 +4,7 @@
 // point in startup where it must run.
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
-const { checkPath } = require("./file-access.cjs");
+const { checkPath, isNetworkPath } = require("./file-access.cjs");
 
 const PREVIEW_CSP = [
   "default-src 'none'",
@@ -92,12 +92,17 @@ async function hardenSession({ session, protocol, net, devUrl, linkedFolders }) 
   // One that reached it would load over SMB and offer the NTLM hash (<img src="file://host/share/x.jpg">,
   // proved on Electron 44, audit finding M2 in SECURITY-AUDIT-2026-09-28.md). Only a page's requests are
   // refused: main's own net.fetch (the kapevault-file handler, which checked the path against the linked
-  // folders and a network folder's click) passes here too, with no webContentsId (proved) - refusing it
-  // broke previews from a network folder or a mapped drive.
+  // folders) passes here too, with no webContentsId (proved) - refusing it broke previews from a mapped
+  // drive. The handler itself refuses a network path (below): no click gates a protocol request, and
+  // looking one up freezes main ~21 s.
   session.defaultSession.webRequest.onBeforeRequest((details, done) => done({ cancel: details.url.startsWith("file:") && details.webContentsId !== undefined }));
   protocol.handle("kapevault-file", async (request) => {
     try {
-      const target = checkPath(linkedFolders(), decodeURIComponent(new URL(request.url).pathname.slice(1)));
+      const wanted = decodeURIComponent(new URL(request.url).pathname.slice(1));
+      // \\server\share, //server and \\?\UNC\: refused by name, before any disk call (the page-side click
+      // gate does not cover a protocol request, and checkPath's disk lookup contacts the host).
+      if (isNetworkPath(wanted)) return new Response("Not allowed", { status: 403 });
+      const target = checkPath(linkedFolders(), wanted);
       if (!fs.statSync(target).isFile()) return new Response("Not a file", { status: 404 });
       // Forward Range headers so video and audio can seek.
       const file = await net.fetch(pathToFileURL(target).href, { headers: request.headers, bypassCustomProtocolHandlers: true });

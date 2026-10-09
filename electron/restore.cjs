@@ -61,8 +61,11 @@ function createRestores({ vault, cloud, throttledUnlock, device }) {
     // in SECURITY-AUDIT-2026-09-28.md: restoring your own backup at the lock screen reset it between guesses).
     const check = await throttledUnlock(() => vault.verifyBackup(text, String(master ?? "")), { local: false });
     if (!check.ok) return check;
+    // check.carry: what the vault here keeps through the restore (its device removals, and its key after a
+    // lock-out), read before keepBeforeRestore's upload; its key copy is wiped with the backup's.
     const abort = (result) => {
       check.opened.key.fill(0);
+      check.carry?.key?.key.fill(0);
       return result;
     };
     let keep = null; // stays null when nothing could be kept and the page confirmed replacing anyway
@@ -87,7 +90,7 @@ function createRestores({ vault, cloud, throttledUnlock, device }) {
     // Nothing kept: the slot stays, as the confirm said.
     let slot;
     if (fromReplaced && keep) slot = keep.kept === "local" ? "staged" : "clear";
-    const { slotOk, ...result } = vault.commitRestore(text, check.opened, { cloud: keep?.cloud ?? null, slot });
+    const { slotOk, ...result } = vault.commitRestore(text, check.opened, { cloud: keep?.cloud ?? null, slot, carry: check.carry });
     onRestored(result);
     return { ...result, keptCopy: keep?.kept === "local" && slotOk };
   }

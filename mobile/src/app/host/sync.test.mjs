@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isConflictCopy, snapshotKey } from "@core";
 import { createRealHost } from "./real-host.ts";
+import { olderKeyQuestion } from "./restore.ts";
 import { syncLineText } from "../features/sync/sync-text.ts";
 import { R2_KEYS, fakeClipboard, fakeKeystore, fakeR2, fetchTransport, fillNearCap, nodeFs, pc, pcDevice, tempDir, until, wait, withPro } from "./test/fixtures.mjs";
 
@@ -466,6 +467,35 @@ test("a new master password on the PC: the phone says why it cannot sync, asks f
   assert.ok(!fs.existsSync(path.join(phone.dir, "unlock-throttle.json")), "cleared by this vault's own unlock");
 });
 
+// Security re-scan 2026-10-10 (as on the PC): restoring a backup made before a lock-out put back the old
+// key and dropped the removal, so the lost device's copy of that key opened every later upload.
+test("restoring a backup from before a lock-out keeps the removal and the new key, from a file or from R2", async (t) => {
+  const { r2, desk, phone } = await pair(t);
+  const LOST = "eeeeeeee-1c1d-4e5f-8a9b-0c1d2e3f4a5b";
+  const fileBefore = fs.readFileSync(phone.file, "utf8"); // under MASTER, before the removal
+  const snapshotBefore = [...r2.objects.keys()].filter((k) => pc.cloud.snapshotOwner(k) === PC_ID).sort().at(-1);
+  desk.vault.revokeDevice(LOST);
+  assert.equal((await desk.vault.changeMaster(MASTER, NEW_MASTER)).ok, true); // the lock-out, finished on the PC
+  await pcSync(desk);
+  await phone.sync();
+  assert.deepEqual(await phone.host.adoptSyncKey(NEW_MASTER), { ok: true });
+  assert.equal((await phone.host.applySync()).ok, true);
+  assert.ok((await phone.onDisk(NEW_MASTER)).sync.devices[LOST].revokedAt);
+
+  const keptOut = async (what) => {
+    const data = await phone.onDisk(NEW_MASTER);
+    assert.ok(data, `${what}: the restored vault opens with the new master password`);
+    assert.equal(await pc.crypto.openFile(MASTER, JSON.parse(fs.readFileSync(phone.file, "utf8"))), null, `${what}: and not with the old one`);
+    assert.ok(data.sync.devices[LOST].revokedAt, `${what}: the lost device stays removed`);
+    assert.equal(data.sync.keys.at(-1).salt, JSON.parse(fs.readFileSync(phone.file, "utf8")).kdf.salt, `${what}: the key history ends with the file's key`);
+  };
+  assert.deepEqual(await phone.host.restoreFile(fileBefore, MASTER), { ok: true });
+  await keptOut("a file");
+  fs.rmSync(path.join(phone.dir, "replaced.kapevault"), { force: true }); // the slot, free for the next restore
+  assert.deepEqual(await phone.host.restore(R2_KEYS, snapshotBefore, MASTER, undefined, true), { ok: true });
+  await keptOut("an R2 backup");
+});
+
 test("the phone under the old master password is 'behind' on the PC until it adopts the new one", async (t) => {
   const { desk, phone, personal } = await pair(t);
   assert.equal((await desk.vault.changeMaster(MASTER, NEW_MASTER)).ok, true);
@@ -552,6 +582,13 @@ test("removed on the PC: the phone stops syncing, says so, and never rejoins wit
   desk.sync.revoke(ref);
   await pcSync(desk);
   await phone.sync();
+  // Security re-scan 2026-10-10: anyone with the vault key could switch the phone off for good, unseen.
+  // The removal waits for a review, and nothing changes on the phone before Apply.
+  const asked = await phone.status();
+  assert.deepEqual(asked.review?.reasons, ["removed"]);
+  assert.equal(asked.removed, false);
+  assert.equal((await phone.onDisk()).sync.devices[phone.installId()].revokedAt, undefined, "nothing written before Apply");
+  assert.equal((await phone.host.applySync()).ok, true);
   const status = await phone.status();
   assert.equal(status.removed, true);
   assert.equal(syncLineText(status, () => "").text, "This phone was removed from sync");
@@ -579,6 +616,16 @@ test("no-change syncs send nothing", async (t) => {
   }
   await wait(100);
   assert.equal(puts(r2), before);
+});
+
+test("the older-key question is true for a restore that drops the key and for one that keeps it", () => {
+  const drops = olderKeyQuestion("DESKTOP-4F2A", false);
+  assert.match(drops, /before the master password was changed on DESKTOP-4F2A/);
+  assert.match(drops, /will see this phone as behind/);
+  assert.doesNotMatch(drops, /keeps this phone's current master password/);
+  const keeps = olderKeyQuestion("DESKTOP-4F2A", true);
+  assert.match(keeps, /The restore keeps this phone's current master password\. If that one is older than the one on DESKTOP-4F2A/);
+  assert.match(keeps, /Restore it anyway\?$/);
 });
 
 test("restoring a backup made before a newer master password: said first, restored only on Restore anyway", async (t) => {

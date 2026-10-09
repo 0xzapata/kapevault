@@ -175,6 +175,16 @@ test("clients can be renamed, and deleted by moving or removing their items", as
   assert.throws(() => vault.renameSpace(personal, "  "), /required/);
 });
 
+test("a space's photo is saved, shown in the page's view, and removed", async () => {
+  const { vault, spaceId: personal } = await seeded();
+  const photo = `data:image/jpeg;base64,${btoa("\xff\xd8\xff mock photo")}`;
+  vault.setSpacePhoto(personal, photo);
+  assert.equal(vault.publicView().spaces.find((s) => s.id === personal).photo, photo);
+  assert.throws(() => vault.setSpacePhoto(personal, "data:image/png;base64,AAAA"), /could not be saved/);
+  vault.setSpacePhoto(personal, "");
+  assert.equal(Object.hasOwn(vault.publicView().spaces.find((s) => s.id === personal), "photo"), false);
+});
+
 test("touch records use without uploading a backup", async () => {
   let uploads = 0;
   const file = tempVault();

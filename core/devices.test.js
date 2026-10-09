@@ -93,6 +93,15 @@ test("the label photo must be a JPEG data URL under the size cap; empty removes 
   assert.throws(() => cleanPhoto(42), /Photo could not be saved/);
 });
 
+test("a photo whose base64 does not decode is refused, so no app ever tries to draw it", () => {
+  // The phone decodes the whole body with atob to show it; a body cut mid-group made atob throw and
+  // blanked the app (security re-scan 2026-10-10). Only the first 4 characters used to be checked.
+  for (const body of ["/9j/A", "/9j/4AA", "/9j/4AAQ=A", "/9j/4AAQ==", "/9j/4AAQ!!!!"]) {
+    assert.throws(() => cleanPhoto(`data:image/jpeg;base64,${body}`), /Photo could not be saved/, body);
+  }
+  assert.equal(cleanPhoto(`data:image/jpeg;base64,${btoa("\xff\xd8\xff\xe0 ok")}`), `data:image/jpeg;base64,${btoa("\xff\xd8\xff\xe0 ok")}`);
+});
+
 test("a TP-Link router label: admin page and login, Wi-Fi name and password, MAC, serial split by OCR", () => {
   assert.deepEqual(parseLabel(TP_LINK), {
     type: "router",

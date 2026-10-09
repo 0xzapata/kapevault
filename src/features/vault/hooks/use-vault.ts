@@ -148,6 +148,10 @@ export function useVault(initial: VaultView) {
     setData(await vaultApi.renameSpace(id, name));
   }
 
+  async function setSpacePhoto(id: string, photo: string) {
+    setData(await vaultApi.setSpacePhoto(id, photo));
+  }
+
   async function deleteSpace(id: string, moveToId: string | null) {
     setData(await vaultApi.deleteSpace(id, moveToId));
     const landing = moveToId ?? data.spaces.find((s) => s.kind === "personal")?.id;
@@ -183,6 +187,7 @@ export function useVault(initial: VaultView) {
     moveEntry,
     addSpace,
     renameSpace,
+    setSpacePhoto,
     deleteSpace,
     load: setData,
   };

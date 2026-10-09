@@ -3,7 +3,7 @@
 // (core), and commit - or hold the merge for the user's review when it would change too much. The upload
 // after it is the normal backup of the merged vault. The rules live in core/ (shared with the PC); this
 // is the phone's host around them.
-import { isConflictCopy, isNewerData, isNewerKey, isNewerVaultFile, isTrashed, logEntry, mergeRemotes, nameOf, newerProblem, pickSnapshots, readCopyTitle, snapshotStamp, readSnapshotKey, readSync, reviewReasons, reviewView, sharedState, syncChanges, withEntry } from "@core";
+import { isConflictCopy, isNewerData, isNewerKey, isTrashed, logEntry, mergeRemotes, nameOf, newerProblem, pickSnapshots, readCopyTitle, snapshotStamp, readSnapshotKey, readSync, reviewReasons, reviewView, sharedState, syncChanges, withEntry } from "@core";
 import { listSnapshots } from "./cloud";
 import { syncAllowed } from "./pro";
 import { sha256Hex } from "./sha256";
@@ -68,7 +68,7 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
   let objects: R2Object[] = []; // the last listing: the devices in the Sync sheet
   let merged = new Map<string, string>(); // device -> the snapshot key this session already has in it
   let unopened = new Set<string>(); // snapshotStamp()s that would not open: not downloaded again until the object changes
-  let newer = new Set<string>(); // snapshotStamp()s a newer KAPEVault wrote: named on every run, downloaded once until the object changes
+  let newer = new Set<string>(); // snapshotStamp()s a newer KAPEVault wrote (said inside the ciphertext): named on every run, downloaded once until the object changes
   let mergedIn = 0; // the session generation `merged` belongs to
   let print = { revision: -1, code: "" }; // the shared state's check code, worked out after each sync
   let merging: Remote[] = []; // what the commit in flight merges: counted as merged once it is written
@@ -142,7 +142,9 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
   // an unknown one it counts as unopenable. A newKey snapshot does not hide the device's older ones: anyone
   // holding the bucket keys can plant one (no vault key needed), so the next that opens is still merged, with
   // newKey beside it for the prompt. One that will not open is remembered (unopened), so the next run does
-  // not download it again.
+  // not download it again. A header that only claims a newer version is one that will not open: the header
+  // is not covered by the tag, so anyone holding the bucket keys can write it (SYNC.md 3.5). Only a newer
+  // minReader or sync.v inside a snapshot that opened with the vault key says the device runs a newer app.
   async function download(r2: Pick<R2Client, "get">, keys: string[], name: string, known: boolean, stamps: Map<string, string>): Promise<{ key: string; data: VaultData; salt: string; newKey?: string } | { newKey: string } | { problem: string }> {
     let newKey: string | undefined;
     for (const key of keys) {
@@ -150,7 +152,7 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
       if (newer.has(stamps.get(key) ?? key)) return { problem: newerProblem(name) };
       const text = await r2.get(key);
       const opened = await host.openSnapshot(text);
-      if ((!opened && isNewerVaultFile(text)) || (opened && "data" in opened && isNewerData(opened.data))) {
+      if (opened && "data" in opened && isNewerData(opened.data)) {
         newer.add(stamps.get(key) ?? key);
         return { problem: newerProblem(name) };
       }
@@ -178,7 +180,7 @@ export function createSync(host: SyncHost, delayMs = SYNC_DELAY_MS) {
       const result = mergeAll(data, remotes);
       problems = [...found, ...result.problems];
       const changes = syncChanges(data, result.data);
-      const reasons = reviewReasons(changes, data.entries.length, { epoch: result.epoch, key: Boolean(rekey) });
+      const reasons = reviewReasons(changes, data.entries.length, { epoch: result.epoch, key: Boolean(rekey), removed: result.removed });
       const done = { remotes: result.merged, upToDate };
       dropReview();
       if (reasons.length) {

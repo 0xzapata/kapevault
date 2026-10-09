@@ -1,10 +1,10 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { adoptEpoch, isNewerEpoch, isNewerKey, merge, sharedState, VaultMismatchError } from "./merge.js";
+import { adoptEpoch, carryLockOut, isNewerEpoch, isNewerKey, merge, sharedState, VaultMismatchError } from "./merge.js";
 import { splitGroups } from "./groups.js";
 import { syncChanges } from "./review.js";
-import { SHARED_FIELDS, newEpoch, validSync } from "./shape.js";
+import { SHARED_FIELDS, addKey, newEpoch, revokeDevice, validSync } from "./shape.js";
 import { repair, stamp } from "./stamp.js";
 import { DEVICES, editor, firstSync, random } from "./test-helpers.js";
 import { clearHistory, isTrashed, removeEntries, toggleFavorite, touchEntry, upsertEntry } from "../entries.js";
@@ -12,7 +12,7 @@ import { deleteForever, restoreEntry, trashEntry } from "../trash.js";
 import { recordGenerated } from "../generated.js";
 import { confirmGone, setLifecycle } from "../lifecycle.js";
 import { markRecoveryCode, setRecoveryCodes } from "../recovery-codes.js";
-import { addSpace, deleteSpace, renameSpace } from "../spaces.js";
+import { addSpace, deleteSpace, renameSpace, setSpacePhoto } from "../spaces.js";
 
 // The core functions read the clock and make ids; both are faked so every run replays from its seed.
 const T0 = Date.UTC(2026, 8, 1, 2);
@@ -478,6 +478,20 @@ test("spaces: a rename is last-writer-wins; a deleted space's items stay as they
   assert.deepEqual(pc.data.sync.meta[phoneItem.id], phone.data.sync.meta[phoneItem.id]);
 });
 
+test("spaces: a photo set on one device reaches the other, and a rename there keeps it", () => {
+  const photo = `data:image/jpeg;base64,${btoa("\xff\xd8\xff mock photo")}`;
+  const [pc, phone] = devicesWithVault();
+  change(pc, later(), (data) => setSpacePhoto(data, CLIENT, photo));
+  syncBoth(pc, phone);
+  assert.equal(phone.data.spaces.find((s) => s.id === CLIENT).photo, photo);
+  change(phone, later(), (data) => renameSpace(data, CLIENT, "Phone name"));
+  syncBoth(pc, phone);
+  assert.deepEqual(pc.data.spaces.find((s) => s.id === CLIENT), { id: CLIENT, name: "Phone name", kind: "client", photo });
+  change(phone, later(), (data) => setSpacePhoto(data, CLIENT, ""));
+  syncBoth(pc, phone);
+  assert.equal(Object.hasOwn(pc.data.spaces.find((s) => s.id === CLIENT), "photo"), false);
+});
+
 test("delete vs edit: a delete that saw the item wins; an edit it never saw keeps the item", () => {
   const [pc, phone] = devicesWithVault();
   const note = find(pc, "Mock Note").id;
@@ -691,6 +705,36 @@ test("a device's generated passwords (genHistory) are its own: never stamped, ne
   // A restored epoch replaces the shared state, not this device's list.
   const adopted = adoptEpoch(pc.data, { ...phone.data, sync: newEpoch(phone.data.sync, { id: "epoch-2", installId: "dev-b", now: Date.now() }) }, HOST);
   assert.deepEqual(adopted.data.genHistory.map((g) => g.value), ["mock-pc-Pass-1"]);
+});
+
+test("a restore keeps every removal of the vault it replaces, and its key when a lock-out retired the backup's", () => {
+  const OLD = "AAAAAAAAAAAAAAAAAAAAAA==";
+  const NEW = "BBBBBBBBBBBBBBBBBBBBBB==";
+  const LATER = "CCCCCCCCCCCCCCCCCCCCCC==";
+  const backup = firstSync({ spaces: [{ id: "p", kind: "personal" }] }); // under OLD, dev-b listed
+  const removed = revokeDevice(backup, { id: "dev-b", installId: "dev-a", now: T0 + 1000 });
+  const lockedOut = addKey(removed, { salt: NEW, installId: "dev-a", now: T0 + 2000 });
+
+  let carried = carryLockOut(lockedOut, NEW, backup, OLD);
+  assert.equal(carried.keepKey, true, "the backup's key was retired by the lock-out");
+  assert.deepEqual(carried.sync.devices["dev-b"].revokedAt, lockedOut.devices["dev-b"].revokedAt);
+  assert.deepEqual(carried.sync.keys.map((k) => k.salt), [OLD, NEW], "the key history, the current key newest");
+  assert.deepEqual(carried.sync.clock, lockedOut.clock);
+
+  carried = carryLockOut(removed, OLD, backup, OLD);
+  assert.equal(carried.keepKey, false, "the same key: nothing to keep");
+  assert.ok(carried.sync.devices["dev-b"].revokedAt, "the removal still comes along");
+  assert.deepEqual(carried.sync.keys, backup.keys);
+
+  const changedFirst = revokeDevice(addKey(backup, { salt: NEW, installId: "dev-a", now: T0 + 1000 }), { id: "dev-b", installId: "dev-a", now: T0 + 2000 });
+  assert.equal(carryLockOut(changedFirst, NEW, backup, OLD).keepKey, false, "no lock-out: the key changed before the removal");
+
+  const afterLockOut = addKey(lockedOut, { salt: LATER, installId: "dev-a", now: T0 + 3000 });
+  assert.equal(carryLockOut(afterLockOut, LATER, { ...backup, keys: lockedOut.keys }, NEW).keepKey, false, "a key set after the removal was never the removed device's");
+  assert.equal(carryLockOut(lockedOut, NEW, { ...backup, keys: [] }, "DDDDDDDDDDDDDDDDDDDDDD==").keepKey, true, "a key no history holds counts as retired");
+
+  const revokedEarlier = revokeDevice(backup, { id: "dev-b", installId: "dev-c", now: T0 + 500 });
+  assert.deepEqual(carryLockOut(lockedOut, NEW, revokedEarlier, OLD).sync.devices["dev-b"].revokedAt, revokedEarlier.devices["dev-b"].revokedAt, "the earliest removal stands");
 });
 
 test("what the host gates on: the report says only whether anything came in; syncChanges counts", () => {

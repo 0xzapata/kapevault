@@ -45,7 +45,8 @@ function createBackup(ctx) {
 
   // Restore (a saved copy or a cloud snapshot), in two steps so the caller can save the current vault in between:
   // verifyBackup opens the backup with its master password WITHOUT touching this PC's vault,
-  // commitRestore then swaps it in. A wrong file or password never costs the current vault.
+  // commitRestore then swaps it in. A wrong file or password never costs the current vault. carry: what
+  // the restore must keep of this vault (restoreCarry), passed on to commitRestore.
   async function verifyBackup(text, master) {
     const file = parseVaultFile(text);
     if (!file && core.isNewerVaultFile(text)) return newerResult();
@@ -65,7 +66,21 @@ function createBackup(ctx) {
       if (isNewer(e)) return newerResult();
       throw e;
     }
-    return { ok: true, opened };
+    return { ok: true, opened, carry: restoreCarry(opened) };
+  }
+
+  // What a restore keeps of the vault it replaces (SYNC.md 3.7, core carryLockOut): its device removals,
+  // and its key when the backup is under a master password a lock-out retired - then `key` is a copy of
+  // this vault's key, which the caller wipes if the restore stops before commitRestore. Read by
+  // verifyBackup, so before the restore's upload, like the R2 setup (the vault may lock meanwhile). Null
+  // while locked: the vault it replaces cannot be read, so there is nothing to keep (SYNC.md 3.7).
+  /** @returns {{ sync: any, key: { key: Buffer, kdf: any, salt: Buffer } | null } | null} */
+  function restoreCarry(opened) {
+    const session = ctx.session;
+    if (!session) return null;
+    const backupSalt = opened.salt.toString("base64");
+    const { sync, keepKey } = core.carryLockOut(session.data.sync, session.salt.toString("base64"), core.readSync(opened.data, backupSalt), backupSalt);
+    return { sync, key: keepKey ? { key: Buffer.from(session.key), kdf: session.kdf, salt: Buffer.from(session.salt) } : null };
   }
 
   // Write first: if the disk refuses (full, antivirus, a sync lock), the current session stays
@@ -80,14 +95,21 @@ function createBackup(ctx) {
   // never thrown: the restore has happened. slotOk: false when that last step failed.
   // A "staged" restore is written only while the staged copy is still the vault byte for byte - the
   // proof settleStagedCopy relies on. Any other restore settles a staged copy first, like every write.
-  /** @param {string} text @param {any} opened @param {{ cloud?: any, slot?: string }} [options] */
-  function commitRestore(text, opened, { cloud = null, slot } = {}) {
+  // carry: verifyBackup's (restoreCarry), read before the upload. Its removals go into the restored vault; with its
+  // key, the restored vault is written under the key of the vault it replaces (keptKey), never under a
+  // master password a lock-out retired.
+  /** @param {string} text @param {any} opened @param {{ cloud?: any, slot?: string, carry?: ReturnType<typeof restoreCarry> }} [options] */
+  function commitRestore(text, opened, { cloud = null, slot, carry = null } = {}) {
     let contents = text;
+    if (carry?.key) {
+      opened.key.fill(0);
+      opened = { ...opened, ...carry.key, data: core.withKeySalt(opened.data, carry.key.salt.toString("base64")) };
+    }
     try {
       if (slot !== "staged") replaced.settleBeforeWrite();
       else if (!replaced.stagedIsLive()) throw new Error("The vault changed while it was being restored, so nothing was replaced. Try again.");
-      if (cloud) {
-        opened.data = { ...opened.data, cloud };
+      if (cloud || carry) {
+        opened.data = { ...opened.data, ...(cloud && { cloud }), ...(carry && { sync: carry.sync }) };
         contents = JSON.stringify(encryptWithKey(opened.key, opened.kdf, opened.salt, opened.data));
       }
       writeFileAtomic(filePath, contents);
@@ -108,7 +130,7 @@ function createBackup(ctx) {
     } catch {
       slotOk = false; // the staged vault stays on disk as replaced-next.kapevault
     }
-    return { ok: true, vault: publicView(), keptCloud: Boolean(cloud), slotOk };
+    return { ok: true, vault: publicView(), keptCloud: Boolean(cloud), keptKey: Boolean(carry?.key), slotOk };
   }
 
   return { cloudConfig, cloudView, clearOlderBackups, setCloud, setCloudAuto, verifyBackup, commitRestore };

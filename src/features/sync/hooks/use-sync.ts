@@ -34,6 +34,12 @@ export function useSync() {
     refresh: async () => setStatus(await vaultApi.syncStatus()),
     apply: async () => setStatus(await vaultApi.syncApply()),
     revoke: async (ref: string) => setStatus(await vaultApi.syncRevoke(ref)),
+    // Join again after a removal: the vault's master password. The status after it comes back with the result.
+    async rejoin(master: string) {
+      const result = await vaultApi.syncRejoin(master);
+      if (result.status) setStatus(result.status);
+      return result;
+    },
     // The master password another device set. Its merge then waits in status.review.
     async adoptKey(master: string) {
       const result = await vaultApi.syncAdoptKey(master);

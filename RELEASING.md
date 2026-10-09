@@ -58,8 +58,13 @@ and the hash published next to it.
    npm run aab:release
    ```
 
-   The release key and `keystore.properties` are read from outside the repo (`mobile/README.md`, "Release
-   APK"). The scripts check the signature, the version and that the build is not debuggable.
+   The release key is kept offline. Restore `kapevault-release.jks` to a folder for this build only, and run
+   the last two commands through the prompt script instead: `pwsh -File scripts/apk-release-prompt.ps1
+   -Bundle`. It asks for the folder and both passwords (hidden), writes a `keystore.properties` with only
+   `storeFile` and `keyAlias`, passes the passwords to the build as `KAPEVAULT_STORE_PASSWORD` and
+   `KAPEVAULT_KEY_PASSWORD` for that process alone, and removes the file and the variables when it ends.
+   Put the `.jks` back offline afterwards (`mobile/README.md`, "Release APK"). The scripts check the
+   signature, the version and that the build is not debuggable.
 4. Write the hashes: `sha256sum KAPEVault-0.1.7.apk > KAPEVault-0.1.7.apk.sha256` (on Windows,
    `Get-FileHash -Algorithm SHA256`).
 5. Create a **draft** release on the public repo for the tag, with the APK and its `.sha256` attached, and

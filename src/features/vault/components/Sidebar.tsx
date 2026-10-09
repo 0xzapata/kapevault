@@ -1,5 +1,5 @@
 import { useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
-import { Archive, Clock, Code, Devices, DotsThree, Gear, HourglassMedium, IdentificationCard, Info, Key, Link, Lock, MagnifyingGlass, NotePencil, Package, PencilSimple, Plus, Printer, ShieldWarning, SidebarSimple, SquaresFour, Star, Trash } from "@phosphor-icons/react";
+import { Archive, Camera, Clock, Code, Devices, DotsThree, Gear, HourglassMedium, IdentificationCard, Info, Key, Link, Lock, MagnifyingGlass, NotePencil, Package, PencilSimple, Plus, Printer, ShieldWarning, SidebarSimple, SquaresFour, Star, Trash, X } from "@phosphor-icons/react";
 import { AppIcon } from "@/components/AppIcon";
 import { Menu, useMenu } from "@/components/Menu";
 import { TitleBar } from "@/components/TitleBar";
@@ -32,6 +32,7 @@ interface SidebarProps {
   onHandBack: (name: string) => void;
   onAddClient: (name: string) => Promise<void>;
   onRenameSpace: (id: string, name: string) => Promise<void>;
+  onSpacePhoto: (id: string, image: Blob | null) => Promise<void>; // null removes it
   onDeleteSpace: (space: Space) => void;
   onMoveEntry: (entryId: string, spaceId: string) => void;
   onLock: () => void;
@@ -57,7 +58,7 @@ function SmartRow({ active, icon, tone, label, count, alert = false, onClick }: 
       aria-pressed={active}
       className={`row flex h-8 w-full items-center gap-2.5 rounded-[7px] px-2 text-left text-[13.5px] font-medium text-ink focus-ring focus-ring-inset ${active ? "bg-select" : "hover:bg-hover"}`}
     >
-      <span className="grid size-[22px] shrink-0 place-items-center rounded-[6px] text-on-accent" style={{ background: `var(${tone})` }}>
+      <span className="grid size-6 shrink-0 place-items-center rounded-[6px] text-on-accent" style={{ background: `var(${tone})` }}>
         {icon}
       </span>
       <span className="flex-1 truncate">{label}</span>
@@ -71,11 +72,13 @@ function SmartRow({ active, icon, tone, label, count, alert = false, onClick }: 
   );
 }
 
-// Space and person rows share one look: monogram, name, count; "..." appears on hover.
+// Space and person rows share one look: avatar, name, count; "..." appears on hover.
 const sourceRow = "row flex h-8 w-full items-center gap-2.5 rounded-[7px] px-2 pr-9 text-[13.5px] text-ink focus-ring focus-ring-inset";
 const moreButton = "absolute right-1 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-ink-3 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-hover hover:text-ink focus-visible:opacity-100 focus-ring";
 
-function Monogram({ name }: { name: string }) {
+// A space's own photo when it has one, else its initials.
+function Avatar({ name, photo }: { name: string; photo?: string }) {
+  if (photo) return <img src={photo} alt="" draggable={false} className="size-6 shrink-0 rounded-full object-cover" />;
   const letters = name
     .split(" ")
     .map((w) => w[0])
@@ -83,19 +86,20 @@ function Monogram({ name }: { name: string }) {
     .slice(0, 2)
     .toUpperCase();
   return (
-    <span className="grid size-[22px] shrink-0 place-items-center rounded-full bg-linear-to-b from-mono-top to-mono-bottom text-[9.5px] font-semibold tracking-wide text-on-accent">
+    <span className="grid size-6 shrink-0 place-items-center rounded-full bg-linear-to-b from-mono-top to-mono-bottom text-[10px] font-semibold tracking-wide text-on-accent">
       {letters}
     </span>
   );
 }
 
-// A space row: click to open, right-click or "..." for Rename / Delete, and a drop target for items.
-function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEntry }: {
+// A space row: click to open, right-click or "..." for Rename / photo / Delete, and a drop target for items.
+function SpaceRow({ space, active, count, onClick, onRename, onPhoto, onDelete, onDropEntry }: {
   space: Space;
   active: boolean;
   count: number;
   onClick: () => void;
   onRename: (name: string) => Promise<void>;
+  onPhoto: (image: Blob | null) => void;
   onDelete: () => void;
   onDropEntry: (entryId: string) => void;
 }) {
@@ -104,6 +108,7 @@ function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEnt
   const [name, setName] = useState(space.name);
   const [dropping, setDropping] = useState(false);
   const moreRef = useRef<HTMLButtonElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -161,7 +166,7 @@ function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEnt
         aria-current={active ? "true" : undefined}
         className={`${sourceRow} ${active ? "bg-select" : "hover:bg-hover"} ${dropping ? "drop-target" : ""}`}
       >
-        <Monogram name={space.name} />
+        <Avatar name={space.name} photo={space.photo} />
         <span className="flex-1 truncate text-left font-medium">{space.name}</span>
         <span className="text-[12px] tabular-nums text-ink-3 group-hover:opacity-0">{count || ""}</span>
       </button>
@@ -175,6 +180,18 @@ function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEnt
       >
         <DotsThree size={18} weight="bold" />
       </button>
+      <input
+        ref={picker}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        hidden
+        aria-label={`Photo for ${space.name}`}
+        onChange={(e) => {
+          const image = e.target.files?.[0];
+          e.target.value = ""; // the same photo can be picked again
+          if (image) onPhoto(image);
+        }}
+      />
       {menu.anchor && (
         <Menu
           label={`${space.name} options`}
@@ -182,6 +199,8 @@ function SpaceRow({ space, active, count, onClick, onRename, onDelete, onDropEnt
           onClose={menu.close}
           items={[
             { label: "Rename", icon: <PencilSimple size={14} />, onSelect: () => { setName(space.name); setRenaming(true); } },
+            { label: space.photo ? "Change photo..." : "Choose photo...", icon: <Camera size={14} />, onSelect: () => picker.current?.click() },
+            ...(space.photo ? [{ label: "Remove photo", icon: <X size={14} />, onSelect: () => onPhoto(null) }] : []),
             ...(space.kind === "client" ? (["separator", { label: "Delete client...", icon: <Trash size={14} />, danger: true, onSelect: onDelete }] as const) : []),
           ]}
         />
@@ -197,7 +216,7 @@ function PersonRow({ person, active, onClick, onHandBack }: { person: Person; ac
   return (
     <div className="group relative">
       <button type="button" onClick={onClick} onContextMenu={menu.openAt} aria-current={active ? "true" : undefined} className={`${sourceRow} ${active ? "bg-select" : "hover:bg-hover"}`}>
-        <Monogram name={person.name} />
+        <Avatar name={person.name} />
         <span className="flex-1 truncate text-left font-medium">{person.name}</span>
         <span className="text-[12px] tabular-nums text-ink-3 group-hover:opacity-0">{person.count}</span>
       </button>
@@ -266,24 +285,24 @@ function AddClient({ onAdd }: { onAdd: (name: string) => Promise<void> }) {
 const WIDTH = { wide: "w-[248px]", medium: "w-[224px]", drawer: "w-[min(280px,86vw)]" };
 
 const VIEW_ICON: Record<ViewFilter, ReactNode> = {
-  all: <SquaresFour size={13} weight="fill" />,
-  favorites: <Star size={13} weight="fill" />,
-  login: <Key size={13} weight="fill" />,
-  totp: <Clock size={13} weight="bold" />,
-  note: <NotePencil size={13} weight="fill" />,
-  key: <Code size={13} weight="bold" />,
-  link: <Link size={13} weight="bold" />,
-  thing: <Package size={13} weight="fill" />,
-  device: <Devices size={13} weight="fill" />,
-  id: <IdentificationCard size={13} weight="fill" />,
-  security: <ShieldWarning size={13} weight="fill" />,
-  closing: <HourglassMedium size={13} weight="fill" />,
-  closed: <Archive size={13} weight="fill" />,
-  trash: <Trash size={13} weight="fill" />,
+  all: <SquaresFour size={15} weight="fill" />,
+  favorites: <Star size={15} weight="fill" />,
+  login: <Key size={15} weight="fill" />,
+  totp: <Clock size={15} weight="bold" />,
+  note: <NotePencil size={15} weight="fill" />,
+  key: <Code size={15} weight="bold" />,
+  link: <Link size={15} weight="bold" />,
+  thing: <Package size={15} weight="fill" />,
+  device: <Devices size={15} weight="fill" />,
+  id: <IdentificationCard size={15} weight="fill" />,
+  security: <ShieldWarning size={15} weight="fill" />,
+  closing: <HourglassMedium size={15} weight="fill" />,
+  closed: <Archive size={15} weight="fill" />,
+  trash: <Trash size={15} weight="fill" />,
 };
 
 export function Sidebar(props: SidebarProps) {
-  const { spaces, view, spaceId, heldFor, query, variant, onQuery, onView, onSpace, onPerson, onHandBack, onAddClient, onRenameSpace, onDeleteSpace, onMoveEntry, onLock, onSettings, onCollapse, onAbout } = props;
+  const { spaces, view, spaceId, heldFor, query, variant, onQuery, onView, onSpace, onPerson, onHandBack, onAddClient, onRenameSpace, onSpacePhoto, onDeleteSpace, onMoveEntry, onLock, onSettings, onCollapse, onAbout } = props;
   const entries = props.entries.filter((e) => !isGone(e)); // tombstones count only in Closed
   const countIn = (id: string) => entries.filter((e) => e.spaceId === id).length;
   const isView = (v: ViewFilter) => spaceId === null && heldFor === null && view === v;
@@ -312,6 +331,7 @@ export function Sidebar(props: SidebarProps) {
       count={countIn(s.id)}
       onClick={() => onSpace(s.id)}
       onRename={(name) => onRenameSpace(s.id, name)}
+      onPhoto={(image) => void onSpacePhoto(s.id, image)}
       onDelete={() => onDeleteSpace(s)}
       onDropEntry={(id) => onMoveEntry(id, s.id)}
     />

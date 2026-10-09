@@ -41,4 +41,5 @@ test("the gate: more than 5 deletes, or more than 10% of items when that is 3 or
   assert.deepEqual(reviewReasons(changes(0, 20), 500), []);
   assert.deepEqual(reviewReasons(changes(0, 21), 500), ["secrets"]);
   assert.deepEqual(reviewReasons(changes(0), 500, { epoch: true, key: true }), ["epoch", "key"]);
+  assert.deepEqual(reviewReasons(changes(0), 500, { removed: true }), ["removed"], "this device removed from sync by another");
 });

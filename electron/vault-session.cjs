@@ -344,7 +344,7 @@ function createVaultSession(filePath, { onPersist = (_change) => {}, installId =
     publicView,
   };
   const { linkedFolders, openTarget, handBack, getSecret, getPassword, getTotpCode, followUpsDue, getRecoveryCodes } = createReads(ctx);
-  const { saveEntry, importEntries, deleteEntry, restoreEntry, deleteForever, emptyTrash, toggleFavorite, moveEntry, setRecoveryCodes, markRecoveryCode, addPaperCopy, removePaperCopy, setLifecycle, confirmGone, touch, addSpace, renameSpace, deleteSpace, clearHistory, recordGenerated, generatedList, getGenerated, clearGenerated } = createItems(ctx);
+  const { saveEntry, importEntries, deleteEntry, restoreEntry, deleteForever, emptyTrash, toggleFavorite, moveEntry, setRecoveryCodes, markRecoveryCode, addPaperCopy, removePaperCopy, setLifecycle, confirmGone, touch, addSpace, renameSpace, setSpacePhoto, deleteSpace, clearHistory, recordGenerated, generatedList, getGenerated, clearGenerated } = createItems(ctx);
   const { syncBase, openSnapshot, ownsFile, openWithPassword, commitSync, startEpoch, revokeDevice, keepSyncLog } = createSyncSide(ctx);
   const { cloudConfig, cloudView, clearOlderBackups, setCloud, setCloudAuto, verifyBackup, commitRestore } = createBackup(ctx);
 
@@ -378,6 +378,7 @@ function createVaultSession(filePath, { onPersist = (_change) => {}, installId =
     touch,
     addSpace,
     renameSpace,
+    setSpacePhoto,
     deleteSpace,
     getPassword,
     getSecret,

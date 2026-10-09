@@ -62,7 +62,8 @@ no separate data key: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md#cryptography-c
 }
 ```
 
-- `spaces`: `kind` is `"personal"` (one) or `"client"`.
+- `spaces`: `kind` is `"personal"` (one) or `"client"`. Optional `photo`: a JPEG data URL of at most 32 KB
+  shown in place of the space's initials (a larger or non-JPEG one is dropped when the vault opens).
 - `entries`: every item has `id`, `spaceId`, `kind`, `title`, `tags`, `favorite`, `notes`,
   `updatedAt` (YYYY-MM-DD, local), and may have `brand`, `lastUsedAt` (ms since 1970), `heldFor`
   (the name of the person the item is kept for, e.g. `"Mama"`; missing = the owner's own) and
@@ -148,8 +149,9 @@ A reader refuses, with "This vault was saved by a newer KAPEVault. Update this a
 whose header `version` is a number above 1, whose `minReader` is an integer above its `READER_VERSION`, or
 whose `sync.v` is a number above its own (SYNC.md 3.2). It never repairs such a vault, never replaces its
 `sync` object with a new one and never saves over it, so an old app cannot quietly drop what a newer one
-added. A snapshot like that in the cloud is skipped by sync and the device that wrote it is named in the
-sync status. Missing or malformed values keep the old behaviour (repair, or a new `sync` object).
+added. A snapshot like that in the cloud (its `minReader` or `sync.v`, read after it decrypts with the vault
+key) is skipped by sync and the device that wrote it is named in the sync status. A header that only claims a
+newer `version` is treated as unreadable, never as a newer device. Missing or malformed values keep the old behaviour (repair, or a new `sync` object).
 
 Policy for raising the KDF or changing the format later:
 

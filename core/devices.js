@@ -40,14 +40,17 @@ export function cleanMac(value) {
   return mac;
 }
 
-// A photo (a device's label, an ID) as the page made it: a JPEG data URL under the size cap. "" removes it.
-// Checked without decoding it all: every 4 base64 characters carry 3 bytes, and the first 4 hold the
-// JPEG magic bytes FF D8 FF.
-export function cleanPhoto(value) {
+// A photo (a device's label, an ID, a space's picture) as the page made it: a JPEG data URL under `max`
+// bytes. "" removes it.
+// Checked without decoding it all: the body must be whole base64 groups of 4 (padding only at the end), so
+// every app can decode it (a body cut mid-group made the phone's atob throw and blank the app); every 4
+// characters carry 3 bytes, and the first 4 hold the JPEG magic bytes FF D8 FF.
+export function cleanPhoto(value, max = MAX_PHOTO_BYTES) {
   if (value === "") return undefined;
-  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/]+)={0,2}$/.exec(typeof value === "string" ? value : "");
-  const size = m ? Math.floor((m[1].length * 3) / 4) : 0;
-  if (size < 3 || size > MAX_PHOTO_BYTES || !atob(/** @type {RegExpExecArray} */ (m)[1].slice(0, 4)).startsWith("\xff\xd8\xff")) throw new Error("Photo could not be saved. Pick it again");
+  const m = /^data:image\/jpeg;base64,((?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?)$/.exec(typeof value === "string" ? value : "");
+  const body = m ? m[1] : "";
+  const size = (body.length / 4) * 3 - (body.endsWith("==") ? 2 : body.endsWith("=") ? 1 : 0);
+  if (size < 3 || size > max || !atob(body.slice(0, 4)).startsWith("\xff\xd8\xff")) throw new Error("Photo could not be saved. Pick it again");
   return value;
 }
 

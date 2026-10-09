@@ -102,6 +102,7 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
     return result;
   });
   handle("vault:renameSpace", (id, name) => changed(vault.renameSpace(String(id), String(name))));
+  handle("vault:setSpacePhoto", (id, photo) => changed(vault.setSpacePhoto(String(id), String(photo))));
   handle("vault:deleteSpace", (id, moveToId) => changed(vault.deleteSpace(String(id), moveToId ? String(moveToId) : null)));
   handle("vault:clearHistory", (id) => changed(vault.clearHistory(String(id))));
   // Generated passwords: the page sends a value once, as it leaves the generator (main checks it), and

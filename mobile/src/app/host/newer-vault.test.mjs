@@ -147,7 +147,11 @@ for (const [what, edit] of Object.entries(EDITS)) {
   });
 }
 
-for (const [what, edit] of Object.entries(EDITS)) {
+// Only a claim inside the ciphertext is authenticated; a header is what anyone with the bucket keys can
+// write (the tests after these).
+const SEALED = Object.entries(EDITS).filter(([what]) => what !== "a file header at version 2");
+
+for (const [what, edit] of SEALED) {
   test(`a PC snapshot with ${what} is skipped and named, never merged; the phone's vault is not touched`, async (t) => {
     const { r2, desk, phone, personal, pcSync } = await pair(t);
     desk.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock from the PC", body: "b" });
@@ -168,7 +172,30 @@ for (const [what, edit] of Object.entries(EDITS)) {
   });
 }
 
-for (const [what, edit] of Object.entries(EDITS)) {
+// Security re-scan 2026-10-10: about 35 bytes with no vault key, planted as the PC's newest object, said
+// "update this app" and stopped the PC's real snapshots for good. A header is not authenticated, so it is
+// passed over like any other plant that will not open.
+for (const [what, plant] of [
+  ["a bare header claiming version 2", async () => '{"format":"kapevault","version":2}'],
+  ["a real snapshot with its header edited to version 2", (real) => sealNewer(real, MASTER, EDITS["a file header at version 2"])],
+]) {
+  test(`${what} in the PC's folder does not stop its real snapshots, and says nothing of a newer app`, async (t) => {
+    const { r2, desk, phone, personal, pcSync } = await pair(t);
+    desk.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock from the PC", body: "b" });
+    await pcSync();
+    const newest = pc.cloud.snapshotKey(new Date(Date.now() + 86_400_000), PC_ID);
+    const real = [...r2.objects.keys()].filter((k) => pc.cloud.snapshotOwner(k) === PC_ID).sort().at(-1);
+    r2.put(newest, await plant(r2.objects.get(real).toString("utf8")), new Date(Date.now() + 86_400_000));
+    const gets = () => r2.requests.filter((r) => r.method === "GET" && r.key === newest).length;
+    await phone.sync();
+    assert.ok((await phone.titles()).includes("Mock from the PC"), "the PC's real snapshot is still merged");
+    assert.deepEqual((await phone.status()).problems, []);
+    await phone.sync();
+    assert.equal(gets(), 1, "downloaded once, like any plant that will not open");
+  });
+}
+
+for (const [what, edit] of SEALED) {
   test(`a PC snapshot with ${what} is downloaded once and named on every run, then read again when it changes`, async (t) => {
     const { r2, desk, phone, personal, pcSync } = await pair(t);
     desk.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock from the PC", body: "b" });

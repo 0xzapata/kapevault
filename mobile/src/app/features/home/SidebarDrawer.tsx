@@ -110,7 +110,7 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
           </nav>
 
           <p className={section}>Mine</p>
-          {spaces.filter((s) => s.kind === "personal").map((s) => <SpaceRow key={s.id} name={s.name} n={countIn(entries, { spaceId: s.id })} on={current({ spaceId: s.id })} onClick={() => pick({ spaceId: s.id }, s.name)} />)}
+          {spaces.filter((s) => s.kind === "personal").map((s) => <SpaceRow key={s.id} name={s.name} photo={s.photo} n={countIn(entries, { spaceId: s.id })} on={current({ spaceId: s.id })} onClick={() => pick({ spaceId: s.id }, s.name)} />)}
 
           <div className="relative mt-[22px] mb-1 flex items-center justify-between pl-2">
             <p className="track-small flex items-center gap-1.5 text-[11px] font-semibold text-ink-3">
@@ -119,7 +119,7 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
             </p>
             <AddClient pro={pro} onAdd={props.onAddClient} onPro={() => setShowPro(true)} />
           </div>
-          {spaces.filter((s) => s.kind === "client").map((s) => <SpaceRow key={s.id} name={s.name} n={countIn(entries, { spaceId: s.id })} on={current({ spaceId: s.id })} onClick={() => pick({ spaceId: s.id }, s.name)} />)}
+          {spaces.filter((s) => s.kind === "client").map((s) => <SpaceRow key={s.id} name={s.name} photo={s.photo} n={countIn(entries, { spaceId: s.id })} on={current({ spaceId: s.id })} onClick={() => pick({ spaceId: s.id }, s.name)} />)}
 
           {people.length > 0 && (
             <>
@@ -154,10 +154,10 @@ export function SidebarDrawer(props: SidebarDrawerProps) {
   );
 }
 
-function SpaceRow({ name, n, on, onClick }: { name: string; n: number; on: boolean; onClick: () => void }) {
+function SpaceRow({ name, photo, n, on, onClick }: { name: string; photo?: string; n: number; on: boolean; onClick: () => void }) {
   return (
     <button type="button" aria-current={on || undefined} onClick={onClick} className={`${row} ${on ? "bg-select" : "active:bg-hover"}`}>
-      <Monogram name={name} />
+      <Monogram name={name} photo={photo} />
       <span className="flex-1 truncate">{name}</span>
       <span className="text-[12px] tabular-nums text-ink-3">{n || ""}</span>
     </button>

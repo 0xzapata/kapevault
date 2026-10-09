@@ -6,8 +6,9 @@ import { Button } from "@/components/form";
 import type { SyncStatus } from "@/lib/vault-api";
 import { DEVICE, isMac } from "@/lib/platform";
 import { relativeTime } from "@/lib/local-date";
-import { deviceNames } from "../lib/sync-line";
+import { canRejoin, deviceNames } from "../lib/sync-line";
 import { NewMasterCard } from "./NewMasterCard";
+import { JoinAgainCard } from "./JoinAgainCard";
 import { LockOutCard } from "./LockOutCard";
 import { RestoreQuestion } from "./RestoreQuestion";
 import { SyncCard } from "./SyncCard";
@@ -56,6 +57,7 @@ interface SyncSheetProps {
   onAnswerRestore: (everywhere: boolean) => void;
   onAdoptKey: (master: string) => Promise<string>; // "" when it opened; the review follows
   onRevoke: (ref: string) => void;
+  onRejoin: (master: string) => Promise<string>; // "" when it worked
   onMasterChanged: () => void; // the master password was changed from the lock-out card
   onReview: () => void; // opens the held merge's review on top
   onShow: (id: string) => void; // a conflict copy, in the list
@@ -64,7 +66,7 @@ interface SyncSheetProps {
 
 // The devices on this bucket, what needs a look, and Sync now. Portaled: the list it opens from
 // moves with the sidebar, and a moving parent would carry a fixed sheet with it.
-export function SyncSheet({ status, busy, onSyncNow, onAnswerRestore, onAdoptKey, onRevoke, onMasterChanged, onReview, onShow, onClose }: SyncSheetProps) {
+export function SyncSheet({ status, busy, onSyncNow, onAnswerRestore, onAdoptKey, onRevoke, onRejoin, onMasterChanged, onReview, onShow, onClose }: SyncSheetProps) {
   const problems = [status.error, ...status.problems].filter(Boolean);
   // Set once the master password was changed from the lock-out card: the names it was for, and whether quick unlock went off.
   const [finished, setFinished] = useState<{ names: string[]; biometricOff: boolean } | null>(null);
@@ -77,6 +79,8 @@ export function SyncSheet({ status, busy, onSyncNow, onAnswerRestore, onAdoptKey
           <p className="-mt-1 text-[13px] text-ink-3">Your devices share their changes through your own R2 bucket, encrypted.</p>
 
           {status.off === "restored" ? <RestoreQuestion busy={busy} onAnswer={onAnswerRestore} /> : <SyncCard status={status} busy={busy} onSyncNow={onSyncNow} />}
+
+          {canRejoin(status) && <JoinAgainCard onJoin={onRejoin} />}
 
           {status.newMaster && !status.review && <NewMasterCard device={status.newMaster} onAdopt={onAdoptKey} />}
 

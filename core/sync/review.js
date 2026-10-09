@@ -1,5 +1,6 @@
 // The mass-change gate (SYNC.md 3.9): a sync that would delete or change many items, replace the
-// vault with a restored one, or move to another master password waits until the user has looked.
+// vault with a restored one, move to another master password, or remove this device from sync waits
+// until the user has looked.
 // Pure: the host merges, asks reviewReasons, and commits only on [] or the user's Apply.
 import { splitGroups } from "./groups.js";
 import { SECRET_GROUPS } from "./merge.js";
@@ -54,13 +55,14 @@ export function syncChanges(before, after) {
 /**
  * Why a sync must wait for the user, or [] when it may go ahead: more than 5 deletes, or more than 10%
  * of the items when that is 3 or more, secrets changed on more than 20 items, a restored vault (epoch),
- * another master password (key).
+ * another master password (key), this device removed from sync by another one (removed: after it, this
+ * device syncs no more until it joins again).
  * @param {{ deleted: string[], secretItems: number }} changes @param {number} entryCount this device's items before the sync
- * @param {{ epoch?: boolean, key?: boolean }} [also]
- * @returns {("deletes" | "secrets" | "epoch" | "key")[]}
+ * @param {{ epoch?: boolean, key?: boolean, removed?: boolean }} [also]
+ * @returns {("deletes" | "secrets" | "epoch" | "key" | "removed")[]}
  */
-export function reviewReasons(changes, entryCount, { epoch = false, key = false } = {}) {
-  /** @type {("deletes" | "secrets" | "epoch" | "key")[]} */
+export function reviewReasons(changes, entryCount, { epoch = false, key = false, removed = false } = {}) {
+  /** @type {("deletes" | "secrets" | "epoch" | "key" | "removed")[]} */
   const reasons = [];
   const deleted = changes.deleted.length;
   const bigShare = deleted >= REVIEW_LIMITS.deleteShareMin && deleted > entryCount * REVIEW_LIMITS.deleteShare;
@@ -68,5 +70,6 @@ export function reviewReasons(changes, entryCount, { epoch = false, key = false 
   if (changes.secretItems > REVIEW_LIMITS.secretItems) reasons.push("secrets");
   if (epoch) reasons.push("epoch");
   if (key) reasons.push("key");
+  if (removed) reasons.push("removed");
   return reasons;
 }

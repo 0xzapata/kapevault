@@ -4,6 +4,7 @@ export interface Space {
   id: string;
   name: string;
   kind: SpaceKind;
+  photo?: string; // a small square JPEG data URL, shown in place of the initials
 }
 
 // Password health, worked out in the main process (it holds the passwords).

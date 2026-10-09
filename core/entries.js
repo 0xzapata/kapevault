@@ -7,7 +7,7 @@ import { cleanIdNumber, cleanIdType } from "./ids.js";
 import { parseTotp } from "./totp.js";
 
 /** @typedef {{ id: string, kind: string, spaceId: string, title: string, [field: string]: any }} Entry */
-/** @typedef {{ id: string, name: string, kind: string }} Space "personal" (one per vault) or "client" */
+/** @typedef {{ id: string, name: string, kind: string, photo?: string }} Space "personal" (one per vault) or "client"; photo in place of its initials */
 /** @typedef {{ spaces: Space[], entries: Entry[], [field: string]: any }} VaultData */
 
 export const KINDS = ["login", "link", "note", "key", "thing", "device", "id"];

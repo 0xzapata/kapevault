@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readCopyTitle } from "./review.js";
-import { logEntry, mergeRemotes, nameOf, reviewView, withEntry } from "./run.js";
-import { newEpoch, newSync, registerDevice } from "./shape.js";
+import { logEntry, mergeRemotes, nameOf, reviewView, withEntry, writesAsThisInstall } from "./run.js";
+import { newEpoch, newSync, registerDevice, revokeDevice } from "./shape.js";
 
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 const SALT = "AAAAAAAAAAAAAAAAAAAAAA==";
@@ -35,6 +35,33 @@ test("a remote merges in, and this install joins the device list on the first ru
   assert.equal(result.data.sync.devices[ME.installId].name, "Mock PC");
   const again = mergeRemotes(result.data, [], ME);
   assert.equal(again.data, result.data, "an install already listed writes nothing");
+});
+
+test("another install under this id is told by a change it made that this vault never did, never by a copy of this vault", () => {
+  const me = ME.installId;
+  const local = vault();
+  const ownRecord = registerDevice(local.sync, { installId: me, name: "Mock PC", platform: "win32", now: NOW });
+  const mine = { ...local.sync, ...ownRecord, meta: { e1: { vv: { [me]: 2 }, g: {} } }, gone: { e2: { vv: { [me]: 3 }, at: [NOW, 0, me] } } };
+  const as = (sync) => writesAsThisInstall(mine, { ...local, sync }, SALT, me);
+  assert.equal(as(mine), false, "the same state");
+  assert.equal(as({ ...mine, meta: { e1: { vv: { [me]: 1 }, g: {} } }, gone: {} }), false, "an older state of its own");
+  assert.equal(as({ ...mine, meta: { e2: { vv: { [me]: 2 }, g: {} } } }), false, "an item this install deleted since");
+  assert.equal(as({ ...mine, meta: { ...mine.meta, e3: { vv: { [me]: 1 }, g: {} } } }), true, "an item it never made");
+  assert.equal(as({ ...mine, meta: { e1: { vv: { [me]: 3 }, g: {} } } }), true, "a version it never wrote");
+  const renamed = registerDevice(mine, { installId: me, name: "Mock PC copy", platform: "win32", now: NOW + 1000 });
+  assert.equal(as(renamed), true, "a device record it never wrote");
+  assert.equal(writesAsThisInstall(renamed, { ...local, sync: mine }, SALT, me), false, "its own record before a rename");
+  assert.equal(as({ ...mine, v: 2 }), false, "a sync object this app cannot read holds nothing");
+});
+
+test("a remote that removes this install says so, once: a removal already here is no news", () => {
+  const local = mergeRemotes(vault(), [], ME).data;
+  const theirs = { ...local, sync: revokeDevice(local.sync, { id: ME.installId, installId: PHONE, now: NOW + 1000 }) };
+  const result = mergeRemotes(local, [remote(theirs)], ME);
+  assert.equal(result.removed, true);
+  assert.ok(result.data.sync.devices[ME.installId].revokedAt);
+  assert.equal(mergeRemotes(result.data, [remote(theirs)], ME).removed, false);
+  assert.equal(mergeRemotes(local, [remote(local)], ME).removed, false);
 });
 
 test("a remote still holding a payee merges in as a note", () => {
@@ -85,6 +112,13 @@ test("a review names the devices and the items by title; a deleted item by its t
   const changes = { added: ["new"], changed: ["kept"], deleted: ["gone"], copies: [], secretItems: 1 };
   assert.deepEqual(reviewView(before, result, changes, ["deletes"]), { from: ["Mock Phone"], reasons: ["deletes"], added: ["Mock new"], changed: ["Mock kept"], deleted: ["Mock gone"], copies: [], secretItems: 1 });
   assert.equal(nameOf({}, "x"), "Another device");
+});
+
+test("a review names each device once, however many of its snapshots it merges", () => {
+  // Two snapshots of one PC in one sync read "Changes from Mock PC B and Mock PC B wait for you" (e2e, 2026-10-10).
+  const result = { data: { entries: [] }, merged: [{ name: "Mock PC B" }, { name: "Mock PC C" }, { name: "Mock PC B" }] };
+  const changes = { added: [], changed: [], deleted: [], copies: [], secretItems: 0 };
+  assert.deepEqual(reviewView({ entries: [] }, result, changes, ["removed"]).from, ["Mock PC B", "Mock PC C"]);
 });
 
 test("a remote from a newer version is skipped and named, never merged and never read as damaged", () => {

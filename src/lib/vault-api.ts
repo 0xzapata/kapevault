@@ -64,7 +64,7 @@ export interface SyncStatus {
 
 export interface SyncReview {
   from: string[];
-  reasons: ("deletes" | "secrets" | "epoch" | "key")[];
+  reasons: ("deletes" | "secrets" | "epoch" | "key" | "removed")[];
   added: string[]; // titles
   changed: string[];
   deleted: string[];
@@ -130,6 +130,7 @@ export interface VaultStatus {
 export interface RestoreKept {
   keptCopy?: boolean;
   keptCloud?: boolean;
+  keptKey?: boolean; // the restored vault was written under the master password of the vault it replaced
 }
 
 // A restore that did not happen. needsConfirm / needsMaster: see restoreFromFile.
@@ -203,6 +204,7 @@ interface KAPEVaultBridge {
   moveEntry(id: string, spaceId: string): Promise<VaultView>;
   addSpace(name: string): Promise<{ vault: VaultView; id: string }>;
   renameSpace(id: string, name: string): Promise<VaultView>;
+  setSpacePhoto(id: string, photo: string): Promise<VaultView>; // a JPEG data URL; "" removes it
   deleteSpace(id: string, moveToId: string | null): Promise<VaultView>;
   clearHistory(id: string): Promise<VaultView>;
   // Generated passwords (core/generated.js): the generator's recent values, kept in main. The page sends a
@@ -276,6 +278,7 @@ interface KAPEVaultBridge {
   syncAdoptKey(master: string): Promise<{ ok: boolean; error?: string; status: SyncStatus }>; // the master password set on status.newMaster; a review follows
   syncAnswerRestore(everywhere: boolean): Promise<SyncStatus>; // after a restore: true = this vault on all devices, false = merge it in
   syncRevoke(ref: string): Promise<SyncStatus>; // remove another device from sync
+  syncRejoin(master: string): Promise<{ ok: boolean; error?: string; status: SyncStatus }>; // a removed device joins again with the vault's master password
   cloudPhoneCode(): Promise<Attempt<PhoneCode>>; // unlocked and connected only
   onSyncStatus(callback: (status: SyncStatus) => void): () => void;
   onLocked(callback: (reason?: LockReason) => void): () => void;

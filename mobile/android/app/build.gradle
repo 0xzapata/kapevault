@@ -10,9 +10,14 @@ def (major, minor, patch) = appVersion.replaceFirst(/[-+].*/, '').tokenize('.')*
 // storePassword, keyAlias, keyPassword), or the file KAPEVAULT_SIGNING names. Without it the release
 // APK stays unsigned, as before (CI, and npm run proof -- --release, which signs it with the debug key).
 // KAPEVAULT_SIGNING=none turns the key off on a PC that has it.
+// storePassword / keyPassword may be left out of the file: KAPEVAULT_STORE_PASSWORD and
+// KAPEVAULT_KEY_PASSWORD from the environment are used then (the key can stay offline; see
+// scripts/apk-release-prompt.ps1). A password in the file wins.
 def signingFile = file(System.getenv('KAPEVAULT_SIGNING') ?: "${System.getProperty('user.home')}/.kapevault-signing/keystore.properties")
 def signing = new Properties()
 if (signingFile.isFile()) signingFile.withInputStream { signing.load(it) }
+def storePasswordValue = signing.storePassword ?: System.getenv('KAPEVAULT_STORE_PASSWORD')
+def keyPasswordValue = signing.keyPassword ?: System.getenv('KAPEVAULT_KEY_PASSWORD')
 
 android {
     namespace = "com.brewedops.kapevault"
@@ -33,9 +38,9 @@ android {
             release {
                 // A relative storeFile is read beside keystore.properties.
                 storeFile signingFile.parentFile.toPath().resolve(signing.storeFile).toFile()
-                storePassword signing.storePassword
+                storePassword storePasswordValue
                 keyAlias signing.keyAlias
-                keyPassword signing.keyPassword
+                keyPassword keyPasswordValue
                 // v2 for Android 7-8, v3 on 9+: v3 carries a proof-of-rotation record, so the key can be
                 // rotated later without breaking updates to installed copies.
                 enableV2Signing true

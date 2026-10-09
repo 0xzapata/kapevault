@@ -55,6 +55,8 @@ export function reviewSentences(review: SyncReview): string[] {
     if (reason === "deletes") return `${who} wants to delete ${items(review.deleted.length)}.`;
     if (reason === "secrets") return `${who} changed passwords or other secrets on ${items(review.secretItems)}.`;
     if (reason === "epoch") return `${who} restored a backup and made it the vault on all devices.`;
+    // Not `who`: a review gathers every device it merges, and nothing records which one did the removal.
+    if (reason === "removed") return "This phone was removed from sync on another device. After Apply it syncs no more.";
     return `${who} set a new master password. After Apply it unlocks this vault too.`;
   });
 }

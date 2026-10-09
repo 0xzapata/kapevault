@@ -126,6 +126,30 @@ export function isNewerKey(remote, local) {
   return laterOf(newest(remote.keys), newest(local.keys), (k) => k.salt);
 }
 
+/**
+ * A restore over this vault (SYNC.md 3.7) never undoes a removal or a lock-out (3.9). `sync` is the
+ * backup's sync object with every device removal of the vault it replaces carried in (the earliest
+ * `revokedAt` stands, as in a merge). keepKey: the backup is under a master password a lock-out retired -
+ * one set before a device was removed, while this vault's key was set after that removal - so the restored
+ * vault must be written under this vault's key, and `sync` then carries this vault's key history too. Under
+ * the backup's key, the removed device's copy of it would open every snapshot the restore uploads, and its
+ * own snapshots under that key would merge again. A backup key this vault's history does not hold counts
+ * as retired when there is a lock-out at all (nothing says the removed device never had it).
+ * @param {import("./shape.js").Sync} current this vault's @param {string} currentSalt its header's
+ * @param {import("./shape.js").Sync} backup the backup's, read (readSync) @param {string} backupSalt its header's
+ * @returns {{ sync: import("./shape.js").Sync, keepKey: boolean }}
+ */
+export function carryLockOut(current, currentSalt, backup, backupSalt) {
+  const removals = Object.fromEntries(Object.entries(current.devices).filter(([, d]) => d.revokedAt));
+  const devices = mergeRecords(backup.devices, removals, mergeDevice);
+  const keyNow = current.keys.find((k) => k.salt === currentSalt);
+  const keyThen = current.keys.find((k) => k.salt === backupSalt) ?? backup.keys.find((k) => k.salt === backupSalt);
+  const retired = (/** @type {{ revokedAt?: Hlc }} */ d) => Boolean(d.revokedAt && keyNow && compare(keyNow.at, d.revokedAt) > 0 && (!keyThen || compare(keyThen.at, d.revokedAt) < 0));
+  const keepKey = backupSalt !== currentSalt && Object.values(removals).some(retired);
+  const sync = { ...backup, clock: max(backup.clock, current.clock), devices, ...(keepKey && { keys: mergeKeys(current.keys, backup.keys) }) };
+  return { sync, keepKey };
+}
+
 /** The shared state as one string with a stable key order: what two synced devices must agree on. */
 export function sharedState(data) {
   const { meta, ...sync } = data.sync;

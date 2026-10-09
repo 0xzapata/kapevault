@@ -4,6 +4,7 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 import "./styles/app.css";
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ToastProvider } from "./components/Toast";
 import { HostProvider } from "./host/host-context";
 import { createMockHost } from "./host/mock-host";
@@ -20,13 +21,15 @@ const root = document.getElementById("root");
 if (root) {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
-      <HostProvider host={host}>
-        <SettingsProvider>
-          <ToastProvider>
-            <App />
-          </ToastProvider>
-        </SettingsProvider>
-      </HostProvider>
+      <ErrorBoundary>
+        <HostProvider host={host}>
+          <SettingsProvider>
+            <ToastProvider>
+              <App />
+            </ToastProvider>
+          </SettingsProvider>
+        </HostProvider>
+      </ErrorBoundary>
     </React.StrictMode>,
   );
 }

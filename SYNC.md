@@ -72,9 +72,14 @@ by: "" }]`, and empty `meta`, `gone`, `histFloor` and `devices`. `h` = SHA-256 o
   version (FORMAT.md), makes `readSync` throw `NewerVaultError` instead of returning a new object: an older
   app that replaced it would drop the tombstones, device removals and key history. Locally the vault is
   refused and nothing is written. A remote snapshot like that is skipped by `mergeRemotes` (its device is
-  named in `problems`: "<device> runs a newer KAPEVault. Update this app."), and a remote whose file header
-  version is above 1 is skipped the same way by each host's download. A missing or malformed `sync.v` keeps
-  the old behaviour: a new sync object.
+  named in `problems`: "<device> runs a newer KAPEVault. Update this app."), and so is one whose decrypted
+  `minReader` is above this app's (each host's download). Both claims are inside the ciphertext, so only a
+  holder of the vault key can make them. A file header whose `version` is above 1 is NOT taken as a newer
+  device: the header is not covered by the tag, and anyone holding the bucket keys can write
+  `{"format":"kapevault","version":2}` (35 bytes) as a device's newest object. It is passed over like any
+  snapshot that will not open (3.5): remembered, not downloaded again until it changes, and the device's
+  next snapshot that opens is merged. A missing or malformed `sync.v` keeps the old behaviour: a new sync
+  object.
 - `lastUsedAt` is outside every group: merged by max, never bumps `vv`, never causes a conflict.
 - A delete (`removeEntries`, `deleteSpace`, a Trash purge) writes `gone[id] = { vv: meta.vv + own tick, at }`
   and removes `meta[id]`. Closing an account (`confirmGone`) is not a delete. The `viaEntryId` cascade in
@@ -168,14 +173,20 @@ Snapshot names are in [FORMAT.md](FORMAT.md) (Cloud backup names). Selection is 
   equal the local ones (no scrypt, no stored password). If the newest will not open, the next-newest of
   that device is tried (an older snapshot is a safe subset of a newer one, never read as an empty vault);
   three that will not open = a visible error for that device. An object that would not open is
-  remembered and not downloaded again until it changes.
+  remembered and not downloaded again until it changes. A header that claims a newer version is one that
+  will not open (3.2): only a claim inside a snapshot that opened with the vault key stops a device.
 - `vaultId` differs: never merged; the device shows that the bucket holds a different vault.
 - `epoch` differs: see 3.7.
 - Before upload: the bytes read from disk must decrypt with the session key (GCM tag check). A device
   never uploads a file it cannot read.
-- Duplicate install id (a copied app data folder on a second PC): an object under this install's own id
-  that it never uploaded (`sent-snapshots.json`) means two installs share an id; the install id is
-  regenerated and logged. Sync refuses to run while the install id cannot be read.
+- Duplicate install id (a copied app data folder on a second PC): a snapshot under this install's own id
+  that it never uploaded (`sent-snapshots.json`), that opens with the vault key, and that holds a change made
+  under this id that this vault never made (an item version or a device record,
+  `core/sync/run.js` `writesAsThisInstall`) means two installs share an id; the install id is regenerated
+  and logged (PC). Anything else in that folder - junk, a header, a stranger's vault, a copy of one of this
+  install's own snapshots - is what anyone holding the bucket keys can plant, and changes nothing: a new id
+  would leave the old folder un-thinned and show this device as a new one. The three newest unread objects
+  are read per run, each once until it changes. Sync refuses to run while the install id cannot be read.
 - Downloads come back on the courier's stdout (PC) or in memory (phone) and are never written to disk.
 
 ### 3.6 Master password change
@@ -214,6 +225,23 @@ Snapshot names are in [FORMAT.md](FORMAT.md) (Cloud backup names). Selection is 
   `-before-restore` snapshot.
 - Restore never resets the unlock throttle with a backup's password: only a success on the local vault
   clears the miss count.
+- **A restore never undoes a removal or a lock-out** (3.9; `core/sync/merge.js` `carryLockOut`, PC
+  `vault-session-backup.cjs` `restoreCarry`, phone `restore.ts`). Restoring over an unlocked vault, every
+  device removal of the vault it replaces is written into the restored one (the earliest `revokedAt`
+  stands). And when the backup is under a master password a lock-out retired - one set before a device was
+  removed, while the vault's own key was set after that removal - the restored vault is written under the
+  replaced vault's key, with its key history (the PC's result says `keptKey`, and the restore toast adds
+  "The vault keeps your current master password."): it then opens with today's master password, not the
+  backup's. Under the backup's key, the removed device's copy of it would open
+  everything the restore uploads, and its snapshots under that key would merge again. Both are read before
+  the restore's own upload (the vault may lock meanwhile), and Remove from sync is refused while a restore
+  runs. A key set after the removal, or a removal with no new key yet, keeps the backup's key: the removed
+  device never had it, or it still has today's too.
+- What that leaves: a restore at the lock screen cannot read the vault it replaces, so it carries nothing:
+  the restored vault has the backup's key and device list. After restoring a backup from before a lock-out
+  there, remove the lost device again and change the master password BEFORE answering the sync question
+  (sync stays paused until then, 3.7); answered first, the lost device's snapshots under the backup's key
+  merge as they did before the lock-out.
 
 ### 3.8 What syncs and what never syncs
 
@@ -248,8 +276,8 @@ snapshots.
 - Unlock never waits on sync; sync runs after unlock.
 - **Mass-change gate** (`core/sync/review.js`): a merge that would delete more than 5 items, or more than
   10% of entries when that is 3 or more, change secret groups on more than 20 items, replace the vault
-  with a restored epoch, or adopt a new key shows a review ("<device> wants to delete 143 items") before
-  it commits. The gate judges one merge at a time. It catches a bug or a mistake that would empty a
+  with a restored epoch, adopt a new key, or remove THIS device from sync (reason `removed`: after it this
+  device syncs no more) shows a review ("<device> wants to delete 143 items") before it commits. The gate judges one merge at a time. It catches a bug or a mistake that would empty a
   vault. It is not a defence against a device that holds the vault key: such a device can stay under
   the limits on every sync.
 - **Remove from sync** (PC, Sync sheet): sets `devices[id].revokedAt`; snapshots in that device's folder
@@ -262,7 +290,18 @@ snapshots.
   Connect). The status carries `lockOut`: every removed device with no key in `sync.keys` newer than its
   `revokedAt`. The Sync sheet shows a "Finish locking out <device>" card and the sync line shows the same
   words until the master password has changed after the removal. The R2 token step cannot be seen from
-  the vault, so the card only states it. The phone has no remove-device screen. The phone's biometric
+  the vault, so the card only states it. The phone has no remove-device screen.
+- **Removed, and back** (PC, `electron/sync.cjs` `rejoin`): a removal is never lifted - the earliest
+  `revokedAt` stands on every device. A device that learns from a merge that it was removed shows that
+  merge as a review first (reason `removed`), so anyone holding the vault key cannot switch a device off
+  unseen; after Apply, sync is off on it ("This device was removed from sync"). The way back for a device
+  the owner trusts again: Join again with the vault's own master password (proven on the vault file
+  through the unlock throttle), typed in the Join again card the Sync sheet shows on a removed PC. The device takes a new install id, the old id stays removed everywhere,
+  and the new one joins like any new device. If the owner locked out with a new master password since, the
+  device then asks for "the master password set on <device>" (3.6) and adopts it after a review. This gives
+  a removed device nothing it lacked before (with the key and the bucket token it could always write under
+  a new id); only a new master password locks a device out. Its old folder is no longer thinned out by it.
+  The phone shows the same review but has no Join again yet: a removed phone stays removed. The phone's biometric
   prompt uses `BIOMETRIC_STRONG` with a CryptoObject, no device-credential fallback.
 - The Sync sheet shows a check code on every device: the first 8 hex of the SHA-256 of the canonical
   shared state. After Sync now on each device, the codes match.

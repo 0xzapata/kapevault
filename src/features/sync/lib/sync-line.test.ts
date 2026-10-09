@@ -1,7 +1,7 @@
 // Run with `npm test` (Node strips the types). The sync line under the item count, and the review's words.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deviceNames, reviewSentences, syncLine } from "./sync-line.ts";
+import { canRejoin, deviceNames, reviewSentences, syncLine } from "./sync-line.ts";
 import type { SyncReview, SyncStatus } from "@/lib/vault-api";
 
 const idle: SyncStatus = { state: "idle", off: null, manual: false, error: "", problems: [], newMaster: null, thisDevice: "Mock PC", lastSync: null, devices: [], lockOut: [], needsLook: [], review: null, fingerprint: "0123abcd" };
@@ -47,4 +47,13 @@ test("the review says who wants what", () => {
   assert.deepEqual(reviewSentences({ ...review, from: ["Mock Phone", "Mock Tablet"], reasons: ["secrets"], secretItems: 21 }), ["Mock Phone and Mock Tablet changed passwords or other secrets on 21 items."]);
   assert.deepEqual(reviewSentences({ ...review, reasons: ["epoch"] }), ["Mock Phone restored a backup and made it the vault on all devices."]);
   assert.deepEqual(reviewSentences({ ...review, reasons: ["key"] }), ["Mock Phone set a new master password. After Apply it unlocks this vault too."]);
+});
+
+test("a removal is a review with its own sentence, and only a removed device can join again", () => {
+  // The review names every device it merges; only one did the removal, and nothing says which, so none is named.
+  const removal = "This device was removed from sync on another device. After Apply it syncs no more.";
+  assert.deepEqual(reviewSentences({ ...review, from: ["Mock Phone", "Mock PC"], reasons: ["removed"] }), [removal]);
+  assert.equal(reviewSentences({ ...review, from: [], reasons: ["removed"] })[0], removal);
+  assert.equal(canRejoin({ ...idle, off: "removed" }), true);
+  for (const off of [null, "locked", "no-cloud", "no-id", "restored"] as const) assert.equal(canRejoin({ ...idle, off }), false);
 });

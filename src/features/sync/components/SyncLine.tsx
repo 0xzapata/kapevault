@@ -52,6 +52,10 @@ export function SyncLine({ onShow }: { onShow: (id: string) => void }) {
             return result.ok ? "" : (result.error ?? "");
           }}
           onRevoke={sync.revoke}
+          onRejoin={async (master) => {
+            const result = await sync.rejoin(master);
+            return result.ok ? "" : (result.error ?? "Could not join again.");
+          }}
           onMasterChanged={sync.refresh}
           onReview={() => setReviewing(status.review)}
           onShow={onShow}

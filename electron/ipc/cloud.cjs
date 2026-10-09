@@ -53,6 +53,8 @@ function register({ handle, attempt, vault, cloud, sync, broadcast, devEnv }) {
   handle("sync:answerRestore", (everywhere) => sync.answerRestore(everywhere === true));
   // A device by the ref the Sync sheet was given, never an install id.
   handle("sync:revoke", (ref) => sync.revoke(String(ref)));
+  // A device that was removed from sync joins again: the vault's master password, proven on the vault file.
+  handle("sync:rejoin", (master) => attempt(() => sync.rejoin(String(master ?? ""))));
   // Add a phone: the R2 keys as a QR code for the phone's first run. The one way the secret key reaches
   // the page - as the code's modules, on a click, unlocked and connected only; the page hides it after
   // `seconds`.

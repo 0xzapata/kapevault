@@ -15,24 +15,32 @@ const MASTER = "mock kettle harbor pass orbit gazelle";
 const SWITCH = "Keep KAPEVault offline";
 
 (async () => {
-  // Opens the vault (creating it on the first launch) and Settings > Security.
-  async function openSecurity(fake) {
+  // Opens the vault (creating it on the first launch). "Settings" is exact: the Air Wall notice's
+  // "Open Settings" button would match it too.
+  async function unlock(fake) {
     const run = await launchWith({ KAPEVAULT_DATA_DIR: dataDir, ...(fake && { KAPEVAULT_AIRWALL_FAKE: fake }) });
     const { page } = run;
     await page.getByPlaceholder("Master password", { exact: true }).fill(MASTER);
     if (await page.getByPlaceholder("Confirm master password").isVisible()) await page.getByPlaceholder("Confirm master password").fill(MASTER);
     await page.keyboard.press("Enter");
-    await page.getByRole("button", { name: "Settings" }).waitFor({ timeout: 15000 });
-    await page.getByRole("button", { name: "Settings" }).click();
-    await page.getByRole("dialog").getByRole("tab", { name: "Security" }).click();
-    return { ...run, dialog: page.getByRole("dialog") };
+    await page.getByRole("button", { name: "Settings", exact: true }).waitFor({ timeout: 15000 });
+    return run;
   }
+  // ...and Settings > Security.
+  async function openSecurity(fake) {
+    const run = await unlock(fake);
+    await run.page.getByRole("button", { name: "Settings", exact: true }).click();
+    await run.page.getByRole("dialog").getByRole("tab", { name: "Security" }).click();
+    return { ...run, dialog: run.page.getByRole("dialog") };
+  }
+  const NOTICE = "Keep KAPEVault offline protects another copy of the app.";
   const toggle = (dialog, checked) => dialog.getByRole("switch", { name: SWITCH, checked });
   const testButton = (dialog) => dialog.getByRole("button", { name: "Test", exact: true });
 
   // ---- Off -> Test gets through -> switch on -> Test is blocked -> switch off
   let { app, page, errors, dialog } = await openSecurity("off");
   check("Air Wall row shows, switched off", await shows(toggle(dialog, false)));
+  check("no 'another copy' notice while Air Wall is simply off", (await page.getByText(NOTICE, { exact: false }).count()) === 0);
   check("the row says cloud backup still works", await shows(dialog.getByText("Cloud backup still works.", { exact: false })));
   check("status says off", await shows(dialog.getByText("Not blocked", { exact: true })));
   await testButton(dialog).click();
@@ -49,8 +57,12 @@ const SWITCH = "Keep KAPEVault offline";
   check("no page errors (off/on)", errors.length === 0, errors.join(" | "));
   await app.close();
 
-  // ---- A rule left for another copy of the app
-  ({ app, page, errors, dialog } = await openSecurity("other"));
+  // ---- A rule left for another copy of the app: said outside Settings on unlock, then fixed there
+  ({ app, page, errors } = await unlock("other"));
+  check("on unlock, a rule for another copy is announced outside Settings", await shows(page.getByText(NOTICE, { exact: false })));
+  await page.getByRole("button", { name: "Open Settings" }).click();
+  dialog = page.getByRole("dialog");
+  check("Open Settings lands on Security with the Air Wall switch", await shows(toggle(dialog, false)));
   check("a rule for another copy is named as such", await shows(dialog.getByText("Set for another copy of KAPEVault")));
   check("it shows which copy and how to move it", await shows(dialog.getByText("turn on to use this copy", { exact: false })));
   await toggle(dialog, false).click();
@@ -88,8 +100,8 @@ const SWITCH = "Keep KAPEVault offline";
     await page.getByPlaceholder("Master password", { exact: true }).fill(MASTER);
     await page.getByPlaceholder("Confirm master password").fill(MASTER);
     await page.keyboard.press("Enter");
-    await page.getByRole("button", { name: "Settings" }).waitFor({ timeout: 15000 });
-    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("dialog").getByRole("tab", { name: "General" }).click();
     return { ...run, dir, dialog: page.getByRole("dialog") };
   }

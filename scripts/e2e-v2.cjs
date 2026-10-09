@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { createHarness, shows, gone, clip, opened, waitFor } = require("./e2e-harness.cjs");
+const { renderIdCard } = require("./mock-sticker.cjs");
 const { totpCode } = require("../electron/totp.cjs");
 const { parseTotp } = require("../core/index.js");
 
@@ -247,6 +248,20 @@ function codeMatches(code) {
   await page.getByLabel("Rename Mock Client").fill("Mock Client Renamed");
   await page.keyboard.press("Enter");
   check("rename a client", await shows(page.locator("aside").getByText("Mock Client Renamed")));
+  // A client's photo: picked from its menu, cropped square and shown in place of the initials; removable.
+  const clientRow = page.locator("aside").getByRole("button", { name: /^(MC )?Mock Client Renamed( \d+)?$/ });
+  const avatar = clientRow.locator("img");
+  const photoFile = await renderIdCard(path.join(dataDir, "mock-photo.png"));
+  await page.getByRole("button", { name: "Mock Client Renamed options" }).click();
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 5000 }), page.getByRole("menuitem", { name: "Choose photo..." }).click()]);
+  await chooser.setFiles(photoFile);
+  check("a client's chosen photo replaces its initials", await shows(avatar));
+  const shape = await avatar.evaluate((img) => ({ src: img.getAttribute("src")?.slice(0, 23), w: img.naturalWidth, h: img.naturalHeight, shown: img.getBoundingClientRect().width }));
+  check("the photo is kept as a small square JPEG, drawn at 24 px", shape.src === "data:image/jpeg;base64," && shape.w === 128 && shape.h === 128 && shape.shown === 24);
+  await page.getByRole("button", { name: "Mock Client Renamed options" }).click();
+  check("with a photo the menu offers Change and Remove", await shows(page.getByRole("menuitem", { name: "Change photo..." })));
+  await page.getByRole("menuitem", { name: "Remove photo" }).click();
+  check("removing the photo brings the initials back", await gone(avatar) && (await shows(clientRow.getByText("MC", { exact: true }))));
   await page.getByRole("button", { name: "Mock Client Renamed options" }).click();
   await page.getByRole("menuitem", { name: "Delete client..." }).click();
   check("delete asks what happens to the items", await shows(dialog.getByText("This client holds 1 item.")));
@@ -536,22 +551,33 @@ function codeMatches(code) {
   // A real drag on the scrim over a title bar must close the sheet, not move the window.
   const win = await app.evaluate(({ BrowserWindow, screen }) => {
     const w = BrowserWindow.getAllWindows().find((x) => !x.webContents.getURL().includes("#quick"));
+    // An OS press lands on whatever window is on top there. Windows refuses focus() to a background
+    // process, so with another window over it (an editor in use) the press missed: [] (2026-10-10).
+    w.setAlwaysOnTop(true, "screen-saver");
+    w.moveTop();
     w.focus();
     const c = w.getContentBounds();
     // Physical pixels for the press, converted by Windows itself (mixed-DPI monitors included).
-    return { ...w.getBounds(), press: screen.dipToScreenPoint({ x: c.x + 420, y: c.y + 20 }) };
+    return { ...w.getBounds(), pid: process.pid, press: screen.dipToScreenPoint({ x: c.x + 420, y: c.y + 20 }) };
   });
   await page.waitForTimeout(300);
   await page.evaluate(() => {
     window.__downs = [];
     addEventListener("mousedown", (e) => window.__downs.push(`${e.clientX},${e.clientY} ${String(e.target.className).slice(0, 12)}`), true);
   });
-  execFileSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "os-drag.ps1"), String(win.press.x), String(win.press.y)]);
+  const under = String(execFileSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "os-drag.ps1"), String(win.press.x), String(win.press.y)])).trim();
   await page.waitForTimeout(400);
-  const moved = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((x) => !x.webContents.getURL().includes("#quick")).getBounds());
+  const moved = await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows().find((x) => !x.webContents.getURL().includes("#quick"));
+    w.setAlwaysOnTop(false);
+    return w.getBounds();
+  });
   check("dragging the dimmed title bar does not move the window", moved.x === win.x && moved.y === win.y, `${win.x},${win.y} -> ${moved.x},${moved.y}`);
   const downs = await page.evaluate(() => window.__downs);
-  check("the real press landed on the scrim over the title bar", downs[0]?.startsWith("420,20 scrim"), JSON.stringify(downs));
+  // The OS press goes through screen pixels and sometimes lands a pixel or two off (418,21 on a
+  // two-display PC, 2026-10-10): what matters is that it hit the scrim, inside the title bar strip.
+  const [, px, py] = /^(\d+),(\d+) scrim/.exec(downs[0] ?? "") ?? [];
+  check("the real press landed on the scrim over the title bar", px !== undefined && Math.abs(px - 420) <= 3 && Math.abs(py - 20) <= 3, `${JSON.stringify(downs)} app pid=${win.pid} win=${win.x},${win.y} ${win.width}x${win.height} under: ${under}`);
   check("clicking the dimmed title bar closes the sheet", await gone(dialog));
   if (await dialog.isVisible()) await page.keyboard.press("Escape"); // leave a clean window either way
   await page.screenshot({ path: path.join(SHOTS, "theme-dark.png") });

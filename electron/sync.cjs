@@ -31,7 +31,8 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
   let lastSeen = new Map(); // device -> R2 LastModified of its newest snapshot, from the last listing
   let merged = new Map(); // device -> the snapshot key this session already has in it
   let unopened = new Set(); // snapshotStamp()s that would not open: not downloaded again until the object changes
-  let newer = new Set(); // snapshotStamp()s a newer KAPEVault wrote: named on every run, downloaded once until the object changes
+  let newer = new Set(); // snapshotStamp()s a newer KAPEVault wrote (said inside the ciphertext): named on every run, downloaded once until the object changes
+  let ownChecked = new Set(); // snapshotStamp()s under this install's id it never sent, read and found to be no other install's
   let mergedIn = 0; // the session generation `merged` belongs to
   let print = { revision: -1, code: "" }; // the shared state's fingerprint, worked out once per save
 
@@ -100,8 +101,7 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
     const { generation } = vault.syncBase();
     try {
       const objects = await cloud.syncListing();
-      // A snapshot under this install's id that it never uploaded: another install has the same id.
-      if (cloud.notSentHere(objects).length && renewInstallId()) keepLog({ at: now(), with: [], renewedId: true });
+      if ((await sharesThisId(objects)) && renewInstallId()) keepLog({ at: now(), with: [], renewedId: true });
       const devices = vault.syncBase().data.sync.devices;
       const all = core.pickSnapshots(objects, { installId: installId(), devices, now: now(), failed: unopened });
       const stamps = new Map(objects.map((o) => [o.key, core.snapshotStamp(o)]));
@@ -129,13 +129,35 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
     }
   }
 
+  // Another install has this install's id (a copied app data folder): a snapshot under this id that it
+  // never uploaded opens with the vault key and holds a change made under this id that this vault never
+  // made. Anything else there - junk, a stranger's file, a copy of its own snapshot - may be planted by
+  // anyone holding the bucket keys, and taking a new id for it abandoned the old folder's thinning out
+  // (SYNC.md 3.5). The three newest unread a run; each is read once until it changes.
+  async function sharesThisId(objects) {
+    const strangers = new Set(cloud.notSentHere(objects));
+    const unread = objects
+      .filter((o) => strangers.has(o.key) && !ownChecked.has(core.snapshotStamp(o)) && !(Number(o.size) > core.MAX_VAULT_BYTES))
+      .sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0))
+      .slice(0, 3);
+    for (const object of unread) {
+      const opened = vault.openSnapshot(await cloud.fetchSnapshot(object.key));
+      if (opened?.data && core.writesAsThisInstall(vault.syncBase().data.sync, opened.data, opened.salt, installId())) return true;
+      ownChecked.add(core.snapshotStamp(object));
+    }
+    return false;
+  }
+
   // A device's newest snapshot that opens; an older one when the newest will not (every older
   // snapshot is a safe subset of a newer one - never read as an empty vault). newKey: it is under a
   // master password this vault has never had - the user types it once (adoptKey), and only a known
   // device is asked for it: from an unknown one it counts as unopenable. A newKey snapshot does not
   // hide the device's older ones: anyone holding the bucket keys can plant one (no vault key needed), so
   // the next that opens is still merged, with newKey beside it for the prompt. One that will not open
-  // is remembered (unopened), so the next run does not download it again.
+  // is remembered (unopened), so the next run does not download it again. A header that only claims a
+  // newer version is one that will not open: the header is not covered by the tag, so anyone holding the
+  // bucket keys can write it (SYNC.md 3.5). Only a newer minReader or sync.v inside a snapshot that opened
+  // with the vault key says the device runs a newer KAPEVault.
   async function download(pick, name, known, stamps) {
     let newKey = null;
     for (const key of pick.keys) {
@@ -143,7 +165,7 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
       if (newer.has(stamps.get(key))) return { problem: core.newerProblem(name) };
       const bytes = await cloud.fetchSnapshot(key);
       const opened = vault.openSnapshot(bytes);
-      if ((!opened && core.isNewerVaultFile(bytes)) || (opened?.data && core.isNewerData(opened.data))) {
+      if (opened?.data && core.isNewerData(opened.data)) {
         newer.add(stamps.get(key));
         return { problem: core.newerProblem(name) };
       }
@@ -168,7 +190,7 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
     const result = mergeAll(base.data, remotes);
     problems = [...found, ...result.problems];
     const changes = core.syncChanges(base.data, result.data);
-    const reasons = core.reviewReasons(changes, base.data.entries.length, { epoch: result.epoch, key: Boolean(rekey) });
+    const reasons = core.reviewReasons(changes, base.data.entries.length, { epoch: result.epoch, key: Boolean(rekey), removed: result.removed });
     const done = { remotes: result.merged, upToDate };
     dropReview();
     if (reasons.length) {
@@ -259,13 +281,43 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
     return syncNow();
   }
 
-  // Another device, by the ref the page was given: its snapshots are never merged again.
+  // Another device, by the ref the page was given: its snapshots are never merged again. Not during a
+  // restore: it carries the removals it read before its upload, and one made meanwhile would be lost.
   function revoke(ref) {
+    if (holder === "restore") {
+      error = BUSY.restore;
+      publish();
+      return status();
+    }
     const me = installId();
     const id = [...new Set([...Object.keys(vault.syncBase().data.sync.devices), ...lastSeen.keys()])].find((d) => d !== me && refOf(d) === ref);
     if (id && saved(() => vault.revokeDevice(id))) lastSeen.delete(id);
     publish();
     return status();
+  }
+
+  // Back in sync after another device removed this one (SYNC.md 3.9): the vault's own master password,
+  // proven on the vault file through the unlock throttle, then a new install id. The removed id stays
+  // removed on every device (a removal is never lifted); the new one joins like any new device. One locked
+  // out with a new master password since cannot open the others' snapshots until it is typed here too (the
+  // new-master prompt, then a review). Joining needs nothing a removed device lacked before: one that holds
+  // the key and the bucket token could always write under a new id - only a new master password locks out.
+  async function rejoin(master) {
+    await running?.catch(() => {});
+    if (holder) return { ok: false, error: BUSY[holder], status: status() };
+    if (offReason() !== "removed") return { ok: false, error: "This device is not removed from sync.", status: status() };
+    holder = "sync";
+    try {
+      const proof = await throttledUnlock(() => vault.proveCopy(vault.status().path, String(master ?? "")));
+      if (!proof.ok) return { ok: false, error: proof.newer ? proof.error : "Wrong master password.", status: status() };
+      if (offReason() !== "removed") return { ok: false, error: "Nothing to join. Sync again.", status: status() }; // locked meanwhile
+      if (!renewInstallId()) return { ok: false, error: "This device's settings cannot be saved right now. Try again in a moment.", status: status() };
+      [merged, lastSeen, problems] = [new Map(), new Map(), []];
+      keepLog({ at: now(), with: [], renewedId: true });
+    } finally {
+      holder = null;
+    }
+    return { ok: true, status: await syncNow() };
   }
 
   // A save the page asked for; one the disk refused is said on the sync line, and nothing changed.
@@ -336,6 +388,7 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
     adoptKey,
     answerRestore,
     revoke,
+    rejoin,
     syncNow,
     // Unlock never waits on sync.
     afterUnlock: () => run(false),
@@ -350,7 +403,7 @@ function createSync({ vault, cloud, installId, renewInstallId = () => "", device
       clearTimeout(timer);
       timer = null;
       dropReview();
-      [error, problems, newMaster, lastSeen, unopened, newer] = ["", [], null, new Map(), new Set(), new Set()];
+      [error, problems, newMaster, lastSeen, unopened, newer, ownChecked] = ["", [], null, new Map(), new Set(), new Set(), new Set()];
     },
   };
 }

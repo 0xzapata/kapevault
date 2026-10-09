@@ -1,5 +1,6 @@
 import { Buildings, Code, Cpu, DeviceMobile, Devices, EnvelopeSimple, FileText, GoogleDriveLogo, IdentificationCard, Key, Laptop, Link, NotePencil, Package, SecurityCamera, WifiHigh } from "@phosphor-icons/react";
 import appIcon from "../assets/app-icon.svg";
+import { useBlobUrl } from "./photo";
 import { brandBySlug, brandForEntry, type Brand } from "../lib/brands";
 import { signInOption } from "../lib/sign-in";
 import type { Entry, EntryKind, SignInMethod } from "../host/types";
@@ -106,8 +107,10 @@ export function AppIcon({ size }: { size: number }) {
   );
 }
 
-// Contacts-style initials for a space or a person.
-export function Monogram({ name }: { name: string }) {
+// Contacts-style initials for a space or a person, or the space's own photo when it has one.
+export function Monogram({ name, photo }: { name: string; photo?: string }) {
+  const url = useBlobUrl(photo ?? null);
+  if (url) return <img src={url} alt="" draggable={false} className="size-[22px] shrink-0 rounded-full object-cover" />;
   const letters = name
     .split(" ")
     .map((w) => w[0])

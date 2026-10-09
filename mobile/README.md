@@ -227,9 +227,16 @@ One source tree, two product flavors (`android/app/build.gradle`):
 `npm run apk:release` builds the signed APK into `release/KAPEVault-<version>.apk` (gitignored) and
 checks it: signed with the release key (APK signature schemes v2 and v3; v3 allows a key rotation
 later), not debuggable, no shell page. The key is a keystore outside the repo, by default in
-`~/.kapevault-signing/` (the `.jks` + `keystore.properties` with `storeFile`, `storePassword`,
-`keyAlias` and `keyPassword`). **Back that folder up:** without it the installed app can never be updated, and
-uninstalling wipes the phone's vault. `KAPEVAULT_SIGNING` names another properties file;
+`~/.kapevault-signing/` (the `.jks` + `keystore.properties` with `storeFile` and `keyAlias`; the passwords
+are read from `storePassword` / `keyPassword` in that file when it has them, otherwise from the environment
+variables `KAPEVAULT_STORE_PASSWORD` and `KAPEVAULT_KEY_PASSWORD`). **Back the key up, offline:** without it
+the installed app can never be updated, and uninstalling wipes the phone's vault. The key does not need to
+sit on the PC between builds: restore `kapevault-release.jks` to a folder only for a build and run
+`pwsh -File scripts/apk-release-prompt.ps1` (add `-Bundle` for the Play `.aab`) from `mobile/`. It asks for
+the folder and both passwords (hidden), writes a `keystore.properties` with only `storeFile` and
+`keyAlias=kapevault` into that folder, gives the passwords to the build through environment variables of
+that one process, and deletes the file and clears the variables when it ends, whatever the result. Then
+move the `.jks` offline again. `KAPEVAULT_SIGNING` names another properties file;
 `KAPEVAULT_SIGNING=none` builds unsigned (the release proof does this and signs with the debug key
 so it installs over the debug build). The script refuses to build without the key rather than ship
 a debug-signed APK. Version: `version` in `package.json`; versionCode = major x 10000 + minor x 100 +

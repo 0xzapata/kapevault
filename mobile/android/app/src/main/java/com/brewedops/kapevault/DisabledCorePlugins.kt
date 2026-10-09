@@ -82,7 +82,26 @@ class R2OnlyHttpPlugin : CapacitorHttp() {
             return parsed.protocol == "https" &&
                 parsed.userInfo == null &&
                 (parsed.port == -1 || parsed.port == 443) &&
-                parsed.host.lowercase().endsWith(".r2.cloudflarestorage.com")
+                parsed.host.lowercase().endsWith(".r2.cloudflarestorage.com") &&
+                sameHostAfterRebuild(parsed)
+        }
+
+        /**
+         * Capacitor's setUrlParams (run when a request carries `params`) rebuilds the URL from
+         * URI.getAuthority(), which percent-decodes: `https://evil.com%2F.r2.cloudflarestorage.com/x` passes a
+         * check on URL.getHost() and then connects to evil.com. So a host is accepted only when it is plain
+         * (letters, digits, dots, hyphens) and the URL as the rebuild would write it names the same host.
+         */
+        private fun sameHostAfterRebuild(parsed: URL): Boolean {
+            if (!Regex("[A-Za-z0-9.-]+").matches(parsed.host)) return false
+            if (parsed.authority.contains('%')) return false
+            val rebuilt = try {
+                val uri = parsed.toURI()
+                URL(uri.scheme + "://" + uri.authority + uri.path)
+            } catch (_: Exception) {
+                return false
+            }
+            return rebuilt.host.equals(parsed.host, ignoreCase = true) && rebuilt.protocol == parsed.protocol
         }
 
         /**

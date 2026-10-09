@@ -182,7 +182,7 @@ export function LockScreen({ isNew, reason, onOpen }: LockScreenProps) {
         <RestoreSheet
           onClose={() => setRestoring(false)}
           onOpened={(vault, kept) => {
-            toast(restoredNote(kept)); // the toast outlives this screen
+            toast(restoredNote(kept, DEVICE)); // the toast outlives this screen
             setRestoring(false);
             onOpen(vault);
           }}

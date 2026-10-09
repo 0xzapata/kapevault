@@ -3,7 +3,7 @@
 // Listing, downloads, the commit and when a run may start stay in each host.
 import { dueToNotes } from "../due-to-note.js";
 import { payeeToNotes } from "../payee-to-note.js";
-import { tooFarAhead } from "./hlc.js";
+import { compare, tooFarAhead } from "./hlc.js";
 import { adoptEpoch, isNewerEpoch, merge, VaultMismatchError } from "./merge.js";
 import { NewerVaultError } from "../vault-format.js";
 import { readSync, registerDevice } from "./shape.js";
@@ -26,13 +26,15 @@ export const newerProblem = (/** @type {string} */ name) => `${name} runs a newe
 /**
  * Each remote in turn into the local vault. A device that cannot be merged is left out and named in
  * `problems` - one from a newer KAPEVault too, whose snapshot this app must not touch. epoch: a device restored a backup as the vault on all devices, and this one adopts it
- * (SYNC.md 3.7). From its first run this install is in the device list, so a device that restores or
- * merges its vault names it at once (written once: the same record is a no-op).
+ * (SYNC.md 3.7). removed: the merge removes THIS install from sync (another device's removal of it) - the
+ * host holds it for a review, since after it this device syncs no more (SYNC.md 3.9). From its first run
+ * this install is in the device list, so a device that restores or merges its vault names it at once
+ * (written once: the same record is a no-op).
  * @template {{ sync: any }} T
  * @template {Remote} R
  * @param {T} local @param {R[]} remotes
  * @param {{ installId: string, device: { name: string, platform: string }, now: number, sha256: (text: string) => string }} context
- * @returns {{ data: T, merged: (R & { name: string })[], problems: string[], epoch: boolean }}
+ * @returns {{ data: T, merged: (R & { name: string })[], problems: string[], epoch: boolean, removed: boolean }}
  */
 export function mergeRemotes(local, remotes, { installId, device, now, sha256 }) {
   let data = local;
@@ -70,7 +72,32 @@ export function mergeRemotes(local, remotes, { installId, device, now, sha256 })
     }
   }
   const sync = registerDevice(data.sync, { installId, ...device, now });
-  return { data: sync === data.sync ? data : { ...data, sync }, merged, problems, epoch };
+  const removed = !local.sync.devices[installId]?.revokedAt && Boolean(sync.devices[installId]?.revokedAt);
+  return { data: sync === data.sync ? data : { ...data, sync }, merged, problems, epoch, removed };
+}
+
+/**
+ * A snapshot under this install's own id that it never uploaded, opened with the vault key (SYNC.md 3.5):
+ * does it hold a change made under this id that this vault never made - an item version or a device record
+ * this vault does not have? Only another install running under the same id writes one (a copied app data
+ * folder). A replay or copy of this install's own snapshot holds nothing new, and a planted object never
+ * opens: neither may make an install take a new id. A sync object this app cannot read holds nothing.
+ * @param {import("./shape.js").Sync} local this vault's @param {any} data the snapshot's, decrypted
+ * @param {string} salt its header's @param {string} installId this install's
+ */
+export function writesAsThisInstall(local, data, salt, installId) {
+  let theirs;
+  try {
+    theirs = readSync(data, salt);
+  } catch {
+    return false;
+  }
+  const seen = (/** @type {string} */ id) => Math.max(local.meta[id]?.vv[installId] ?? 0, local.gone[id]?.vv[installId] ?? 0);
+  const versions = [...Object.entries(theirs.meta), ...Object.entries(theirs.gone)];
+  if (versions.some(([id, record]) => (record.vv[installId] ?? 0) > seen(id))) return true;
+  const theirRecord = theirs.devices[installId];
+  const ownRecord = local.devices[installId];
+  return Boolean(theirRecord) && (!ownRecord || compare(theirRecord.addedAt, ownRecord.addedAt) > 0);
 }
 
 /**
@@ -104,7 +131,7 @@ export function reviewView(before, result, changes, reasons) {
   const titleIn = (/** @type {{ id: string, title: string }[]} */ entries) => (/** @type {string} */ id) => entries.find((e) => e.id === id)?.title ?? "";
   const after = titleIn(result.data.entries);
   return {
-    from: result.merged.map((r) => r.name),
+    from: [...new Set(result.merged.map((r) => r.name))], // one device's several snapshots name it once
     reasons,
     added: changes.added.map(after),
     changed: changes.changed.map(after),

@@ -5,6 +5,7 @@ import com.getcapacitor.annotation.CapacitorPlugin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.URL
 
 // Capacitor registers its WebView and CapacitorHttp plugins first and lets the app's own plugin of the
 // same name replace them (Bridge.registerAllPlugins, then Bridge.registerPlugin's map put). The page then
@@ -46,6 +47,28 @@ class DisabledCorePluginsTest {
             "https://x.r2.cloudflarestorage.com:8443/b",
             "ftp://x.r2.cloudflarestorage.com/b",
         )) assertTrue(bad.toString(), !R2OnlyHttpPlugin.isR2Url(bad))
+    }
+
+    @Test
+    fun `a percent-encoded authority cannot slip past the host check when Capacitor rebuilds the URL`() {
+        // setUrlParams rebuilds the URL from URI.getAuthority() (percent-decoded). This is that step.
+        fun rebuiltHost(url: String): String {
+            val uri = URL(url).toURI()
+            return URL(uri.scheme + "://" + uri.authority + uri.path).host
+        }
+        val evil = "https://evil.example%2F.r2.cloudflarestorage.com/x"
+        assertEquals("evil.example", rebuiltHost(evil)) // the connection would go to evil.example
+        assertTrue(evil, !R2OnlyHttpPlugin.isR2Url(evil))
+        for (bad in listOf(
+            "https://evil.example%2f.r2.cloudflarestorage.com/x",
+            "https://evil.example%40x.r2.cloudflarestorage.com/x",
+            "https://x%2E.r2.cloudflarestorage.com/x",
+            "https://ev il.r2.cloudflarestorage.com/x",
+        )) assertTrue(bad, !R2OnlyHttpPlugin.isR2Url(bad))
+        // The real shape of a bucket URL still passes, and the rebuild keeps its host.
+        val ok = "https://0123abcd.r2.cloudflarestorage.com/kapevault/vault.kapevault"
+        assertTrue(R2OnlyHttpPlugin.isR2Url(ok))
+        assertEquals("0123abcd.r2.cloudflarestorage.com", rebuiltHost(ok))
     }
 
     @Test

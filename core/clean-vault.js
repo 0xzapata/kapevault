@@ -11,6 +11,7 @@
 import { KINDS } from "./entries.js";
 import { cleanPhoto } from "./devices.js";
 import { parseR2Url } from "./r2.js";
+import { MAX_SPACE_PHOTO_BYTES } from "./spaces.js";
 /** @import { VaultData } from "./entries.js" */
 
 // Deeper than any vault KAPEVault writes (entries > item > backup codes > paper copy is 5).
@@ -28,13 +29,14 @@ const text = (v) => (isText(v) ? v : undefined);
 const smallInt = (v) => (Number.isInteger(v) && v >= 0 && v < 1000 ? v : undefined);
 const listOf = (row) => (v) => (Array.isArray(v) ? v.map(row).filter((r) => r !== undefined) : undefined);
 const recordOf = (fields) => (v) => (isRecord(v) ? keep(v, fields) : undefined);
-const photo = (v) => {
+const photoUnder = (/** @type {number | undefined} */ max) => (/** @type {unknown} */ v) => {
   try {
-    return cleanPhoto(v);
+    return cleanPhoto(v, max);
   } catch {
     return undefined;
   }
 };
+const photo = photoUnder(undefined);
 
 // Copies `value` with every known field checked; unknown fields ride along as they are.
 /** @param {any} value @param {Record<string, (v: any) => any>} fields @returns {Record<string, any>} */
@@ -109,7 +111,7 @@ const cloud = (v) => {
 export function cleanVault(data) {
   if (!isRecord(data) || !Array.isArray(data.entries) || !Array.isArray(data.spaces) || tooDeep(data)) throw new Error("That vault's contents are damaged.");
   /** @type {any[]} */
-  const spaces = data.spaces.filter((s) => isRecord(s) && isId(s.id) && isText(s.name)).map((s) => keep(s, { kind: text }));
+  const spaces = data.spaces.filter((s) => isRecord(s) && isId(s.id) && isText(s.name)).map((s) => keep(s, { kind: text, photo: photoUnder(MAX_SPACE_PHOTO_BYTES) }));
   const seen = new Set();
   /** @type {any[]} */
   const entries = [];

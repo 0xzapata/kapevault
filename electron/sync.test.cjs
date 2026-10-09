@@ -7,6 +7,7 @@ const path = require("node:path");
 const { createVaultSession } = require("./vault-session.cjs");
 const { createCloudBackup, configFromInput } = require("./cloud-backup.cjs");
 const { createSync } = require("./sync.cjs");
+const { createRestores } = require("./restore.cjs");
 const { encryptWithKey, openFile } = require("./vault-crypto.cjs");
 
 const MASTER = "correct horse battery orbit gazelle";
@@ -109,7 +110,7 @@ const onDisk = async (dev, master = MASTER) => (await openFile(master, JSON.pars
 // A restore as main runs it: the backup's file written over this device's vault, then the pause.
 async function restoreFrom(dev, bytes) {
   const check = await dev.vault.verifyBackup(bytes.toString("utf8"), MASTER);
-  dev.vault.commitRestore(bytes.toString("utf8"), check.opened, { cloud: dev.vault.cloudConfig() });
+  dev.vault.commitRestore(bytes.toString("utf8"), check.opened, { cloud: dev.vault.cloudConfig(), carry: check.carry });
   dev.sync.pauseAfterRestore();
 }
 
@@ -422,13 +423,18 @@ test("one of sync, restore and master password change at a time: the others wait
   const { pc, phone } = await pair();
   const syncing = phone.sync.syncNow();
   assert.equal(phone.sync.status().state, "running");
+  const [ref] = phone.sync.status().devices.map((d) => d.ref);
+  let removedDuring = null;
   const restore = phone.sync.exclusive("restore", async () => {
+    removedDuring = phone.sync.revoke(ref); // the restore carries the removals it read: one now would be lost
     await sleep(30);
     return { ok: true, during: phone.sync.status().state };
   });
   assert.deepEqual(await phone.sync.exclusive("master", async () => ({ ok: true })), { ok: false, error: "A restore is already running." });
   await syncing;
   assert.deepEqual(await restore, { ok: true, during: "idle" }, "the restore ran after the sync, not during it");
+  assert.equal(removedDuring.error, "A restore is already running.");
+  assert.equal(removedDuring.devices.length, 1, "no removal during a restore");
   const runs = pc.runs;
   const held = pc.sync.exclusive("master", () => sleep(50));
   await pc.sync.syncNow();
@@ -522,6 +528,34 @@ test("two installs sharing an id: the one that finds a snapshot it never sent ta
   assert.equal(phone.sync.status().devices.length, 2, "the PC and the copy");
 });
 
+// Security re-scan 2026-10-10: one object anyone with the bucket keys put under this install's folder
+// made it take a new id - it then stopped thinning out its old folder and showed up as a new device. Only
+// a snapshot that opens with the vault key and holds a change made under this id that this vault never
+// made is another install sharing the id.
+for (const [what, plant] of [
+  ["junk", () => Buffer.from("not a vault")],
+  ["a header claiming a newer version", () => Buffer.from('{"format":"kapevault","version":2}')],
+  ["a stranger's vault", (_dev, stranger) => fs.readFileSync(stranger.file)],
+  ["a copy of one of its own snapshots", (dev, _stranger, bucket) => bucket.objects.get(bucket.newest(dev.id))],
+]) {
+  test(`${what} planted under this install's own id never makes it take a new id`, async () => {
+    const { bucket, phone, personal } = await pair();
+    const stranger = wire(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-sync-")), "00000000-0000-4000-8000-000000000003", "Junk", fakeBucket());
+    await stranger.vault.create("xK9#mQ2$vL7@pZ4!wR8&tN3");
+    const key = `kapevault/snapshots/${PHONE}/2026-09-30T00-00-00-000Z.kapevault`;
+    bucket.objects.set(key, plant(phone, stranger, bucket));
+    bucket.modified.set(key, Date.now());
+    const gets = () => bucket.log.filter((l) => l === `GET ${key}`).length;
+    await phone.sync.syncNow();
+    assert.equal(phone.id, PHONE, "the same id");
+    assert.ok(!(await onDisk(phone)).syncLog.some((e) => e.renewedId));
+    phone.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock after the plant", body: "b" });
+    await phone.sync.syncNow();
+    assert.equal(phone.id, PHONE);
+    assert.ok(gets() <= 1, "read at most once");
+  });
+}
+
 test("a device removed from sync is never merged again, and the removed one says so", async () => {
   const { pc, phone, personal } = await pair();
   const [ref] = phone.sync.status().devices.map((d) => d.ref);
@@ -533,9 +567,63 @@ test("a device removed from sync is never merged again, and the removed one says
   assert.ok(!titles(phone).includes("Mock from the removed PC"));
   assert.deepEqual(status.problems, []);
 
-  status = await pc.sync.syncNow(); // the PC reads the phone's snapshot with the removal in it
-  assert.equal(status.off, "removed");
+  status = await pc.sync.syncNow(); // the PC reads the phone's snapshot with the removal in it: a review first
+  assert.ok(status.review.reasons.includes("removed"));
+  await pc.sync.apply();
+  assert.equal(pc.sync.status().off, "removed");
   assert.equal(phone.sync.revoke("0000000000000000").devices.length, 0, "an unknown ref changes nothing");
+});
+
+// Security re-scan 2026-10-10: anyone with the vault key could switch off the owner's devices for good -
+// the removal was merged with no review, and nothing ever let a removed device back, even after the
+// owner locked everyone else out with a new master password.
+test("a snapshot that removes this device waits for a review: nothing changes here until Apply", async () => {
+  const { pc, phone, personal } = await pair();
+  phone.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock from the phone", body: "b" });
+  const [ref] = phone.sync.status().devices.map((d) => d.ref);
+  phone.sync.revoke(ref);
+  await phone.sync.syncNow();
+  const status = await pc.sync.syncNow();
+  assert.equal(status.state, "review");
+  assert.deepEqual(status.review.reasons, ["removed"]);
+  assert.deepEqual(status.review.from, ["Mock Phone"]);
+  assert.equal(status.off, null, "still syncing until the user says yes");
+  assert.equal((await onDisk(pc)).sync.devices[PC].revokedAt, undefined, "nothing written");
+  assert.ok(!titles(pc).includes("Mock from the phone"));
+  await pc.sync.apply();
+  assert.equal(pc.sync.status().off, "removed");
+  assert.ok((await onDisk(pc)).sync.devices[PC].revokedAt);
+});
+
+test("a removed device joins again with the vault's master password, under a new id; the old id stays removed", async () => {
+  const { pc, phone, personal } = await pair();
+  const [ref] = phone.sync.status().devices.map((d) => d.ref);
+  phone.sync.revoke(ref);
+  await phone.vault.changeMaster(MASTER, NEW_MASTER); // the owner finishes the lock-out on the phone
+  await phone.sync.syncNow();
+  await pc.sync.syncNow();
+  await pc.sync.apply();
+  assert.equal(pc.sync.status().off, "removed");
+
+  let joined = await pc.sync.rejoin("not the master password orbit gazelle");
+  assert.equal(joined.ok, false);
+  assert.equal(pc.id, PC, "a wrong password changes nothing");
+  assert.equal(pc.sync.status().off, "removed");
+  joined = await pc.sync.rejoin(MASTER); // this vault's own master password, not the phone's new one
+  assert.equal(joined.ok, true);
+  assert.notEqual(pc.id, PC, "a new install id");
+  assert.equal(joined.status.off, null);
+  assert.equal(joined.status.newMaster, "Mock Phone", "and it asks for the phone's new master password");
+  await pc.sync.adoptKey(NEW_MASTER);
+  await pc.sync.apply();
+  pc.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock after joining again", body: "b" });
+  await pc.sync.syncNow();
+  await phone.sync.syncNow();
+  assert.ok(titles(phone).includes("Mock after joining again"), "the phone merges the PC again");
+  const devices = (await onDisk(phone, NEW_MASTER)).sync.devices;
+  assert.ok(devices[PC].revokedAt, "the old id stays removed");
+  assert.equal(devices[pc.id].revokedAt, undefined);
+  assert.equal((await pc.sync.rejoin(MASTER)).ok, false, "only a removed device joins again");
 });
 
 // Audit crypto 1 (2026-10-04): removing a device only stops its folder merging. A device that still has
@@ -553,6 +641,52 @@ test("a removed device stays on the lock-out list until the master password chan
   await pc.vault.changeMaster(MASTER, NEW_MASTER);
   assert.deepEqual(pc.sync.status().lockOut, [], "a new key was made after the removal");
   assert.equal(phone.vault.status().unlocked, true);
+});
+
+// Security re-scan 2026-10-10: restoring a backup made before a lock-out put back the old key and dropped
+// the removal; the next uploads opened with the master password the lost device still knows, and its
+// snapshots merged again. As main runs it: restore.cjs, the restore's own upload, then the pause.
+async function restoreAs(dev, text, master = MASTER) {
+  const restores = createRestores({ vault: dev.vault, cloud: dev.cloud, throttledUnlock: (attempt) => attempt(), device: "PC" });
+  const result = await restores.restore({ load: () => text, master }, () => dev.sync.pauseAfterRestore());
+  await dev.cloud.flush();
+  return result;
+}
+
+test("a restore of a backup from before a lock-out keeps the removal and the new key; the removed device stays out", async () => {
+  const { bucket, pc, phone, personal } = await pair();
+  const before = bucket.objects.get(bucket.newest(PC)).toString("utf8"); // under MASTER, the phone listed
+  const [ref] = pc.sync.status().devices.map((d) => d.ref);
+  pc.sync.revoke(ref);
+  await pc.vault.changeMaster(MASTER, NEW_MASTER); // the lock-out, finished
+  assert.deepEqual(pc.sync.status().lockOut, []);
+
+  assert.equal((await restoreAs(pc, before)).ok, true);
+  const restored = await onDisk(pc, NEW_MASTER);
+  assert.ok(restored, "the restored vault opens with the new master password");
+  assert.equal(await openFile(MASTER, JSON.parse(fs.readFileSync(pc.file, "utf8"))), null, "and not with the old one");
+  assert.ok(restored.sync.devices[PHONE].revokedAt, "the phone stays removed");
+  assert.deepEqual(pc.sync.status().lockOut, [], "and locked out");
+  const upload = bucket.objects.get(bucket.newest(PC));
+  assert.equal(await openFile(MASTER, JSON.parse(upload.toString("utf8"))), null, "what goes up does not open with the old key");
+
+  phone.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock from the lost phone", body: "b" });
+  await phone.cloud.backupNow();
+  const lost = await copyOf(phone, "eeeeeeee-1b7e-4d8e-9a53-6f0c1d2e3f40", "Mock Lost Phone copy", bucket); // the old key, under a new id
+  await lost.cloud.backupNow();
+  await pc.sync.answerRestore(false);
+  assert.ok(!titles(pc).includes("Mock from the lost phone"), "nothing of the removed device merges");
+});
+
+test("a restore never lifts a removal, even of a backup under the master password of today", async () => {
+  const { bucket, pc } = await pair();
+  const before = bucket.objects.get(bucket.newest(PC)).toString("utf8");
+  const [ref] = pc.sync.status().devices.map((d) => d.ref);
+  pc.sync.revoke(ref);
+  assert.equal((await restoreAs(pc, before)).ok, true);
+  const restored = await onDisk(pc);
+  assert.ok(restored.sync.devices[PHONE].revokedAt, "the phone stays removed");
+  assert.deepEqual(pc.sync.status().lockOut.map((d) => d.name), ["Mock Phone"], "and still to be locked out");
 });
 
 test("a master password changed BEFORE the removal does not count as locking the device out", async () => {
@@ -635,10 +769,11 @@ function plantNewer(bucket, opened, { header = {}, data = (d) => d } = {}) {
 
 const NEWER = "Mock Phone runs a newer KAPEVault. Update this app.";
 
+// Only a claim inside the ciphertext (minReader, sync.v) is authenticated: the header is not covered by
+// the tag, so a header version is what anyone with the bucket keys can write (SYNC.md 3.5).
 for (const [what, planted] of [
   ["a sync object at v 2", { data: (d) => ({ ...d, sync: { ...d.sync, v: 2, gone: {} } }) }],
   ["a minReader of 2", { data: (d) => ({ ...d, minReader: 2 }) }],
-  ["a file header at version 2", { header: { version: 2 } }],
 ]) {
   test(`a snapshot with ${what} is skipped and named, never merged and never read as damaged; this vault is not touched`, async () => {
     const { bucket, pc, phone, personal } = await pair();
@@ -658,10 +793,37 @@ for (const [what, planted] of [
   });
 }
 
-for (const [what, planted] of [
-  ["a sync object at v 2", { data: (d) => ({ ...d, sync: { ...d.sync, v: 2, gone: {} } }) }],
-  ["a file header at version 2", { header: { version: 2 } }],
+// Security re-scan 2026-10-10: about 35 bytes with no vault key, planted as a device's newest object,
+// said "update this app" and stopped that device's real snapshots for good. A header is not
+// authenticated, so it is passed over like any other plant that will not open.
+for (const [what, plant] of [
+  ["a bare header claiming version 2", () => Buffer.from('{"format":"kapevault","version":2}')],
+  ["a real snapshot with its header edited to version 2", (opened) => Buffer.from(JSON.stringify({ ...encryptWithKey(opened.key, opened.kdf, opened.salt, opened.data), version: 2 }))],
 ]) {
+  test(`${what} in a known device's folder does not stop its real snapshots, and says nothing of a newer app`, async () => {
+    const { bucket, pc, phone, personal } = await pair();
+    phone.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock from the phone", body: "b" });
+    await phone.sync.syncNow(); // the phone's real newest snapshot, the one before the plant
+    const key = `kapevault/snapshots/${PHONE}/2026-09-30T00-00-00-000Z.kapevault`;
+    bucket.objects.set(key, plant(await openFile(MASTER, JSON.parse(fs.readFileSync(phone.file, "utf8")))));
+    bucket.modified.set(key, Date.now() + DAY);
+    const gets = () => bucket.log.filter((l) => l === `GET ${key}`).length;
+    let status = await pc.sync.syncNow();
+    assert.ok(titles(pc).includes("Mock from the phone"), "the phone's real snapshot is still merged");
+    assert.deepEqual(status.problems, []);
+    assert.equal(status.error, "");
+    phone.vault.saveEntry({ kind: "note", spaceId: personal, title: "Mock later from the phone", body: "c" });
+    await phone.cloud.backupNow(); // a newer real snapshot (a backup: the phone's own sync would see the plant too)
+    bucket.modified.set(key, Date.now() + 2 * DAY); // and it is planted again as the newest
+    status = await pc.sync.syncNow();
+    assert.ok(titles(pc).includes("Mock later from the phone"), "and the next one too");
+    assert.deepEqual(status.problems, []);
+    await pc.sync.syncNow();
+    assert.equal(gets(), 2, "downloaded once per change, like any plant that will not open");
+  });
+}
+
+for (const [what, planted] of [["a sync object at v 2", { data: (d) => ({ ...d, sync: { ...d.sync, v: 2, gone: {} } }) }]]) {
   test(`a snapshot with ${what} is downloaded once and named on every run, then read again when it changes`, async () => {
     const { bucket, pc, phone } = await pair();
     await phone.sync.syncNow();

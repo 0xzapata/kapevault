@@ -5,11 +5,16 @@ import { Sheet } from "./Sheet";
 
 // A photo from the vault (a JPEG data URL) as a blob: URL: the page's CSP lets images come from the
 // app's own files and blob: only. Revoked when the photo changes or the view goes.
-function useBlobUrl(dataUrl: string | null) {
+export function useBlobUrl(dataUrl: string | null) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!dataUrl) return setUrl(null);
-    const bytes = Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(",") + 1)), (c) => c.charCodeAt(0));
+    let bytes: Uint8Array<ArrayBuffer>;
+    try {
+      bytes = Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(",") + 1)), (c) => c.charCodeAt(0));
+    } catch {
+      return setUrl(null); // a photo that does not decode is not drawn; an error here would blank the app
+    }
     const made = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
     setUrl(made);
     return () => URL.revokeObjectURL(made);

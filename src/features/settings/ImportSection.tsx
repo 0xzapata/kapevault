@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/form";
 import { vaultApi } from "@/lib/vault-api";
-import { plural } from "@/lib/local-date";
+import { importLines } from "./lib/import-note";
 import type { VaultView } from "@/features/vault/types";
 import { Group } from "./SettingRow";
 
@@ -19,14 +19,7 @@ export function ImportSection({ onImported }: { onImported: (vault: VaultView) =
       return;
     }
     onImported(result.vault);
-    const lines = [`Added ${plural(result.added, "item")} from ${result.source}.`];
-    if (result.skipped) lines.push(`${plural(result.skipped, "item")} skipped, already in the vault.`);
-    for (const { reason, count } of result.unreadable) lines.push(`${plural(count, "row")} skipped: ${reason}.`);
-    lines.push(...result.notes);
-    if (result.kept) lines.push(`Kept the file: ${plural(result.kept, "item")} could not be imported.`);
-    else if (result.deleted) lines.push("The file was deleted. It held every password in plain text.");
-    else lines.push(`Could not delete ${result.name}. Delete it yourself, it holds every password in plain text.`);
-    setNote({ lines, error: !result.deleted });
+    setNote({ lines: importLines(result), error: !result.deleted });
   }
 
   return (

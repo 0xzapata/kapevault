@@ -2,7 +2,8 @@
 // release APK signed with KAPEVault's release key, copies it to release/KAPEVault-<version>.apk and
 // proves it: signed by that key (not the debug one), the package.json version, not debuggable.
 // The key: ~/.kapevault-signing/keystore.properties, or the file KAPEVAULT_SIGNING names (the same
-// file android/app/build.gradle reads).
+// file android/app/build.gradle reads). The two passwords may be left out of that file and given as
+// KAPEVAULT_STORE_PASSWORD / KAPEVAULT_KEY_PASSWORD instead (apk-release-prompt.ps1 does this).
 // With --bundle (`npm run aab:release`) it makes the Android App Bundle Google Play takes instead,
 // release/KAPEVault-<version>.aab, and proves the same three things of it.
 // Both are the play flavor (with Google Play Billing). `npm run apk:release -- --foss` makes the foss
@@ -15,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { env, jdk, sdk } from "./android-env.mjs";
+import { missingSigning, parseProperties, resolveSigning } from "./lib/signing.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = process.argv.includes("--bundle");
@@ -32,13 +34,9 @@ const signingFile = process.env.KAPEVAULT_SIGNING ?? path.join(os.homedir(), ".k
 // A debug-signed APK on a phone can never be updated by the real one without an uninstall, which
 // wipes the vault, so there is no fallback key here.
 if (!fs.statSync(signingFile, { throwIfNoEntry: false })?.isFile()) fail(`no release key at ${signingFile} (set KAPEVAULT_SIGNING to its keystore.properties).`);
-const signing = Object.fromEntries(
-  fs
-    .readFileSync(signingFile, "utf8")
-    .split(/\r?\n/)
-    .filter((line) => /^\s*[^#!\s]/.test(line))
-    .map((line) => line.split(/=(.*)/).map((s) => s.trim())),
-);
+const signing = resolveSigning(parseProperties(fs.readFileSync(signingFile, "utf8")));
+const missing = missingSigning(signing);
+if (missing.length) fail(`${signingFile} is incomplete, missing: ${missing.join(", ")}.`);
 
 const version = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
 const gradle = spawnSync(process.execPath, [path.join(root, "scripts", "gradle.mjs"), bundle ? `bundle${Flavor}Release` : `assemble${Flavor}Release`, "--quiet"], { cwd: root, env, stdio: "inherit" });

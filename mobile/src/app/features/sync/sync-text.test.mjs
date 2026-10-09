@@ -1,7 +1,7 @@
 // The sync line and the Sync now toast for a phone without Pro: it only backs up, and says so.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { afterSyncToast, lastTime, syncLineText, syncsNow } from "./sync-text.ts";
+import { afterSyncToast, lastTime, reviewSentences, syncLineText, syncsNow } from "./sync-text.ts";
 
 const ago = () => "2 min ago";
 const free = (more = {}) => ({
@@ -54,4 +54,10 @@ test("the button backs up and says Backed up whenever this phone does not sync",
   assert.equal(syncsNow(synced), true);
   assert.equal(afterSyncToast(synced), "Synced with DESKTOP-4F2A");
   assert.equal(afterSyncToast({ ...synced, review: { from: ["DESKTOP-4F2A"] } }), null);
+});
+
+test("a removal is a review with its own sentence, and a new master password keeps its own", () => {
+  const review = { from: ["DESKTOP-4F2A"], reasons: ["removed"], added: [], changed: [], deleted: [], copies: [], secretItems: 0 };
+  assert.deepEqual(reviewSentences(review), ["This phone was removed from sync on another device. After Apply it syncs no more."]);
+  assert.deepEqual(reviewSentences({ ...review, reasons: ["key"] }), ["DESKTOP-4F2A set a new master password. After Apply it unlocks this vault too."]);
 });

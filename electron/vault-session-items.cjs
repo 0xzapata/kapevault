@@ -99,6 +99,10 @@ function createItems(ctx) {
     return commit((data) => core.renameSpace(data, id, name));
   }
 
+  function setSpacePhoto(id, photo) {
+    return commit((data) => core.setSpacePhoto(data, id, photo));
+  }
+
   function deleteSpace(id, moveToId) {
     return commit((data) => core.deleteSpace(data, id, moveToId));
   }
@@ -153,6 +157,7 @@ function createItems(ctx) {
     touch,
     addSpace,
     renameSpace,
+    setSpacePhoto,
     deleteSpace,
     clearHistory,
     recordGenerated,

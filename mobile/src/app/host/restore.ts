@@ -1,7 +1,7 @@
 // Restores: a backup from R2 or a picked file, opened with its own master password, then written over
 // the vault here, keeping the vault it replaces in the one slot (the PC's restore.cjs rules). Plus the
 // password proofs the host shares: a master password typed for another file, or for this vault's own.
-import { NewerVaultError, SHARED_FIELDS, checkReader, isNewerVaultFile, readSync, withKeySalt } from "@core";
+import { NewerVaultError, SHARED_FIELDS, carryLockOut, checkReader, isNewerVaultFile, readSync, withKeySalt } from "@core";
 import type { createBiometric } from "./biometric";
 import { backupsOf, listSnapshots, readSnapshotKey, type Backups } from "./cloud";
 import { parseR2Url, type CloudConfig, type R2Client, type R2Object } from "./r2";
@@ -19,6 +19,15 @@ const WRONG_BACKUP = "Wrong master password for that backup.";
 const NOT_A_BACKUP = "That file is not a KAPEVault backup. Pick the .kapevault file.";
 const FILE_TOO_BIG = "That file is too big to be a KAPEVault backup.";
 // A backup a newer KAPEVault saved is neither a wrong password nor damaged: the throttle does not count it.
+// The question before a restore from before a newer master password (SYNC.md 3.6). Unlocked, a restore
+// whose key a lock-out retired keeps this phone's current key (carryLockOut), so "behind" is then only
+// possible, not certain: whether the current key is as new as the other device's is not known here.
+export function olderKeyQuestion(newer: string, keepsKey: boolean): string {
+  const head = `This backup is from before the master password was changed on ${newer}.`;
+  if (keepsKey) return `${head} The restore keeps this phone's current master password. If that one is older than the one on ${newer}, your other devices will see this phone as behind until you type the newer master password here. Restore it anyway?`;
+  return `${head} Your other devices will see this phone as behind and not sync with it until you type that newer master password here. Restore it anyway?`;
+}
+
 export const newerResult = () => ({ ok: false as const, newer: true as const, error: new NewerVaultError().message });
 const SLOT_TAKEN = "This phone already keeps a vault from an earlier restore, and it stays as it is. Replace the vault here without keeping a copy?";
 
@@ -123,10 +132,26 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
     return openThrottled(file, master, WRONG_BACKUP);
   }
 
+  // What a restore keeps of the open vault it replaces (SYNC.md 3.7, core carryLockOut, the PC's
+  // restoreCarry): its device removals, and its key when the backup is under a master password a lock-out
+  // retired - the restore is then written under the open vault's key (a copy of its raw bytes, wiped on
+  // failure; a lock meanwhile wipes the session's own). Locked, there is nothing readable to keep.
+  function restoreCarry(opened: OpenVault): { sync: ReturnType<typeof readSync>; key: OpenVault | null } | null {
+    const open = session.open;
+    if (!open) return null;
+    const salt = toBase64(opened.salt);
+    const { sync, keepKey } = carryLockOut(open.data.sync, toBase64(open.salt), readSync(opened.data, salt), salt);
+    return { sync, key: keepKey ? { raw: open.raw.slice(), key: open.key, kdf: open.kdf, salt: open.salt.slice(), data: opened.data } : null };
+  }
+
   // The restore's last half, for a backup from R2 or a picked file: keep the vault it replaces (one slot;
   // holding another vault, ask first - needsConfirm - and `replace` goes ahead without a copy, the PC's
-  // restore.cjs rule), write the backup with `cloud` as this phone's R2 setup, then unlock it.
-  async function replaceWith(opened: OpenVault, cloud: CloudConfig | undefined, replace?: { current?: string }): Promise<RestoreResult> {
+  // restore.cjs rule), write the backup with `cloud` as this phone's R2 setup, then unlock it - with the
+  // removals (and after a lock-out the key) of the vault it replaces (restoreCarry, read before any await).
+  async function replaceWith(backup: OpenVault, cloud: CloudConfig | undefined, replace?: { current?: string }): Promise<RestoreResult> {
+    const carry = restoreCarry(backup);
+    if (carry?.key) backup.raw.fill(0);
+    const opened = carry?.key ?? backup;
     try {
       const { current, kept, keepReplaced } = await readSlot();
       if (kept !== null && kept !== current) {
@@ -145,6 +170,7 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
         }
       }
       const data = sharedOnly(opened, cloud);
+      if (carry) data.sync = carry.sync;
       await session.writeVault(opened, data, keepReplaced);
       opened.data = data;
     } catch (e) {
@@ -205,8 +231,10 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
       const { opened } = tried;
       const newer = acceptOlder ? null : await newerKeyThan(cloud, backupKey, opened).catch(() => null);
       if (newer) {
+        const open = session.open;
+        const keepsKey = Boolean(open && carryLockOut(open.data.sync, toBase64(open.salt), readSync(opened.data, toBase64(opened.salt)), toBase64(opened.salt)).keepKey);
         opened.raw.fill(0);
-        return { ok: false, olderKey: true, error: `This backup is from before the master password was changed on ${newer}. Your other devices will see this phone as behind and not sync with it until you type that newer master password here. Restore it anyway?` };
+        return { ok: false, olderKey: true, error: olderKeyQuestion(newer, keepsKey) };
       }
       return replaceWith(opened, cloud, replace);
     },

@@ -70,7 +70,7 @@ $ml['EnableModuleLogging'] = 1
 $ml['ModuleNames'] = [string[]]@('*')
 $cache["$base\\ModuleLogging"] = $ml
 foreach ($m in Get-Module) { $m.LogPipelineExecutionDetails = $true }
-Start-Transcript -Path (Join-Path $env:KVW_TRANSCRIPT_DIR 'emulated.txt') -IncludeInvocationHeader | Out-Null
+Start-Transcript -Path (Join-Path $env:KVW_TRANSCRIPT_DIR "emulated-$([guid]::NewGuid()).txt") -IncludeInvocationHeader | Out-Null
 `;
 const STOP_TRANSCRIPT = "Stop-Transcript | Out-Null";
 
@@ -95,10 +95,18 @@ function replayScript(challengeB64) {
   return `$Op = 'sign'; $Challenge = '${challengeB64}'\n${src.slice(0, cut)}${standIn}${src.slice(tail)}`;
 }
 
-// Every transcript file's text, and every Operational event (id + message) since `since`.
-function readLogs(since) {
-  const files = fs.readdirSync(transcriptDir, { recursive: true }).map((f) => path.join(transcriptDir, String(f))).filter((f) => fs.statSync(f).isFile());
-  const transcripts = files.map((f) => fs.readFileSync(f, "utf8")).join("\n");
+const transcriptFiles = () => fs.readdirSync(transcriptDir, { recursive: true }).map((f) => path.join(transcriptDir, String(f))).filter((f) => fs.statSync(f).isFile());
+
+const transcriptSizes = () => new Map(transcriptFiles().map((f) => [f, fs.statSync(f).size]));
+
+// The transcript text written after `sizes` was taken (what each file gained, and every new file), and
+// every Operational event (id + message) since `since`. Emulated runs append to one file; under the real
+// policy keys each process writes its own. Transcripts are read BEFORE the Get-WinEvent call: with the
+// real keys that call is transcribed too, and its output holds the control run's events, canary
+// included (2026-10-10: an HKLM run counted those 2 as a leak of the Hello script).
+function readLogs(since, sizes = new Map()) {
+  const files = transcriptFiles();
+  const transcripts = files.map((f) => fs.readFileSync(f).subarray(sizes.get(f) ?? 0).toString("utf8")).join("\n");
   const command = `Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-PowerShell/Operational'; StartTime = [datetime]'${since.toISOString()}' } -ErrorAction SilentlyContinue | ForEach-Object { "EVENT $($_.Id)"; $_.Message }`;
   const events = execFileSync(powershellPath(), ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   return { transcripts, events, files: files.length };
@@ -141,9 +149,10 @@ try {
   await new Promise((r) => setTimeout(r, 2000)); // so the control run's events fall before the window below
   const before = new Date();
   const prior = proof.files;
+  const earlier = transcriptSizes(); // what the marker, control and reader runs wrote: not the Hello script's
   const result = await runPsJson({ script: `${prelude}\n${replayScript(crypto.randomBytes(32).toString("base64"))}\n${postlude}`, timeoutMs: 60_000, env });
-  const logs = readLogs(before);
-  console.log(`\nscript answered: status=${result.status}, signature field ${typeof result.signature === "string" ? `${result.signature.length} chars` : "absent"} (transcript files now ${logs.files}, was ${prior})`);
+  const logs = readLogs(before, earlier);
+  console.log(`\nscript answered: status=${result.status}, signature field ${typeof result.signature === "string" ? `${result.signature.length} chars` : "absent"} (transcript files now ${logs.files}, was ${prior}; only what this run wrote is searched)`);
   const hits = [
     ["transcript: canary base64", count(logs.transcripts, canaryB64)],
     ["transcript: canary token", count(logs.transcripts, token)],
@@ -152,6 +161,8 @@ try {
   ];
   for (const [name, n] of hits) console.log(`  ${name.padEnd(28)} ${n}`);
   console.log(`  events that carry it: ${[...new Set([...eventIds(logs.events, canaryB64), ...eventIds(logs.events, token)])].join(", ") || "none"}`);
+  // 0 here means the transcript side searched nothing, so its zeros above prove nothing.
+  console.log(`  transcript text searched:   ${Buffer.byteLength(logs.transcripts)} bytes written by this run`);
   leaked = hits.some(([, n]) => n > 0);
 } finally {
   if (registryHive) {
