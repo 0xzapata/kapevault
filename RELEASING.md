@@ -51,6 +51,8 @@ and the hash published next to it.
    git clone --branch android-v0.1.7 --depth 1 https://github.com/brewed-ops/kapevault.git
    cd kapevault/mobile
    npm ci
+   npm run build
+   npx cap sync android
    npm run notices:android
    npm run apk:release
    npm run aab:release
