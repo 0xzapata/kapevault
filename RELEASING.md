@@ -65,6 +65,9 @@ and the hash published next to it.
    `KAPEVAULT_KEY_PASSWORD` for that process alone, and removes the file and the variables when it ends.
    Put the `.jks` back offline afterwards (`mobile/README.md`, "Release APK"). The scripts check the
    signature, the version and that the build is not debuggable.
+   On Windows, double-click `mobile/scripts/sign-apk.cmd` (it runs the prompt script in a window you can
+   see). Not sure a saved password is the keystore's? `mobile/scripts/check-keystore-password.cmd` asks
+   Java's keytool directly. The keystore and key passwords are not the 7z archive's password.
 4. Write the hashes: `sha256sum KAPEVault-0.1.7.apk > KAPEVault-0.1.7.apk.sha256` (on Windows,
    `Get-FileHash -Algorithm SHA256`).
 5. Create a **draft** release on the public repo for the tag, with the APK and its `.sha256` attached, and

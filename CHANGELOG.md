@@ -7,6 +7,10 @@ built and installed by hand; none was tagged.
 
 ## [Unreleased]
 
+## [Windows 0.1.4] - 2026-10-11
+
+The first release built by the Release workflow from the public repository.
+
 ### Added
 
 - Import from other password managers on Windows: Bitwarden (CSV and unencrypted JSON), 1Password (CSV),
