@@ -200,6 +200,9 @@ Snapshot names are in [FORMAT.md](FORMAT.md) (Cloud backup names). Selection is 
   this device merges its local state into it, re-encrypts its file under the remote salt and key, adopts
   its `sync.keys`, turns Windows Hello / Touch ID / fingerprint unlock off (the key changed) and sets its
   own `olderBackupsPending`. Adopting a key always goes through the review (3.9).
+- Key history is never widened by an ordinary snapshot (audit run-1 lead 4): a salt both sides hold keeps
+  its earlier record, and a snapshot under a salt this vault already holds contributes only salts this
+  vault holds. A new salt arrives only in a snapshot under that salt, after its password is typed.
 - An unknown-salt snapshot does not hide that device's other snapshots: anyone holding the bucket keys can
   plant one without the vault key. The next snapshot of that device that opens is still merged, and the
   prompt is shown beside it. From a device the vault does not know, an unknown-salt snapshot counts as

@@ -169,16 +169,22 @@ function canOpenInApp(file) {
 const ZIP_PACKAGES = new Set(".docx .xlsx .pptx .docm .xlsm .pptm .odt .ods .odp".split(" "));
 
 // What the name allows, plus what is really there: a regular file (not a folder named "x.pdf"), and a
-// ZIP header (PK\x03\x04) for a package type. Reads 4 bytes; false on any error.
+// ZIP header (PK\x03\x04) for a package type. Reads 8 bytes; false on any error.
+const ZIP_HEAD = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 function isGenuineOpenable(file) {
   try {
     if (!canOpenInApp(file)) return false;
     if (!fs.statSync(file).isFile()) return false;
-    if (!ZIP_PACKAGES.has(path.extname(file).toLowerCase())) return true;
+    const ext = path.extname(file).toLowerCase();
+    if (!ZIP_PACKAGES.has(ext)) return true;
     const fd = fs.openSync(file, "r");
     try {
-      const head = Buffer.alloc(4);
-      return fs.readSync(fd, head, 0, 4, 0) === 4 && head.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+      const head = Buffer.alloc(8);
+      const n = fs.readSync(fd, head, 0, 8, 0);
+      // Only a ZIP package is handed to Office. A compound (OLE) file - a password-protected .docx, or a
+      // legacy .doc renamed to look like one, which nothing short of parsing it tells apart - is revealed
+      // in Explorer instead (audit run-1 lead 15).
+      return n >= 4 && head.subarray(0, 4).equals(ZIP_HEAD);
     } finally {
       fs.closeSync(fd);
     }

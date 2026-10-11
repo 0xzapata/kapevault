@@ -99,10 +99,14 @@ export function nextTargets(targets, key, result, { local = true, now }) {
   const current = targets[key] ?? { failed: 0, nextAt: 0 };
   const next = nextThrottle(current, result, { local, now });
   if (next === current) return targets;
-  const { [key]: _gone, [ANY_TARGET]: _any, ...rest } = targets;
-  if (next.failed === 0) return rest; // a success: this target and the unnamed count are cleared
-  // Over the cap, the counts with the fewest misses go (the oldest first among equals): a run of junk
-  // misses at other files must never push out the count at the file being guessed at.
+  if (next.failed === 0) {
+    const { [key]: _gone, [ANY_TARGET]: _any, ...rest } = targets;
+    return rest; // a success: this target and the unnamed count are cleared
+  }
+  // A miss keeps every other count, the unnamed one too. Over the cap, the counts with the fewest misses
+  // go (the oldest first among equals): a run of junk misses at other files must never push out the count
+  // at the file being guessed at.
+  const { [key]: _gone, ...rest } = targets;
   const kept = Object.entries({ ...rest, [key]: next });
   const drop = new Set(
     kept

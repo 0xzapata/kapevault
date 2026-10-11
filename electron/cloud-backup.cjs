@@ -136,9 +136,10 @@ function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transp
   // The opener is not secret: it holds no vault data. Once per bucket per run it is read back and
   // compared byte for byte - a page someone changed in the bucket must not sit beside the backups as
   // ours - and put back when it is missing or different (anything larger than the real page is).
-  // Then every other object in the opener folder (earlier app versions' pages, which nothing re-checks
-  // and an older Emergency Kit may still point at) is deleted. Best effort, once per run: a refused
-  // delete (a Bucket Lock) or a failed listing never fails a backup.
+  // The key is one fixed object (opener.cjs), the one the Emergency Kit names. Then every other object
+  // in the opener folder (earlier versions' pages, planted ones) is deleted. Best effort, once per run:
+  // a refused delete (a Bucket Lock) or a failed listing never fails a backup, and never touches the
+  // fixed object, which is already verified by then.
   // Not awaited by a backup, so a slow upload never holds up quitting or a restore; a failure is
   // forgotten and the next backup tries again.
   function sendOpener(r2, config) {
@@ -157,7 +158,17 @@ function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transp
       }
       try {
         const folder = opener.key.slice(0, opener.key.lastIndexOf("/") + 1);
-        for (const o of await r2.list(folder)) if (o.key !== opener.key && o.key.startsWith(folder)) await r2.del(o.key).catch(() => {});
+        // Each page is deleted as it is read (r2.sweep), so a folder of more pages than the listing cap
+        // still shrinks run by run. A bounded number of deletes per run keeps curl spawns in check.
+        let budget = 1000;
+        await r2.sweep(folder, async (items) => {
+          for (const o of items) {
+            if (o.key === opener.key || !o.key.startsWith(folder)) continue;
+            if (budget-- <= 0) return false;
+            await r2.del(o.key).catch(() => {});
+          }
+          return true;
+        });
       } catch {
         // left for the next run
       }

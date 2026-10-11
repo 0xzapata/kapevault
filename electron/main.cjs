@@ -92,7 +92,7 @@ try {
 }
 const settings = createAppSettings(dataDir);
 const backupDelayMs = Number(devEnv.KAPEVAULT_BACKUP_DELAY_MS) || BACKUP_DELAY_MS;
-const cloud = createCloudBackup({ vault, endpoint: devEnv.KAPEVAULT_R2_ENDPOINT, delayMs: backupDelayMs, installId: () => settings.installId(), opener: { key: openerKey(app.getVersion()), html: () => openerHtml(app.getVersion()) } });
+const cloud = createCloudBackup({ vault, endpoint: devEnv.KAPEVAULT_R2_ENDPOINT, delayMs: backupDelayMs, installId: () => settings.installId(), opener: { key: openerKey(), html: () => openerHtml(app.getVersion()) } });
 // Unlock, change master password and every restore: see unlock-throttle.cjs.
 // A local guess is counted against the vault file's own KDF salt, so unlocking a restored backup never clears
 // the misses at the vault it replaced (audit run-1 4.5).
@@ -310,7 +310,14 @@ function vaultStatus() {
 // is not proof: anyone at the keyboard can restore a file of their own at the lock screen and be
 // unlocked in it, with the real vault now in the copy.
 async function proveOwnsCopy(file, master) {
-  const proof = await throttledUnlock(() => vault.proveCopy(file, String(master ?? "")), { local: false });
+  // salt: the copy's own, so these guesses count against that file (audit run-1 4.5 follow-up).
+  let salt;
+  try {
+    salt = parseVaultFile(fs.readFileSync(file))?.kdf.salt;
+  } catch {
+    // unreadable: counted as a guess at another, unnamed file
+  }
+  const proof = await throttledUnlock(() => vault.proveCopy(file, String(master ?? "")), { local: false, salt });
   if (!proof.ok) throw new Error(proof.error);
 }
 

@@ -113,3 +113,19 @@ test("R2 error replies keep today's messages", async () => {
   await assert.rejects(client(reply(301)).get("k"), /R2 error 301\./); // a redirect is never followed
   await assert.rejects(client(reply(500, "InternalError")).put("k", Buffer.from("x")), /R2 error 500 \(InternalError\)/);
 });
+
+test("a key with a dot segment, %, ?, # or a backslash is refused before any request (audit run-1 round 2)", async () => {
+  const { createR2Client } = require("./r2-client.cjs");
+  const sent = [];
+  const transport = async (req) => {
+    sent.push(req.url);
+    return { status: 204, body: Buffer.alloc(0) };
+  };
+  const r2 = createR2Client({ endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "b-1", accessKeyId: "k", secretAccessKey: "s", transport });
+  for (const key of ["kapevault/opener/../snapshots/x", "kapevault/./x", "kapevault//x", "a%2e%2e/x", "a?x=1", "a#b", "a\\b"]) {
+    await assert.rejects(r2.del(key), /not one KAPEVault uses/, key);
+  }
+  assert.deepEqual(sent, []);
+  await r2.del("kapevault/opener/kapevault-opener-0.1.3.html");
+  assert.equal(sent.length, 1, "an ordinary key still goes through");
+});

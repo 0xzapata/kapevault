@@ -77,7 +77,9 @@ test("a success with local: false (a backup, a kept copy) never resets the count
   await guess(throttled, HIT, { local: false });
   assert.deepEqual(saved(), before);
   await guess(throttled, MISS, { local: false });
-  assert.equal(saved().failed, 6, "a miss on another file still counts");
+  // A miss on another file that names none has its own count, which no own-vault success clears.
+  assert.equal(saved().targets["?other"].failed, 1, "a miss on another file still counts");
+  assert.equal(saved().targets["?"].failed, 5, "and the count here stays");
 });
 
 test("a new master password refused by the rule is not counted", async () => {

@@ -124,12 +124,16 @@ The first release built by the Release workflow from the public repository.
 - Sync refuses item ids and device names like `toString` or `__proto__` instead of failing every merge.
 - A closed account's wiped secrets, and passwords cleared from history, no longer come back in a conflict
   copy. Moves to the Trash count toward the sync review.
-- Older Forever Opener pages are removed from the cloud bucket; the Emergency Kit points to the newest.
+- The Forever Opener in the cloud bucket sits at one fixed name the Emergency Kit prints, checked on
+  every backup; older pages there are removed.
+- Another device holding the vault key can no longer fake a master password change to hide "Finish
+  locking out".
 - A changed bucket URL or key ID never reuses the saved secret key.
 - Settings, Air Wall, Windows Hello turn-off, QR scan, copy and reveal refuse while the vault is locked.
   Connecting cloud backup, deleting older backups, choosing the copy folder and saving a printout stop if
   the vault locked meanwhile. A copy made while the clipboard is being cleared is still cleared later.
-- Office files open only when they really are Office files; links inside linked folders and at the
+- Office files open only when they really are Office files (password-protected ones open their folder
+  instead); links inside linked folders and at the
   folder-copy name are refused; an encrypted copy cannot be saved into the vault's own folder.
 - A custom install folder is locked by the user's SID, with entries another account added removed.
 - The lock-file workflow runs no install scripts and hands its token only to the push step.

@@ -98,6 +98,38 @@ test("an entry this reader cannot size up is a writer, never 'nobody': condition
   assert.deepEqual(parseSddl(`D:(XA;;FA;;;WD;(@User.a == 1))`).aces.map((a) => [a.type, a.sid, a.unparsed]), [["XA", "WD", true]]);
 });
 
+test("the DACL is found whatever sits before it: alias group, numeric group, no group, flags, an S: section", () => {
+  const AUW = [["A", "SY"], ["A", "AU"]];
+  const ids = (s) => parseSddl(s).aces.map((a) => [a.type, a.sid]);
+  // Real Get-Acl shape: the group alias ends in Y/A right before D:.
+  assert.deepEqual(ids("O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1301bf;;;AU)"), AUW);
+  assert.deepEqual(ids("O:BAG:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1301bf;;;AU)"), AUW);
+  assert.deepEqual(ids(`O:${ME}G:${ME}D:PAI(A;OICI;FA;;;SY)(A;OICI;0x1301bf;;;AU)`), AUW);
+  assert.deepEqual(ids("O:BAD:(A;;FA;;;SY)(A;;0x1301bf;;;AU)"), AUW);
+  assert.deepEqual(ids("D:P(A;;FA;;;SY)(A;;0x1301bf;;;AU)"), AUW);
+  assert.deepEqual(ids("O:BAG:SYD:AI(A;;FA;;;SY)(A;;0x1301bf;;;AU)"), AUW);
+  assert.deepEqual(ids("O:BAG:SYD:PARAI(A;;FA;;;SY)(A;;0x1301bf;;;AU)"), AUW);
+  assert.deepEqual(ids("O:BAG:SYD:PAI(A;;FA;;;SY)(A;;0x1301bf;;;AU)S:AI(AU;SA;FA;;;WD)"), AUW);
+  assert.deepEqual(ids("O:BAG:SYD:(A;;FA;;;SY)(A;;0x1301bf;;;AU)S:(ML;;NW;;;LW)"), AUW);
+  assert.deepEqual(ids("O:BAG:SYD:PAI(A;;FA;;;SY)(XA;;FA;;;AU;(@User.a == 1))S:AI"), [["A", "SY"], ["XA", "AU"]]);
+  assert.equal(parseSddl("O:BAG:SYD:PAI(A;;FA;;;SY)").owner, "BA");
+  assert.equal(parseSddl(`O:${ME}G:SYD:PAI`).owner, ME);
+  assert.deepEqual(parseSddl("O:BAG:SYD:PAI").aces, [], "an empty DACL lets nobody in");
+});
+
+test("real-shaped SDDL names Authenticated Users; a missing or unreadable DACL is never 'nobody'", () => {
+  assert.deepEqual(otherWriters("O:BAG:SYD:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1301bf;;;AU)"), ["Authenticated Users"]);
+  assert.deepEqual(otherWriters("O:BAG:SYD:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1301bf;;;AU)S:AI(AU;SA;FA;;;WD)"), ["Authenticated Users"]);
+  assert.deepEqual(otherWriters(`O:${ME}G:SYD:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)`, ME), []);
+  assert.equal(parseSddl("O:BAG:SY").aces, null);
+  assert.equal(parseSddl("").aces, null);
+  assert.equal(parseSddl("O:BAG:SYD:PAI(A;;FA;;;SY)garbage").aces, null);
+  assert.equal(parseSddl("O:BAG:SYD:NO_ACCESS_CONTROL").aces, null, "a NULL DACL grants everyone");
+  for (const bad of ["O:BAG:SY", "", "nonsense", "O:BAG:SYD:PAI(A;;FA;;;SY)garbage"]) {
+    assert.notDeepEqual(otherWriters(bad, ME), [], `unknown must not read as nobody: ${bad}`);
+  }
+});
+
 test("a folder owned by another account is a writer unless OWNER RIGHTS narrows it; the user's own folder is not", () => {
   const THEM = "S-1-5-21-400883919-3398603373-3929718506-1002";
   const made = `O:${THEM}G:${THEM}D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;${ME})`;

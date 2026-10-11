@@ -267,6 +267,6 @@ test("Check my Opener: genuine, changed (put back), missing, and not an opener",
 });
 
 test("the cloud copy sits beside the snapshots, where listing and thinning never see it", () => {
-  assert.equal(openerKey("0.1.0"), "kapevault/opener/kapevault-opener-0.1.0.html");
+  assert.equal(openerKey("0.1.0"), "kapevault/opener/kapevault-opener.html", "one fixed key in every version (audit run-1 4.8)");
   assert.equal(snapshotTime(openerKey("0.1.0")), null);
 });

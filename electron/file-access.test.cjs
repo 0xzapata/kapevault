@@ -166,7 +166,16 @@ test("a package type opens only when it starts with a ZIP header; a folder named
   };
   assert.equal(isGenuineOpenable(put("ok.docx", Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2]))), true);
   assert.equal(isGenuineOpenable(put("rtf.docx", Buffer.from("{" + "\\rtf1 hello"))), false);
-  assert.equal(isGenuineOpenable(put("ole.xlsx", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1]))), false);
+  assert.equal(isGenuineOpenable(put("trunc.xlsx", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1]))), false, "a cut-off CFB header");
+  // Password-protected Office files are OLE compound files (D0CF11E0A1B11AE1), not ZIPs.
+  // A compound (OLE) file - password-protected, or a legacy .doc renamed (even one holding the text
+  // "EncryptedPackage") - is revealed in Explorer, never handed to Office by its name.
+  const head = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
+  const cfb = Buffer.concat([head, Buffer.alloc(500), Buffer.from("EncryptedPackage", "utf16le")]);
+  for (const n of ["locked.docx", "locked.xlsx", "locked.pptx"]) {
+    assert.equal(isGenuineOpenable(put(n, cfb)), false, n);
+  }
+  for (const n of ["x.odt", "x.ods", "x.odp"]) assert.equal(isGenuineOpenable(put(n, cfb)), false, `${n}: ODF is never CFB`);
   assert.equal(isGenuineOpenable(put("short.pptx", Buffer.from([0x50, 0x4b]))), false);
   assert.equal(isGenuineOpenable(put("empty.docx", Buffer.alloc(0))), false);
   assert.equal(isGenuineOpenable(put("plain.txt", "hello")), true, "a non-package type needs no header");

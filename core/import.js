@@ -107,6 +107,16 @@ export function importEntries(data, file, checkFolder = () => {}) {
   try {
     const links = [];
     items.forEach((item, i) => checkImportItem(item, i, checkFolder)); // every item is checked before anything changes
+    // Live items by kind, space and title, so each row is compared only with its own group: scanning the
+    // whole vault per row froze the app for seconds near the item cap (audit run-1 4.10 follow-up).
+    const groupKey = (e) => JSON.stringify([e.kind, e.spaceId, String(e.title).toLowerCase(), ...(SAME_FIELDS[e.kind] ?? []).map((f) => e[f] ?? "")]);
+    const groups = new Map();
+    const remember = (e) => {
+      const key = groupKey(e);
+      if (groups.has(key)) groups.get(key).push(e);
+      else groups.set(key, [e]);
+    };
+    data.entries.filter(isLive).forEach(remember);
     items.forEach((item) => {
       const spaceName = cleanText(item.space);
       let space = spaceName ? data.spaces.find((s) => same(s.name, spaceName)) : data.spaces.find((s) => s.kind === "personal");
@@ -118,10 +128,11 @@ export function importEntries(data, file, checkFolder = () => {}) {
       const stored = data.entries;
       const id = upsertEntry(data, { ...item, id: undefined, kind, spaceId: space.id, viaEntryId: undefined });
       const made = data.entries[data.entries.length - 1];
-      if (stored.some((e) => isLive(e) && isSameItem(e, made))) {
+      if ((groups.get(groupKey(made)) ?? []).some((e) => isSameItem(e, made))) {
         data.entries = stored;
         return;
       }
+      remember(made);
       added += 1;
       if (kind === "login" && cleanText(item.via)) links.push({ id, spaceId: space.id, via: item.via });
     });

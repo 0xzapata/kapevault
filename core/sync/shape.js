@@ -2,7 +2,7 @@
 // and `entries` so neither changes shape and every old Opener still reads the vault. A `sync` read
 // from a file may come from another device, so every part of it is checked before it is used.
 import { NewerVaultError, READER_VERSION } from "../vault-format.js";
-import { ZERO, isHlc, max, tick } from "./hlc.js";
+import { ZERO, compare, isHlc, max, tick } from "./hlc.js";
 
 /**
  * @typedef {import("./hlc.js").Hlc} Hlc
@@ -83,6 +83,25 @@ export function validSync(value) {
   });
   // The clock is the highest time this vault has seen, so it is never behind a time the object holds.
   return { ...sync, clock: timesIn(sync).reduce(max, sync.clock) };
+}
+
+/**
+ * A remote's sync object with its key history cut to what a real snapshot under `salt` (its header's,
+ * the one salt that opened it) can hold: that salt's record, and older ones. The newest record is the
+ * header's (SYNC.md 3.1), so a record dated after it, or one dated with it under another salt, is not a
+ * master change this vault can see: a removed device holding the vault key could write it to hide the
+ * lock-out. No record for the header salt: nothing is trusted.
+ * mine: this vault's own key history. A snapshot under a salt this vault already holds (the normal sync,
+ * opened with today's key) is no master change at all, so only salts this vault holds are kept from it -
+ * mergeKeys keeps the earlier record of each, so re-dating one hides nothing (audit run-1 lead 4). A new
+ * salt arrives only in a snapshot under that salt, which the user unlocks with its password and reviews.
+ * @param {Sync} sync @param {string} salt @param {KeyRecord[]} [mine] @returns {Sync}
+ */
+export function trustedKeys(sync, salt, mine = []) {
+  const held = new Set(mine.map((k) => k.salt));
+  if (held.has(salt)) return { ...sync, keys: sync.keys.filter((k) => held.has(k.salt)) };
+  const head = sync.keys.find((k) => k.salt === salt);
+  return { ...sync, keys: head ? sync.keys.filter((k) => k === head || compare(k.at, head.at) < 0) : [] };
 }
 
 /**

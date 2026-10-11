@@ -25,6 +25,9 @@ function createR2Client({ endpoint, bucket, accessKeyId, secretAccessKey, allowH
   // Resolves the whole reply body, read up to maxBytes. missing: what a 404 resolves to (default: an error).
   /** @param {string} method @param {string} key @param {{ query?: string, body?: any, maxBytes?: number, tooLarge?: string, missing?: any }} [options] */
   async function send(method, key, { query = "", body, maxBytes = MAX_REPLY_BYTES, tooLarge = "R2 sent an unexpectedly large reply.", missing } = {}) {
+    // A key is put in the URL as it is: one a listing returned with a dot segment, %, ?, # or \ would
+    // reach another object than its name says (a "kapevault/opener/../x" delete lands on "kapevault/x").
+    if (key && (/[?#%\\]/.test(key) || key.split("/").some((s) => s === "" || s === "." || s === ".."))) throw new Error("That object name is not one KAPEVault uses.");
     const url = `${endpoint}/${bucket}${key ? `/${key}` : ""}${query ? `?${query}` : ""}`;
     const headers = signRequest({ method, url, body: body ?? "", accessKeyId, secretAccessKey });
     const res = await transport({ method, url, headers, body, maxBytes, tooLarge, allowHttp });
@@ -63,6 +66,19 @@ function createR2Client({ endpoint, bucket, accessKeyId, secretAccessKey, allowH
       }
       // Cut short, the real snapshots could be the part not read: pruning, sync and restore must not act on it.
       throw new Error(R2_TOO_MANY_OBJECTS);
+    },
+    // Best-effort walk for clean-up: hands each page to onPage as it is read, so what was read is acted on
+    // even when the bucket holds more pages than the cap (list() throws there and returns nothing).
+    // Stops quietly at the cap or when onPage returns false.
+    async sweep(prefix, onPage) {
+      let token = "";
+      for (let page = 0; page < R2_LIST_PAGES; page++) {
+        const xml = (await send("GET", "", { query: listQuery(prefix, token), maxBytes: R2_LIST_BYTES, tooLarge: "R2 sent an unexpectedly large listing." })).toString("utf8");
+        const read = readListPage(xml);
+        if ((await onPage(read.items)) === false) return;
+        token = read.token;
+        if (!token) return;
+      }
     },
   };
 }

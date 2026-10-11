@@ -62,8 +62,17 @@ test("an old throttle file ({ failed, nextAt }) still counts, and is cleared by 
   await throttled(async () => HIT);
   assert.equal(saved(), null, "the old count was cleared, so the vault is never held shut by it for good");
   fs.writeFileSync(file, JSON.stringify({ failed: 2, nextAt: 0 }));
-  await make()(async () => MISS, { local: false });
-  assert.deepEqual(saved(), { failed: 3, nextAt: 0 }, "unnamed misses keep the old file shape");
+  await createUnlockThrottle({ file, now: () => clock.t })(async () => MISS);
+  assert.deepEqual(saved(), { failed: 3, nextAt: 0 }, "unnamed misses here keep the old file shape");
+});
+
+test("a guess at another file that names no salt is never cleared by an own-vault success", async () => {
+  const { make, saved, timed } = setup();
+  const throttled = make();
+  for (let i = 0; i < 5; i++) await throttled(async () => MISS, { local: false }); // e.g. a kept copy's delete proof
+  await throttled(async () => HIT); // the attacker's own restored vault unlocks
+  assert.equal(saved().targets["?other"].failed, 5);
+  assert.ok((await timed(throttled, MISS, { local: false })) >= 900, "the next guess still waits");
 });
 
 test("without an own salt a local guess uses the unnamed count, like before", async () => {

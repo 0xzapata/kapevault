@@ -91,14 +91,24 @@ export function adoptEpoch(local, remote, { sha256 }) {
       entries.push(item);
       continue;
     }
-    const unseen = Object.keys(stamps.g).filter((name) => !seen(stamps.g[name], known ?? {}));
-    if (!unseen.length) continue;
-    // What the restored vault cleared stays cleared in the copy too.
-    const floors = { mine: own(mine.histFloor, item.id), theirs: own(theirs.histFloor, item.id) };
-    const copy = conflictCopy(withoutCleared({ item, meta: stamps, floor: floors.mine }, mergedFloor({ floor: floors.mine }, { floor: floors.theirs })), unseen, "conflict copy", { devices, sha256 });
-    if (own(meta, copy.item.id)) continue; // the restored vault already holds this copy
-    entries.push(copy.item);
-    meta[copy.item.id] = { ...copy.meta, h: contentHash(splitGroups(copy.item), sha256) };
+    const context = { devices, sha256 };
+    const there = remote.entries.find((e) => e.id === item.id);
+    let copies;
+    if (there && isClosed(there) && !isClosed(item)) {
+      // The restored vault closed this account: what it wiped never rides back in (closingCopies).
+      const closed = { item: there, meta: own(theirs.meta, item.id) ?? NO_META, groups: splitGroups(there) };
+      copies = closingCopies(closed, { item, meta: stamps, groups: splitGroups(item) }, context);
+    } else {
+      const unseen = Object.keys(stamps.g).filter((name) => !seen(stamps.g[name], known ?? {}));
+      // What the restored vault cleared stays cleared in the copy too.
+      const floors = { mine: own(mine.histFloor, item.id), theirs: own(theirs.histFloor, item.id) };
+      copies = unseen.length ? [conflictCopy(withoutCleared({ item, meta: stamps, floor: floors.mine }, mergedFloor({ floor: floors.mine }, { floor: floors.theirs })), unseen, "conflict copy", context)] : [];
+    }
+    for (const copy of copies) {
+      if (own(meta, copy.item.id)) continue; // the restored vault already holds this copy
+      entries.push(copy.item);
+      meta[copy.item.id] = { ...copy.meta, h: contentHash(splitGroups(copy.item), sha256) };
+    }
   }
   const spaces = [...remote.spaces];
   for (const space of local.spaces) {
@@ -260,18 +270,35 @@ function mergeEntry(L, R, context) {
   };
 }
 
-// A closed account is final: the tombstone stays as confirmGone left it, and a secret the other device
-// typed without having seen the closing is kept in a copy. A title edit or a move is not worth one, and the
-// copy holds only the title, the space and those secrets: what the closing wiped never rides back in. It
-// holds no history either, so nothing a "Clear history" removed can return in it.
+// A closed account is final: the tombstone stays as confirmGone left it, and what the other device typed
+// without having seen the closing is kept in a copy (closingCopies). Its history never rides along.
 function closeOver(closed, open, context) {
-  const unseen = Object.keys(open.meta.g).filter((name) => !NOT_TYPED.has(name) && !seen(open.meta.g[name], closed.meta.vv));
-  const secrets = unseen.filter((name) => SECRET_GROUPS.includes(name));
   return {
     item: closed.item,
     meta: { vv: maxVv(closed.meta.vv, open.meta.vv), g: closed.meta.g },
-    copies: secrets.length ? [conflictCopy(open, secrets, "changed after closing", context, ["core", "space", ...secrets])] : [],
+    copies: closingCopies(closed, open, context),
   };
+}
+
+// The core fields a title edit also touches, and the star: not worth a copy on their own.
+const CORE_NOT_TYPED = new Set(["title", "tags", "favorite", "updatedAt"]);
+const DROPPED_BY_CLOSING = new Set(["signIn", "viaEntryId", "heldFor"]);
+
+// What `open` (a side that never saw the account closed) typed since, as at most one "changed after closing"
+// copy: it is made for an unseen secret group, or for an unseen core group that differs from the tombstone
+// in a field a person types (notes, username, url, ...). A title edit, a move or a star makes none. The copy
+// holds the core and the space and only the secret groups the open side changed: what the closing wiped
+// never rides back in, and it holds no history, so nothing a "Clear history" removed can return in it.
+// The core fields the closing dropped (signIn, a link to another login) cannot tell an edit from the old
+// value, and neither can notes when the closing cleared them: those two never make a copy by themselves.
+function closingCopies(closed, open, context) {
+  const unseen = Object.keys(open.meta.g).filter((name) => !NOT_TYPED.has(name) && !seen(open.meta.g[name], closed.meta.vv));
+  const secrets = unseen.filter((name) => SECRET_GROUPS.includes(name));
+  const [then, now] = [closed.groups.core ?? {}, open.groups.core ?? {}];
+  const fields = new Set([...Object.keys(then), ...Object.keys(now)]);
+  const typed = unseen.includes("core") && [...fields].some((field) => !CORE_NOT_TYPED.has(field) && !DROPPED_BY_CLOSING.has(field) && !(field === "notes" && then.notes === "") && !same(then[field], now[field]));
+  const names = [...(typed ? ["core"] : []), ...secrets];
+  return names.length ? [conflictCopy(open, names, "changed after closing", context, ["core", "space", ...secrets])] : [];
 }
 
 // --- Groups ------------------------------------------------------------------------------------------
@@ -370,10 +397,13 @@ const isClosed = (item) => item.lifecycle?.state === "gone";
 
 // --- Shared sync records -----------------------------------------------------------------------------
 
-// Key history: one row per salt, oldest to newest, so the last row is the current key.
+// Key history: one row per salt, oldest to newest, so the last row is the current key. A salt both sides
+// hold keeps the EARLIER record: the change was made once, and a later `at` can only be a re-stamp, which
+// would pass for a master change after a removal (the lock-out check, carryLockOut). A vault key holder can
+// write any record, so a remote's unknown salts are first cut to what a real header allows (trustedKeys).
 function mergeKeys(a, b) {
   const bySalt = new Map();
-  for (const key of [...a, ...b]) bySalt.set(key.salt, bySalt.has(key.salt) ? newer(bySalt.get(key.salt), key) : key);
+  for (const key of [...a, ...b]) bySalt.set(key.salt, bySalt.has(key.salt) ? earlier(bySalt.get(key.salt), key) : key);
   return [...bySalt.values()].sort((x, y) => compare(x.at, y.at) || compareText(x.salt, y.salt));
 }
 
@@ -419,7 +449,7 @@ function later(name, L, R) {
   return order >= 0 ? [L, R] : [R, L];
 }
 
-const newer = (a, b) => ((compare(a.at, b.at) || compareText(canonical(a), canonical(b))) >= 0 ? a : b);
+const earlier = (a, b) => ((compare(a.at, b.at) || compareText(canonical(a), canonical(b))) <= 0 ? a : b);
 
 // The UTC day of a clock: the same on every device, unlike a local date.
 const day = (/** @type {Hlc} */ at) => new Date(at[0]).toISOString().slice(0, 10);

@@ -516,6 +516,9 @@ async function unlock(event) {
   }
   if (!Array.isArray(data?.spaces) || !Array.isArray(data?.entries)) return say("That file is not a KAPEVault vault.");
   $("password").value = "";
+  // One null or nameless row must not blank the page: only well-formed spaces and items are shown.
+  data.entries = data.entries.filter((e) => e && typeof e === "object");
+  data.spaces = data.spaces.filter((s) => s && typeof s === "object" && typeof s.id === "string" && typeof s.name === "string");
   try {
     showVault(data);
   } catch {

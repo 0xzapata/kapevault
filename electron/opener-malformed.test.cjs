@@ -72,6 +72,37 @@ for (const [name, bad] of [
   });
 }
 
+// The unlock step drops what showVault cannot take: entries that are not objects, spaces that are not
+// objects with a string id and name. The page's own unlock() runs with openVault stubbed.
+async function unlockWith(data) {
+  const page = fs.readFileSync(path.join(__dirname, "opener", "opener-page.js"), "utf8");
+  const byId = new Map();
+  const document = { getElementById: (id) => byId.get(id) ?? byId.set(id, element()).get(id), createElement: element, querySelectorAll: () => [], addEventListener() {} };
+  const context = vm.createContext({ document, MessageChannel, performance, setTimeout: () => 0, clearTimeout() {}, navigator: {}, openVault: async () => data });
+  vm.runInContext(page, context);
+  document.getElementById("password").value = "mock-password";
+  await vm.runInContext('picked = { name: "mock.kapevault", file: {} }; unlock({ preventDefault() {} })', context);
+  return { count: document.getElementById("list-count").textContent, message: document.getElementById("message").textContent, items: document.getElementById("items").children.length };
+}
+
+for (const [name, bad] of [
+  ["a null entry", { entries: null }],
+  ["a null space", { spaces: null }],
+  ["a nameless space", { spaces: { id: "s2" } }],
+]) {
+  test(`unlock still shows the other items when the vault holds ${name}`, async () => {
+    const data = vault({});
+    delete data.entries[1];
+    data.entries = data.entries.filter(Boolean);
+    if ("entries" in bad) data.entries.push(null);
+    if ("spaces" in bad) data.spaces.push(bad.spaces);
+    const shown = await unlockWith(data);
+    assert.equal(shown.message, "");
+    assert.equal(shown.count, "2 items");
+    assert.equal(shown.items, 2);
+  });
+}
+
 test("an item that cannot be shown at all gets a short fallback row and the rest render", () => {
   const evil = { id: "evil", kind: "note", spaceId: "s1", title: "Test Evil", get body() { throw new Error("boom"); } };
   const data = vault({});

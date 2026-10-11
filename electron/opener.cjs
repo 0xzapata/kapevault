@@ -43,8 +43,11 @@ function openerHtml(version) {
     .replace("{{script}}", () => script);
 }
 
-// Where each app version's opener sits in the R2 bucket, beside (never inside) the snapshots.
-const openerKey = (version) => `${OPENER_PREFIX}kapevault-opener-${version}.html`;
+// Where the opener sits in the R2 bucket, beside (never inside) the snapshots. ONE fixed key for every app
+// version, verified and replaced byte for byte each run: the Emergency Kit names this exact object, so a
+// planted page under a newer-looking name is never "the newest" (audit run-1 4.8). The version argument
+// is ignored.
+const openerKey = () => `${OPENER_PREFIX}kapevault-opener.html`;
 
 // The version of the opener at file: undefined = no file there, null = something that is not an opener.
 function openerVersionAt(file) {

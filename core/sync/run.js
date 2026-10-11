@@ -6,7 +6,7 @@ import { payeeToNotes } from "../payee-to-note.js";
 import { compare, tooFarAhead } from "./hlc.js";
 import { adoptEpoch, isNewerEpoch, merge, VaultMismatchError } from "./merge.js";
 import { NewerVaultError } from "../vault-format.js";
-import { readSync, registerDevice } from "./shape.js";
+import { readSync, registerDevice, trustedKeys } from "./shape.js";
 
 const LOG_SIZE = 50;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -44,7 +44,7 @@ export function mergeRemotes(local, remotes, { installId, device, now, sha256 })
   for (const remote of remotes) {
     let theirs;
     try {
-      theirs = { ...remote.data, entries: payeeToNotes(dueToNotes(remote.data.entries)), sync: readSync(remote.data, remote.salt) };
+      theirs = { ...remote.data, entries: payeeToNotes(dueToNotes(remote.data.entries)), sync: trustedKeys(readSync(remote.data, remote.salt), remote.salt, data.sync.keys) };
     } catch (e) {
       if (!(e instanceof NewerVaultError)) throw e;
       problems.push(newerProblem(nameOf(data.sync.devices, remote.device)));

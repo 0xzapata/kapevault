@@ -129,7 +129,7 @@ function kitHtml({ createdAt, vaultPath, itemCount, appVersion, openerSha256, cl
     <li>Choose Cloud (${cloud?.qr ? "the keys above, or on a phone scan the code" : "the R2 URL and keys above"}) or File (an encrypted copy you saved).</li>
     <li>Enter the master password the backup was made with.</li>
   </ol>
-  <p class="note after">No KAPEVault? "KAPEVault Opener.html" opens a vault file in any web browser, offline. It is saved beside the encrypted copies you save${cloud ? ` and in your bucket's kapevault/opener/ folder (use the newest page)` : ""}. Version ${esc(appVersion)}'s SHA-256 is <span class="mono">${esc(fullHash(openerSha256))}</span>.</p>`)}
+  <p class="note after">No KAPEVault? "KAPEVault Opener.html" opens a vault file in any browser, offline. It sits beside your saved encrypted copies${cloud ? ` and in your bucket as kapevault/opener/kapevault-opener.html` : ""}. Version ${esc(appVersion)}'s SHA-256 is <span class="mono">${esc(fullHash(openerSha256))}</span>; Settings &gt; Backup shows the latest.</p>`)}
   ${section(5, "Keep this safe", `<ul>
     <li>Print it and store it with your passport or in a safe.</li>
     <li>Do not keep a photo of the filled-in page in the cloud.</li>

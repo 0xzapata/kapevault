@@ -26,7 +26,7 @@ const { check, launch, report } = createHarness();
 const MASTER = "mock opener kettle harbor orbit gazelle";
 const PASSWORD = "Mock-Opener-Pass-7";
 const OPENER = "KAPEVault Opener.html";
-const OPENER_KEY = `kapevault/opener/kapevault-opener-${version}.html`;
+const OPENER_KEY = "kapevault/opener/kapevault-opener.html"; // one fixed key (audit run-1 4.8)
 
 // A fake R2 bucket, as in e2e.cjs, that also logs every PUT.
 const r2 = { objects: new Map(), modified: new Map(), puts: [] };

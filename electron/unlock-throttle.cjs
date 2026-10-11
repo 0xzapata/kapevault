@@ -7,6 +7,8 @@ const fs = require("node:fs");
 const { writeFileAtomic } = require("./atomic-write.cjs");
 const { ANY_TARGET, nextTargets, readTargets, targetWait, writeTargets } = require("../core/index.js");
 
+const OTHER_FILE = "?other"; // the count of guesses at another file that names no salt
+
 // file: unlock-throttle.json beside the vault. ownSalt(): the KDF salt of the vault file here (null when
 // unreadable), the target of every local guess. Returns throttledUnlock(attemptUnlock, { local, salt }).
 /** @param {{ file: string, now?: () => number, ownSalt?: () => string | null }} options */
@@ -38,7 +40,9 @@ function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => nu
   /** @param {() => any} attemptUnlock @param {{ local?: boolean, salt?: string }} [options] */
   function throttledUnlock(attemptUnlock, { local = true, salt } = {}) {
     const run = unlockQueue.then(async () => {
-      const key = salt || (local && ownSalt()) || ANY_TARGET;
+      // A guess at another file that names none gets its own count, which an own-vault success never clears:
+      // only ANY_TARGET (an unnamed guess at this vault, or an old file's count) is cleared that way.
+      const key = salt || (local ? ownSalt() || ANY_TARGET : OTHER_FILE);
       // The longest pause of any file: dropping the oldest kept count (core MAX_TARGETS) must never give a
       // guesser free guesses back, so junk misses at other files cost as much as guessing on.
       const wait = Math.max(0, ...Object.keys(throttle).map((k) => targetWait(throttle, k, now())));

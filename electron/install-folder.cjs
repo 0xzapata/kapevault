@@ -51,15 +51,52 @@ function aceTexts(dacl) {
   return out;
 }
 
+// Walks the sections in order: O:<sid|alias> G:<sid|alias> D:<flags><aces> S:<flags><aces>. An owner or
+// group value is a 2-letter alias (BA, SY) or an S-1-... SID, so a "D:" is only a section start where the
+// previous section ended - never found by looking for the letters. dacl is null when there is no D:
+// section, it is a NULL DACL (NO_ACCESS_CONTROL: everyone has access), or the text does not fit the
+// layout: "unknown", which the caller must not read as "nobody".
+function splitSddl(sddl) {
+  let owner = "";
+  let dacl = null;
+  let i = 0;
+  while (i < sddl.length) {
+    const tag = /^([OGDS]):/.exec(sddl.slice(i))?.[1];
+    if (!tag) return { owner, dacl: null };
+    i += 2;
+    if (tag === "S") break; // the audit list follows the DACL and says nothing about who can write
+    if (tag === "O" || tag === "G") {
+      const value = /^(?:S-[\d-]+|[A-Z]{2})/.exec(sddl.slice(i))?.[0];
+      if (!value) return { owner, dacl: null };
+      if (tag === "O") owner = value;
+      i += value.length;
+      continue;
+    }
+    const flags = /^(?:P|AI|AR)*/.exec(sddl.slice(i))?.[0] ?? "";
+    i += flags.length;
+    const from = i;
+    let depth = 0;
+    for (; i < sddl.length; i++) {
+      if (sddl[i] === "(") depth++;
+      else if (sddl[i] === ")") depth--;
+      else if (depth === 0) break;
+      if (depth < 0) return { owner, dacl: null };
+    }
+    if (depth !== 0) return { owner, dacl: null };
+    dacl = sddl.slice(from, i);
+  }
+  return { owner, dacl };
+}
+
 /**
  * unparsed: an allow entry this reader cannot size up (a conditional or object entry, a right code
  * outside the table, a malformed entry). otherWriters counts it as a writer - an unreadable entry is
- * never read as "nobody".
- * @param {string} sddl @returns {{ owner: string, aces: { type: string, mask: number, sid: string, unparsed: boolean }[] }}
+ * never read as "nobody". aces is null when the DACL could not be found or read (see splitSddl).
+ * @param {string} sddl @returns {{ owner: string, aces: { type: string, mask: number, sid: string, unparsed: boolean }[] | null }}
  */
 function parseSddl(sddl) {
-  const owner = /(?:^|[^A-Z])O:(S-[\d-]+|[A-Z]{2})/.exec(sddl)?.[1] ?? "";
-  const dacl = /(?:^|[^A-Z])D:(.*?)(?:S:.*)?$/s.exec(sddl)?.[1] ?? "";
+  const { owner, dacl } = splitSddl(sddl.trim());
+  if (dacl === null) return { owner, aces: null };
   const aces = aceTexts(dacl).map((text) => {
     const f = text.split(";");
     const type = f[0];
@@ -82,6 +119,7 @@ function parseSddl(sddl) {
  */
 function otherWriters(sddl, user = "") {
   const { owner, aces } = parseSddl(sddl);
+  if (aces === null) return ["an access list that could not be read"];
   // The owner may change the folder's permissions just by owning it, unless an OWNER RIGHTS entry
   // narrows that (the installer adds one). With the signed-in user known, an owner who is neither them
   // nor a trusted account is a writer - a folder another account made ahead of the install.

@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { createCloudBackup, snapshotKey, snapshotTime, snapshotOwner, snapshotsToPrune, configFromInput, checkBackupBytes, setupCode } = require("./cloud-backup.cjs");
 const { createVaultSession } = require("./vault-session.cjs");
+const { openerKey } = require("./opener.cjs");
 
 const DAY = 86_400_000;
 const URL_OK = "https://0123abcd.r2.cloudflarestorage.com/vault-backups";
@@ -471,6 +472,72 @@ test("a failed opener clean-up never fails the backup", async () => {
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(cloud.status().state, "ok");
   assert.ok(bucket.objects.has(OLD), "left for a later run");
+});
+
+// Audit run-1 4.8 (partial): the kit names ONE fixed object, so a planted newer-looking page can never be
+// "the newest". It is verified and replaced like before; clean-up of the rest is best effort.
+const FIXED = "kapevault/opener/kapevault-opener.html";
+const PLANTED = "kapevault/opener/kapevault-opener-9.9.9.html";
+const REAL_PAGE = "<!doctype html><title>mock opener</title>";
+async function openerBackup(bucket, transport = bucket.transport) {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
+  const vault = createVaultSession(file);
+  await vault.create("correct horse battery orbit gazelle");
+  vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "key-id-123", secretAccessKey: "mock-r2-secret" }));
+  const cloud = createCloudBackup({ vault, installId: () => ID, opener: { key: openerKey("0.0.2"), html: () => REAL_PAGE }, transport });
+  await cloud.backupNow();
+  return cloud;
+}
+
+test("the Opener has one fixed key, verified and replaced, and a planted 9.9.9 page is deleted", async () => {
+  assert.equal(openerKey("0.0.2"), FIXED);
+  assert.equal(openerKey("0.0.3"), FIXED, "the same key in every app version");
+  const bucket = fakeBucket();
+  bucket.objects.set(FIXED, Buffer.from("<script>planted</script>"));
+  bucket.objects.set(PLANTED, Buffer.from("<script>planted</script>"));
+  await openerBackup(bucket);
+  await until(() => !bucket.objects.has(PLANTED));
+  assert.equal(bucket.objects.get(FIXED)?.toString(), REAL_PAGE, "the fixed key holds the real page again");
+});
+
+test("a refused delete leaves the fixed Opener intact beside the planted page", async () => {
+  const bucket = fakeBucket();
+  bucket.objects.set(PLANTED, Buffer.from("<script>planted</script>"));
+  const transport = async (req) => {
+    if (req.method !== "DELETE") return bucket.transport(req);
+    bucket.log.push(`DELETE ${decodeURIComponent(new URL(req.url).pathname.split("/").slice(2).join("/"))}`);
+    return { status: 403, body: Buffer.from("<Error><Code>AccessDenied</Code></Error>") };
+  };
+  const cloud = await openerBackup(bucket, transport);
+  await until(() => bucket.log.includes(`DELETE ${PLANTED}`));
+  assert.equal(cloud.status().state, "ok");
+  assert.ok(bucket.objects.has(PLANTED), "the lock kept it");
+  assert.equal(bucket.objects.get(FIXED)?.toString(), REAL_PAGE, "the kit's named object is still the real page");
+});
+
+// A bucket that lists 2 keys a page (the real one 1000), the continuation token being the last key read.
+const pagedTransport = (bucket, size) => async (req) => {
+  const u = new URL(req.url);
+  if (req.method !== "GET" || !u.searchParams.has("list-type")) return bucket.transport(req);
+  bucket.log.push("LIST");
+  const after = u.searchParams.get("continuation-token") ?? "";
+  const keys = [...bucket.objects.keys()].filter((k) => k.startsWith(u.searchParams.get("prefix") ?? "") && k > after).sort();
+  const page = keys.slice(0, size);
+  const more = keys.length > size;
+  const items = page.map((k) => `<Contents><Key>${k}</Key><Size>1</Size></Contents>`).join("");
+  return { status: 200, body: Buffer.from(`<ListBucketResult>${items}<IsTruncated>${more}</IsTruncated>${more ? `<NextContinuationToken>${page[page.length - 1]}</NextContinuationToken>` : ""}</ListBucketResult>`) };
+};
+
+test("more junk than the list page cap still lets the opener clean-up delete what each page returns", async () => {
+  const bucket = fakeBucket();
+  for (let i = 0; i < 130; i++) bucket.objects.set(`kapevault/opener/zjunk-${String(i).padStart(4, "0")}.html`, Buffer.from("x")); // 65 pages of 2
+  bucket.objects.set(PLANTED, Buffer.from("<script>planted</script>"));
+  const cloud = await openerBackup(bucket, pagedTransport(bucket, 2));
+  await until(() => bucket.log.filter((l) => l.startsWith("DELETE kapevault/opener/")).length >= 99);
+  assert.equal(cloud.status().state, "ok");
+  assert.equal(bucket.objects.get(FIXED)?.toString(), REAL_PAGE);
+  assert.ok(!bucket.objects.has(PLANTED), "a key on an early page is gone");
+  assert.ok([...bucket.objects.keys()].filter((k) => k.startsWith("kapevault/opener/zjunk-")).length <= 32, "the first 50 pages (100 keys) were deleted, the rest left for a later run");
 });
 
 // Audit run-1 section 6: a synced or restored config is re-checked on every use, bucket included.
