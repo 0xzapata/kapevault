@@ -136,20 +136,43 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
   // restoreCarry): its device removals, and its key when the backup is under a master password a lock-out
   // retired - the restore is then written under the open vault's key (a copy of its raw bytes, wiped on
   // failure; a lock meanwhile wipes the session's own). Locked, there is nothing readable to keep.
-  function restoreCarry(opened: OpenVault): { sync: ReturnType<typeof readSync>; key: OpenVault | null } | null {
-    const open = session.open;
-    if (!open) return null;
+  // Only for the same vault: a backup of another vault (another vaultId) keeps nothing of this one.
+  // `held` is the open vault as the restore found it when it BEGAN (hold()), so a lock during the
+  // download or the key derivation does not drop the carry.
+  function restoreCarry(opened: OpenVault, held: Held | null): { sync: ReturnType<typeof readSync>; key: OpenVault | null } | null {
+    if (!held) return null;
     const salt = toBase64(opened.salt);
-    const { sync, keepKey } = carryLockOut(open.data.sync, toBase64(open.salt), readSync(opened.data, salt), salt);
-    return { sync, key: keepKey ? { raw: open.raw.slice(), key: open.key, kdf: open.kdf, salt: open.salt.slice(), data: opened.data } : null };
+    const theirs = readSync(opened.data, salt);
+    if (theirs.vaultId !== held.sync.vaultId) return null;
+    const { sync, keepKey } = carryLockOut(held.sync, toBase64(held.salt), theirs, salt);
+    if (keepKey) held.used = true;
+    return { sync, key: keepKey ? { raw: held.raw, key: held.key, kdf: held.kdf, salt: held.salt, data: opened.data } : null };
   }
+
+  // The open vault's sync object, salt and key as a restore starts, copied: the session may lock before the
+  // restore reaches its write. release(): the key copy is wiped unless the restore took it as its own.
+  interface Held {
+    sync: ReturnType<typeof readSync>;
+    salt: Uint8Array;
+    raw: Uint8Array;
+    key: CryptoKey;
+    kdf: OpenVault["kdf"];
+    used: boolean;
+  }
+  function hold(): Held | null {
+    const open = session.open;
+    return open && { sync: structuredClone(open.data.sync), salt: open.salt.slice(), raw: open.raw.slice(), key: open.key, kdf: open.kdf, used: false };
+  }
+  const release = (held: Held | null) => {
+    if (held && !held.used) held.raw.fill(0);
+  };
 
   // The restore's last half, for a backup from R2 or a picked file: keep the vault it replaces (one slot;
   // holding another vault, ask first - needsConfirm - and `replace` goes ahead without a copy, the PC's
   // restore.cjs rule), write the backup with `cloud` as this phone's R2 setup, then unlock it - with the
   // removals (and after a lock-out the key) of the vault it replaces (restoreCarry, read before any await).
-  async function replaceWith(backup: OpenVault, cloud: CloudConfig | undefined, replace?: { current?: string }): Promise<RestoreResult> {
-    const carry = restoreCarry(backup);
+  async function replaceWith(backup: OpenVault, cloud: CloudConfig | undefined, replace: { current?: string } | undefined, held: Held | null): Promise<RestoreResult> {
+    const carry = restoreCarry(backup, held);
     if (carry?.key) backup.raw.fill(0);
     const opened = carry?.key ?? backup;
     try {
@@ -198,6 +221,9 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
     const r2 = r2For(cloud);
     const newest = new Map<string, R2Object>();
     for (const o of await listSnapshots(r2)) {
+      // Bigger than any vault: never downloaded (the phone's HTTP reads a reply whole), and never the newest
+      // - core pickSnapshots and backupsOf skip it the same way (L9).
+      if (Number(o.size) > MAX_VAULT_BYTES) continue;
       const owner = readSnapshotKey(o.key)?.owner;
       if (!owner || (owner !== maker && !theirs.devices[owner]) || readSnapshotKey(o.key)?.beforeRestore) continue;
       const had = newest.get(owner);
@@ -223,20 +249,25 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
     // Download, open with the backup's own master password, then replaceWith() - with the keys typed or
     // scanned as this phone's R2 setup. A wrong password or a bad file changes nothing here.
     async restore(keys, backupKey, master, replace, acceptOlder) {
-      await ready;
-      const cloud = cloudFrom(keys);
-      if (!cloud) return { ok: false, error: R2_URL };
-      const tried = await openBackup(cloud, backupKey, master);
-      if (!tried.ok) return tried;
-      const { opened } = tried;
-      const newer = acceptOlder ? null : await newerKeyThan(cloud, backupKey, opened).catch(() => null);
-      if (newer) {
-        const open = session.open;
-        const keepsKey = Boolean(open && carryLockOut(open.data.sync, toBase64(open.salt), readSync(opened.data, toBase64(opened.salt)), toBase64(opened.salt)).keepKey);
-        opened.raw.fill(0);
-        return { ok: false, olderKey: true, error: olderKeyQuestion(newer, keepsKey) };
+      const held = hold();
+      try {
+        await ready;
+        const cloud = cloudFrom(keys);
+        if (!cloud) return { ok: false, error: R2_URL };
+        const tried = await openBackup(cloud, backupKey, master);
+        if (!tried.ok) return tried;
+        const { opened } = tried;
+        const newer = acceptOlder ? null : await newerKeyThan(cloud, backupKey, opened).catch(() => null);
+        if (newer) {
+          const open = session.open;
+          const keepsKey = Boolean(open && carryLockOut(open.data.sync, toBase64(open.salt), readSync(opened.data, toBase64(opened.salt)), toBase64(opened.salt)).keepKey);
+          opened.raw.fill(0);
+          return { ok: false, olderKey: true, error: olderKeyQuestion(newer, keepsKey) };
+        }
+        return await replaceWith(opened, cloud, replace, held);
+      } finally {
+        release(held);
       }
-      return replaceWith(opened, cloud, replace);
     },
 
     checkBackupFile(text) {
@@ -250,14 +281,22 @@ export function createRestore({ session, store, throttled, bio, backups, r2For, 
     // open too) the backup's own comes with it - it opened with that vault's password - so the phone backs
     // up and syncs again with no keys typed.
     async restoreFile(text, master, replace) {
-      await ready;
-      const read = readBackupFile(text);
-      if (!read.ok) return read;
-      const tried = await openThrottled(read.file, master, WRONG_BACKUP);
-      if (!tried.ok) return tried;
-      const theirs = tried.opened.data.cloud;
-      const carried = theirs && cloudFrom({ url: `${theirs.endpoint}/${theirs.bucket}`, accessKeyId: String(theirs.accessKeyId ?? ""), secretAccessKey: String(theirs.secretAccessKey ?? "") });
-      return replaceWith(tried.opened, (session.open?.data.cloud as CloudConfig | undefined) ?? carried ?? undefined, replace);
+      const held = hold();
+      try {
+        await ready;
+        const read = readBackupFile(text);
+        if (!read.ok) return read;
+        const tried = await openThrottled(read.file, master, WRONG_BACKUP);
+        if (!tried.ok) return tried;
+        const theirs = tried.opened.data.cloud;
+        // The file's maker chose that bucket, not this user: it stays unconfirmed (carried, auto off) until the
+        // user has seen it on Cloud backup and turned backups on, so nothing leaves for it before then.
+        const found = theirs && cloudFrom({ url: `${theirs.endpoint}/${theirs.bucket}`, accessKeyId: String(theirs.accessKeyId ?? ""), secretAccessKey: String(theirs.secretAccessKey ?? "") });
+        const carried = found ? { ...found, auto: false, carried: true } : null;
+        return await replaceWith(tried.opened, (session.open?.data.cloud as CloudConfig | undefined) ?? carried ?? undefined, replace, held);
+      } finally {
+        release(held);
+      }
     },
   };
 

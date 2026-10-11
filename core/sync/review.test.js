@@ -25,12 +25,12 @@ test("what a sync would change: added, changed, deleted, conflict copies and sec
       login("copy", { title: "Mock kept (conflict copy, Mock Phone, 2026-09-27)" }),
     ],
   };
-  assert.deepEqual(syncChanges(before, after), { added: ["new"], changed: ["renamed", "repassworded"], deleted: ["deleted"], copies: ["copy"], secretItems: 1 });
-  assert.deepEqual(syncChanges(before, before), { added: [], changed: [], deleted: [], copies: [], secretItems: 0 });
+  assert.deepEqual(syncChanges(before, after), { added: ["new"], changed: ["renamed", "repassworded"], deleted: ["deleted"], trashed: [], copies: ["copy"], secretItems: 1 });
+  assert.deepEqual(syncChanges(before, before), { added: [], changed: [], deleted: [], trashed: [], copies: [], secretItems: 0 });
 });
 
 test("the gate: more than 5 deletes, or more than 10% of items when that is 3 or more, more than 20 secret changes, a new epoch or key", () => {
-  const changes = (deleted, secretItems = 0) => ({ added: [], changed: [], copies: [], deleted: Array.from({ length: deleted }, (_, i) => `d${i}`), secretItems });
+  const changes = (deleted, secretItems = 0) => ({ added: [], changed: [], copies: [], trashed: [], deleted: Array.from({ length: deleted }, (_, i) => `d${i}`), secretItems });
   assert.deepEqual(REVIEW_LIMITS, { deletes: 5, deleteShare: 0.1, deleteShareMin: 3, secretItems: 20 });
   assert.deepEqual(reviewReasons(changes(5), 500), []);
   assert.deepEqual(reviewReasons(changes(6), 500), ["deletes"]);

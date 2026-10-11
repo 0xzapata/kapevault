@@ -30,7 +30,9 @@ const asPdf = (file) => (/\.pdf$/i.test(file) ? file : `${file}.pdf`);
 
 // The save dialog (kept out of Recent files), the PDF, then the PDF viewer. html() is called only once
 // a place is picked. Returns { canceled: true } or { name } - the saved file's name, never its folder.
-async function savePdfWithDialog({ BrowserWindow, dialog, shell, parent }, { title, defaultPath, html, margin = 0 }) {
+// stillOpen(): asked once the dialog returns - the dialog can sit open past the auto-lock, and a PDF
+// built from items read before the lock must not be written after it. False refuses: nothing is rendered or written.
+async function savePdfWithDialog({ BrowserWindow, dialog, shell, parent }, { title, defaultPath, html, margin = 0, stillOpen = () => true }) {
   const { canceled, filePath } = await dialog.showSaveDialog(parent, {
     title,
     defaultPath,
@@ -38,6 +40,7 @@ async function savePdfWithDialog({ BrowserWindow, dialog, shell, parent }, { tit
     properties: ["dontAddToRecent"],
   });
   if (canceled || !filePath) return { canceled: true };
+  if (!stillOpen()) throw new Error("The vault locked while the save window was open, so nothing was saved. Unlock it and try again.");
   const file = asPdf(filePath);
   await savePdf(BrowserWindow, html(), file, margin);
   await shell.openPath(file); // straight to the PDF viewer, ready to print

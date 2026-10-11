@@ -5,11 +5,13 @@
 // quitting and relaunching does not reset them; a success deletes it.
 const fs = require("node:fs");
 const { writeFileAtomic } = require("./atomic-write.cjs");
-const { nextThrottle, readThrottle, throttleWait } = require("../core/index.js");
+const { ANY_TARGET, nextTargets, readTargets, targetWait, writeTargets } = require("../core/index.js");
 
-// file: unlock-throttle.json beside the vault. Returns throttledUnlock(attemptUnlock, { local }).
-function createUnlockThrottle({ file, now = () => Date.now() }) {
-  let throttle = readThrottle(readText());
+// file: unlock-throttle.json beside the vault. ownSalt(): the KDF salt of the vault file here (null when
+// unreadable), the target of every local guess. Returns throttledUnlock(attemptUnlock, { local, salt }).
+/** @param {{ file: string, now?: () => number, ownSalt?: () => string | null }} options */
+function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => null }) {
+  let throttle = readTargets(readText());
   let unlockQueue = Promise.resolve();
 
   function readText() {
@@ -23,21 +25,26 @@ function createUnlockThrottle({ file, now = () => Date.now() }) {
   // Atomic: a crash leaves the old count or the new one.
   function saveThrottle() {
     try {
-      if (throttle.failed === 0) fs.rmSync(file, { force: true });
-      else writeFileAtomic(file, JSON.stringify(throttle));
+      if (Object.keys(throttle).length === 0) fs.rmSync(file, { force: true });
+      else writeFileAtomic(file, writeTargets(throttle));
     } catch {
       // the count still holds in memory for this run
     }
   }
 
   // local: false for a password proven on another file (a backup, a kept copy, a snapshot under a new
-  // master password): see core nextThrottle.
-  function throttledUnlock(attemptUnlock, { local = true } = {}) {
+  // master password): see core nextThrottle. salt: the KDF salt of the file the guess is aimed at; a local
+  // guess is aimed at this vault's own file, one that names none is the ANY_TARGET count (core nextTargets).
+  /** @param {() => any} attemptUnlock @param {{ local?: boolean, salt?: string }} [options] */
+  function throttledUnlock(attemptUnlock, { local = true, salt } = {}) {
     const run = unlockQueue.then(async () => {
-      const wait = throttleWait(throttle, now());
+      const key = salt || (local && ownSalt()) || ANY_TARGET;
+      // The longest pause of any file: dropping the oldest kept count (core MAX_TARGETS) must never give a
+      // guesser free guesses back, so junk misses at other files cost as much as guessing on.
+      const wait = Math.max(0, ...Object.keys(throttle).map((k) => targetWait(throttle, k, now())));
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       const result = await attemptUnlock();
-      const next = nextThrottle(throttle, result, { local, now: now() });
+      const next = nextTargets(throttle, key, result, { local, now: now() });
       if (next !== throttle) {
         throttle = next;
         saveThrottle();

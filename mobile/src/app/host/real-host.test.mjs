@@ -243,8 +243,8 @@ test("Lock after: the session ends on time, by either clock, and says why", asyn
   await assert.rejects(p.host.view(), /locked/);
   assert.deepEqual(reasons, [["locked", "session-limit"]]);
 
-  assert.deepEqual(await p.host.setSettings({ lockAfterHours: 0, lockGrace: 7 }), { lockGrace: 30, lockAfterHours: 0, theme: "system", hideFromCapture: true }, "only known values");
   assert.deepEqual(await p.host.unlock(MASTER), { ok: true });
+  assert.deepEqual(await p.host.setSettings({ lockAfterHours: 0, lockGrace: 7 }), { lockGrace: 30, lockAfterHours: 0, theme: "system", hideFromCapture: true }, "only known values (Settings is an unlocked screen)");
   clock.t += 100 * 3600_000;
   assert.equal((await p.host.view()).entries.length, 4, "Off means no limit");
 });

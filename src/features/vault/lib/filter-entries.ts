@@ -70,8 +70,8 @@ export function matchesView(entry: Entry, view: ViewFilter): boolean {
 
 // How well an entry's title answers the query: 3 title starts with it, 2 a title word starts with
 // a query word, 1 the title contains one, 0 it matched some other field. Title hits rank first.
-function titleScore(title: string, words: string[], query: string): number {
-  const t = title.toLowerCase();
+function titleScore(title: unknown, words: string[], query: string): number {
+  const t = text(title).toLowerCase();
   if (t.startsWith(query)) return 3;
   const titleWords = t.split(/[\s\-_.@/]+/);
   if (words.some((w) => titleWords.some((tw) => tw.startsWith(w)))) return 2;
@@ -79,7 +79,9 @@ function titleScore(title: string, words: string[], query: string): number {
   return 0;
 }
 
-const byTitle = (a: Entry, b: Entry) => a.title.localeCompare(b.title);
+// A restored or synced entry can lack a title or a date (or hold a non-text one): such a field reads as "".
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+const byTitle = (a: Entry, b: Entry) => text(a.title).localeCompare(text(b.title));
 
 export function sortEntries(entries: Entry[], sort: SortOrder): Entry[] {
   const list = [...entries];
@@ -88,7 +90,7 @@ export function sortEntries(entries: Entry[], sort: SortOrder): Entry[] {
       // Used items first, newest use on top; never-used ones follow alphabetically.
       return list.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) || byTitle(a, b));
     case "edited":
-      return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || byTitle(a, b));
+      return list.sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)) || byTitle(a, b));
     default:
       return list.sort(byTitle);
   }

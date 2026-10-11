@@ -3,10 +3,17 @@
 function createClipboard({ clipboard, ClipboardItem, isMac, clearMs }) {
   let clipboardTimer = null;
   let lastCopied = null;
+  let copySeq = 0; // bumped when a copy lands, so a clear that was reading the clipboard can tell
 
   async function clearCopiedPassword() {
     clearTimeout(clipboardTimer);
-    if (lastCopied !== null && (await clipboard.readText()) === lastCopied) clipboard.clear();
+    const marker = lastCopied;
+    const seq = copySeq;
+    if (marker === null) return;
+    const onClipboard = await clipboard.readText();
+    // A copy landed while reading: its marker and timer are the new secret's, leave them.
+    if (seq !== copySeq) return;
+    if (onClipboard === marker) clipboard.clear();
     lastCopied = null;
   }
 
@@ -28,6 +35,7 @@ function createClipboard({ clipboard, ClipboardItem, isMac, clearMs }) {
   async function copyWithAutoClear(text) {
     await writeClipboard(text);
     lastCopied = text;
+    copySeq++;
     clearTimeout(clipboardTimer);
     clipboardTimer = setTimeout(clearCopiedPassword, clearMs);
   }

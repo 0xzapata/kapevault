@@ -66,7 +66,18 @@ function createBackup(ctx) {
       if (isNewer(e)) return newerResult();
       throw e;
     }
-    return { ok: true, opened, carry: restoreCarry(opened) };
+    const sameVault = isSameVault(opened);
+    return { ok: true, opened, sameVault, carry: sameVault ? restoreCarry(opened) : null };
+  }
+
+  // Whether the backup is an earlier state of the vault open now (same sync.vaultId). Only then does a
+  // restore carry anything of it (audit run-1 4.1): unlocked in someone else's vault - one they handed
+  // over, or restored at the lock screen - restoring your own must never take their key, device removals
+  // or R2 setup. False while locked: there is no open vault to compare.
+  function isSameVault(opened) {
+    const session = ctx.session;
+    if (!session) return false;
+    return core.readSync(opened.data, opened.salt.toString("base64")).vaultId === session.data.sync.vaultId;
   }
 
   // What a restore keeps of the vault it replaces (SYNC.md 3.7, core carryLockOut): its device removals,

@@ -1,7 +1,7 @@
 // File browser. Every call re-checks the path against the folders linked in the unlocked vault.
 const path = require("node:path");
 const { shell } = require("electron");
-const { resolveInRoot, checkPath, listDir, readTextHead, canOpenInApp } = require("../file-access.cjs");
+const { resolveInRoot, checkPath, listDir, readTextHead, isGenuineOpenable } = require("../file-access.cjs");
 
 const TEXT_PREVIEW_BYTES = 1024 * 1024;
 
@@ -13,8 +13,8 @@ function register({ handle, vault }) {
   });
   handle("files:open", async (file) => {
     const target = checkPath(vault.linkedFolders(), String(file));
-    if (!canOpenInApp(target)) {
-      shell.showItemInFolder(target); // only known documents open; anything that could run code is revealed
+    if (!isGenuineOpenable(target)) {
+      shell.showItemInFolder(target); // only known documents open; anything that could run code, or is not what its name says, is revealed
       return "revealed";
     }
     const error = await shell.openPath(target);

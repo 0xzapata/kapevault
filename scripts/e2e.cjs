@@ -367,7 +367,8 @@ const launch = () =>
   // A real PDF: print the app's own window.
   const pdfBytes = await app.evaluate(async ({ BrowserWindow }) => Array.from(await BrowserWindow.getAllWindows()[0].webContents.printToPDF({})));
   fs.writeFileSync(path.join(sample, "e-report.pdf"), Buffer.from(pdfBytes));
-  fs.writeFileSync(path.join(sample, "f-proposal.docx"), "not really a docx");
+  // A ZIP header: files:open hands an Office file over only when it really is one (audit run-1 lead 15).
+  fs.writeFileSync(path.join(sample, "f-proposal.docx"), Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(" mock docx")]));
   fs.writeFileSync(path.join(sample, "g-setup.exe"), "MZ");
   // Taller than any window: it was cut off with no way to scroll.
   const poster = await page.evaluate(() => {

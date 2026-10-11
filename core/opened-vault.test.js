@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { openedVault } from "./opened-vault.js";
 import { splitGroups } from "./sync/groups.js";
-import { contentHash } from "./sync/stamp.js";
+import { merge } from "./sync/merge.js";
+import { contentHash, stamp } from "./sync/stamp.js";
 
 const sha256 = (text) => createHash("sha256").update(text, "utf8").digest("hex");
 const SALT = "AAAAAAAAAAAAAAAAAAAAAA==";
@@ -22,14 +23,15 @@ test("a vault from before sync opens with its due dates as notes, a new sync obj
   assert.equal(data.entries[0].kind, "due", "the decrypted data is not changed in place");
 });
 
-test("a payee opens as a note, and the conversion is stamped as this device's edit when the payee was already synced", () => {
+test("a payee opens as a note, and the conversion is not stamped as an edit when the payee was already synced", () => {
   const payee = { id: "p1", spaceId: space.id, kind: "payee", title: "Mock Tita", who: "Mock Tita", provider: "GCash", number: "09171234567" };
   const first = openedVault({ spaces: [space], entries: [] }, SALT, context);
   const synced = { ...first, entries: [payee], sync: { ...first.sync, meta: { p1: { vv: { [context.installId]: 1 }, g: {}, h: contentHashOf(payee) } } } };
   const opened = openedVault(synced, SALT, { ...context, now: context.now + 1000 });
   assert.deepEqual([opened.entries[0].kind, opened.entries[0].body], ["note", "Name: Mock Tita\nWallet or bank: GCash\nNumber: 09171234567"]);
-  assert.equal(opened.sync.meta.p1.vv[context.installId], 2, "stamped, so the note reaches the other devices");
-  assert.ok(opened.sync.meta.p1.g.body, "the body is a stamped group");
+  assert.deepEqual(opened.sync.meta.p1.vv, { [context.installId]: 1 }, "no new version: a purge made elsewhere must stay purged");
+  assert.deepEqual(opened.sync.meta.p1.g, {});
+  assert.equal(opened.sync.meta.p1.h, contentHashOf(opened.entries[0]), "the hash follows the converted note, so repair() finds nothing");
   assert.equal(synced.entries[0].kind, "payee", "the decrypted data is not changed in place");
 });
 
@@ -56,4 +58,47 @@ test("a vault from a newer version is refused, never opened with a reset sync ob
     assert.throws(() => openedVault(newer, SALT, context), (e) => e.name === "NewerVaultError" && /newer KAPEVault/.test(e.message));
     assert.equal(JSON.stringify(newer), before, "nothing in the decrypted data is changed");
   }
+});
+
+const deviceB = { ...context, installId: "33333333-3333-4333-8333-333333333333" };
+
+// Two devices hold the same synced legacy payee (built before payees became notes).
+function syncedPayee() {
+  const payee = { id: "p1", spaceId: space.id, kind: "payee", title: "Mock Tita", who: "Mock Tita", provider: "GCash", number: "09171234567" };
+  const first = openedVault({ spaces: [space], entries: [] }, SALT, context);
+  return { ...first, entries: [payee], sync: { ...first.sync, meta: { p1: { vv: { [context.installId]: 1 }, g: {}, h: contentHashOf(payee) } } } };
+}
+
+test("a purge made on another device before this one opened a legacy payee stays purged after the merge", () => {
+  const synced = syncedPayee();
+  // Device A (current build) opens, trashes and purges the converted note.
+  const onA = openedVault(synced, SALT, { ...context, now: context.now + 1000 });
+  const trashed = { ...onA, entries: onA.entries.map((e) => ({ ...e, trashedAt: "2026-09-29T00:00:00.000Z" })) };
+  const afterTrash = { ...trashed, sync: stamp(onA, trashed, { ...context, now: context.now + 2000 }) };
+  const purged = { ...afterTrash, entries: [] };
+  const afterPurge = { ...purged, sync: stamp(afterTrash, purged, { ...context, now: context.now + 3000 }) };
+  assert.ok(afterPurge.sync.gone.p1, "the purge is a tombstone");
+  // Device B opens the old vault under the current build, then the two merge.
+  const onB = openedVault(synced, SALT, { ...deviceB, now: context.now + 4000 });
+  for (const [x, y] of [[onB, afterPurge], [afterPurge, onB]]) {
+    assert.deepEqual(merge(x, y, { sha256 }).data.entries, [], "the purged note must not come back");
+  }
+});
+
+test("on-open migrations never stamp a fresh edit: payee and due conversions keep their versions, tombstones and floors", () => {
+  const first = openedVault({ spaces: [space], entries: [] }, SALT, context);
+  const payee = { id: "p1", spaceId: space.id, kind: "payee", title: "Mock Tita", who: "Mock Tita", provider: "GCash", number: "09171234567" };
+  const due = { id: "d1", spaceId: space.id, kind: "due", title: "Mock bill", agency: "other", schedule: { every: "once" } };
+  const vv = { [context.installId]: 3 };
+  const meta = Object.fromEntries([payee, due].map((e) => [e.id, { vv, g: {}, h: contentHashOf(e) }]));
+  const opened = openedVault({ ...first, entries: [payee, due], sync: { ...first.sync, meta } }, SALT, { ...context, now: context.now + 1000 });
+  assert.deepEqual(opened.entries.map((e) => e.kind), ["note", "note"]);
+  for (const id of ["p1", "d1"]) {
+    assert.deepEqual(opened.sync.meta[id].vv, vv, `${id} keeps its version`);
+    assert.deepEqual(opened.sync.meta[id].g, {}, `${id} gains no stamped group`);
+    assert.equal(opened.sync.meta[id].h, contentHashOf(opened.entries.find((e) => e.id === id)));
+  }
+  assert.deepEqual(opened.sync.gone, {});
+  assert.deepEqual(opened.sync.histFloor, {});
+  assert.deepEqual(opened.sync.clock, first.sync.clock, "the clock did not tick");
 });

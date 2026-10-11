@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { resolveInRoot, checkPath, listDir, readTextHead, canOpenInApp, revealTarget } = require("./file-access.cjs");
+const { resolveInRoot, checkPath, listDir, readTextHead, canOpenInApp, revealTarget, isNetworkPath, isGenuineOpenable } = require("./file-access.cjs");
 
 // The real path: a runner's temp folder can be an 8.3 short name (RUNNER~1), and checkPath answers with the long one.
 const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-fa-")));
@@ -124,4 +124,56 @@ test("on a Mac a plain folder with a dot in its name is a folder, not a bundle",
 
 test("csv and tsv are reveal-only: Excel runs formulas from a hostile file", () => {
   for (const f of ["a.csv", "b.TSV"]) assert.equal(canOpenInApp("C:/x/" + f), false, f);
+});
+
+// A link at `at` to the folder `to`: a junction works without Developer Mode. False when it cannot be made.
+function linkTo(to, at) {
+  try {
+    fs.symlinkSync(to, at, "junction");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a link inside a linked folder is refused by name, before any call that resolves links", (t) => {
+  const inside = path.join(root, "Real");
+  fs.mkdirSync(inside, { recursive: true });
+  fs.writeFileSync(path.join(inside, "a.txt"), "x");
+  const link = path.join(root, "ToReal");
+  if (!linkTo(inside, link)) return t.skip("this PC cannot make a junction");
+  const resolved = [];
+  const original = fs.realpathSync.native;
+  fs.realpathSync.native = (p, ...rest) => (resolved.push(p), original(p, ...rest));
+  t.after(() => (fs.realpathSync.native = original));
+  // The target is inside the root, so only the link check can refuse it; and no link may be resolved.
+  assert.throws(() => checkPath(roots, path.join(link, "a.txt")), /through a link/);
+  assert.throws(() => resolveInRoot(roots, root, "ToReal"), /through a link/);
+  assert.deepEqual(resolved.filter((p) => p.includes("ToReal")), [], "the link was never resolved");
+  assert.equal(checkPath(roots, path.join(inside, "a.txt")), path.join(inside, "a.txt"), "the plain path still opens");
+});
+
+test("isNetworkPath also knows the NT form with a single leading backslash", () => {
+  for (const p of ["\\\\host\\share\\a", "//host/share/a", "\\\\?\\UNC\\host\\share\\a", "\\\\.\\pipe\\x", "\\??\\UNC\\host\\share\\a", "/??/UNC/host/share"]) assert.equal(isNetworkPath(p), true, p);
+  for (const p of ["C:\\Users\\a", "/home/a", "relative\\x", "D:\\??\\x"]) assert.equal(isNetworkPath(p), false, p);
+});
+
+test("a package type opens only when it starts with a ZIP header; a folder named like a document never opens", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-genuine-"));
+  const put = (name, bytes) => {
+    fs.writeFileSync(path.join(dir, name), bytes);
+    return path.join(dir, name);
+  };
+  assert.equal(isGenuineOpenable(put("ok.docx", Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2]))), true);
+  assert.equal(isGenuineOpenable(put("rtf.docx", Buffer.from("{" + "\\rtf1 hello"))), false);
+  assert.equal(isGenuineOpenable(put("ole.xlsx", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1]))), false);
+  assert.equal(isGenuineOpenable(put("short.pptx", Buffer.from([0x50, 0x4b]))), false);
+  assert.equal(isGenuineOpenable(put("empty.docx", Buffer.alloc(0))), false);
+  assert.equal(isGenuineOpenable(put("plain.txt", "hello")), true, "a non-package type needs no header");
+  assert.equal(isGenuineOpenable(put("run.exe", "MZ")), false, "the name still decides first");
+  fs.mkdirSync(path.join(dir, "Folder.pdf"));
+  assert.equal(isGenuineOpenable(path.join(dir, "Folder.pdf")), false);
+  fs.mkdirSync(path.join(dir, "Folder.docx"));
+  assert.equal(isGenuineOpenable(path.join(dir, "Folder.docx")), false);
+  assert.equal(isGenuineOpenable(path.join(dir, "missing.docx")), false);
 });

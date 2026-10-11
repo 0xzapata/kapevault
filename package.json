@@ -68,6 +68,7 @@
       "core/**/*",
       "!core/**/*.test.js",
       "!core/sync/test-helpers.js",
+      "!core/**/fixtures/**",
       "dist/**/*",
       "!dist/legal/**/*",
       "build/icon.ico",

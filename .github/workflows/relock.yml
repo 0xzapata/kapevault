@@ -33,6 +33,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
@@ -47,10 +49,12 @@ jobs:
         run: |
           cp package-lock.json package-lock.json.orig
           rm -f package-lock.json
-          npm install --package-lock-only --no-audit --no-fund
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Confirm npm ci now accepts it
-        run: npm ci --no-audit --no-fund
+        # --ignore-scripts: a fresh resolve can pull any new transitive version, so no install
+        # script (electron postinstall etc.) runs here. Nothing in this job needs one.
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Check for changes
         id: diff
@@ -122,7 +126,8 @@ jobs:
           rm -f package-lock.json.orig
 
       - name: Push the regenerated lock
-        # Pushes with the plain GITHUB_TOKEN (contents: write is enough for a push - no
+        # Pushes with the plain GITHUB_TOKEN, handed to this one step only (checkout runs with
+        # persist-credentials: false, so no install script ever sees it) (contents: write is enough for a push - no
         # pull-requests permission needed since this step never opens a PR). Every value
         # interpolated below comes from env:, never ${{ }} inside run: - a run: block is a
         # shell script, and splicing an expression straight into it lets a crafted value
@@ -130,13 +135,15 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         env:
           BRANCH_NAME: relock/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH_NAME"
           git add package-lock.json
           git commit -m "chore: regenerate package lock on Linux"
-          git push origin "$BRANCH_NAME"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$BRANCH_NAME"
 
       - name: Write the run summary
         if: steps.diff.outputs.changed == 'true'

@@ -187,7 +187,11 @@ function fieldsOf(entry) {
     if (key === "signIn" && entry.signIn === "password") continue; // the default, not worth a row
     if (key === "history" && Array.isArray(entry.history)) {
       // changedAt: a UTC timestamp, or a local YYYY-MM-DD in rows from before
-      entry.history.forEach((h) => add(`Old password, replaced ${/T/.test(h.changedAt) ? new Date(h.changedAt).toLocaleDateString() : h.changedAt}`, h.password, true));
+      for (const h of entry.history) {
+        if (!h || typeof h !== "object") continue; // a malformed row never stops the item showing
+        const when = String(h.changedAt ?? "");
+        add(`Old password, replaced ${/T/.test(when) ? new Date(when).toLocaleDateString() : when}`.trim(), String(h.password ?? ""), true);
+      }
       continue;
     }
     if (key === "genHistory" && Array.isArray(entry.genHistory)) {
@@ -196,10 +200,11 @@ function fieldsOf(entry) {
     }
     // Backup codes: the count and paper copies read plainly, every code stays masked until shown.
     if (key === "recoveryCodes" && Array.isArray(entry.recoveryCodes?.codes)) {
-      const { codes, setAt, paper } = entry.recoveryCodes;
+      const { setAt, paper } = entry.recoveryCodes;
+      const codes = entry.recoveryCodes.codes.filter((c) => c && typeof c === "object"); // a malformed row is left out
       add("Backup codes", `${codes.filter((c) => !c.used).length} of ${codes.length} left${setAt ? `, set ${setAt}` : ""}`, false, true);
       codes.forEach((c, i) => add(`Backup code ${i + 1}${c.used ? " (used)" : ""}`, String(c.code), true));
-      (Array.isArray(paper) ? paper : []).forEach((p) => add(p.outdatedAt ? "Printed copy (out of date)" : "Printed copy", `${p.where}, printed ${p.printedAt}`, false, true));
+      (Array.isArray(paper) ? paper : []).filter((p) => p && typeof p === "object").forEach((p) => add(p.outdatedAt ? "Printed copy (out of date)" : "Printed copy", `${p.where}, printed ${p.printedAt}`, false, true));
       continue;
     }
     if (key === "photo" && PHOTO.test(entry.photo)) {
@@ -404,8 +409,15 @@ function showVault(data) {
   rows = [...items]
     .sort((a, b) => String(a.title).localeCompare(String(b.title)))
     .map((entry) => {
-      const plain = fieldsOf(entry).filter((f) => !f.secret && !f.photo).map((f) => f.value);
-      return { entry, text: [entry.title, spaceName(entry.spaceId), ...plain].join("\n").toLowerCase(), node: itemNode(entry) };
+      try {
+        const plain = fieldsOf(entry).filter((f) => !f.secret && !f.photo).map((f) => f.value);
+        return { entry, text: [entry.title, spaceName(entry.spaceId), ...plain].join("\n").toLowerCase(), node: itemNode(entry) };
+      } catch {
+        // One bad item must not hide the rest of the vault.
+        const li = el("li", "item");
+        li.append(el("p", "field-empty", `${String(entry.title ?? "") || "An item"} could not be shown.`));
+        return { entry, text: String(entry.title ?? "").toLowerCase(), node: li };
+      }
     });
   $("items").replaceChildren(...rows.map((r) => r.node));
   $("file-name").textContent = picked.name;

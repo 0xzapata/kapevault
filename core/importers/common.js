@@ -6,6 +6,7 @@
 // A skipped row is either harmless (it held nothing: an empty line, an empty folder, an exact copy of an
 // earlier row) or it is not. The host deletes the export only when no row is lost, so every skip that
 // is not provably empty must go through `skip`, and only `skipEmpty` marks a row as holding nothing.
+import { MAX_IMPORT_ITEMS } from "../import.js";
 import { parseTotp } from "../totp.js";
 
 /** A refusal whose message is meant for the person, as it is (an encrypted export). */
@@ -55,6 +56,8 @@ export function collector() {
     const signature = JSON.stringify([item.kind, item.title.toLowerCase(), item.username, item.password, item.url, item.totp, item.body, item.keyId, item.secret, item.notes]);
     if (seen.has(signature)) return skipEmpty(row, "Same item as an earlier row");
     seen.add(signature);
+    // The same cap core/import.js enforces, applied while collecting so a crafted file stops here.
+    if (items.length >= MAX_IMPORT_ITEMS) throw new ImportRefused(`The file has more than ${MAX_IMPORT_ITEMS} items; KAPEVault imports up to ${MAX_IMPORT_ITEMS} at a time.`);
     items.push(item);
   }
 
@@ -109,11 +112,17 @@ export function collector() {
   // the list afterwards.
   function result(extra = []) {
     const used = new Set();
+    const nextFree = new Map(); // kind + base title -> the first number not yet tried, so a run of one title is linear
     for (const item of items) {
       const key = (title) => `${item.kind}\n${title.toLowerCase()}`;
       let title = item.title;
       if (used.has(key(title)) && item.username) title = `${item.title} (${item.username})`;
-      for (let n = 2; used.has(key(title)); n += 1) title = `${item.title} (${n})`;
+      if (used.has(key(title))) {
+        let n = nextFree.get(key(item.title)) ?? 2; // every " (k)" below n is already taken
+        for (; used.has(key(`${item.title} (${n})`)); n += 1);
+        title = `${item.title} (${n})`;
+        nextFree.set(key(item.title), n + 1);
+      }
       if (title !== item.title) counts.renamed += 1;
       item.title = title;
       used.add(key(title));

@@ -65,6 +65,7 @@ export function createBackups({ store, installId, config, pro, snapshot, r2For, 
   let owed: boolean | null = null; // null: not read from disk yet
   let lastSent = ""; // the note and hash of the file this run last uploaded
   let sent: Set<string> | null | undefined; // undefined: not read yet; null: none kept (an older install)
+  let lastKey = ""; // the snapshot the last upload made
 
   async function sentKeys() {
     if (sent === undefined) {
@@ -109,6 +110,7 @@ export function createBackups({ store, installId, config, pro, snapshot, r2For, 
     const me = installId();
     const note = snapshotNote(pro());
     const key = snapshotKey(new Date(), me, note);
+    lastKey = key;
     const known = await sentKeys();
     if (known) await keepSent([...known, key]); // before the PUT: a listing meanwhile may show it
     await r2.put(key, bytes);
@@ -155,6 +157,36 @@ export function createBackups({ store, installId, config, pro, snapshot, r2For, 
     return run;
   }
 
+  // After a master password change, older snapshots still open with the OLD password (the PC's forgetOlder):
+  // a fresh one goes up under the new password, then every snapshot of this phone's that is older than it
+  // goes - its own, and ones from before install ids. Other devices' snapshots are left alone. A Bucket
+  // Lock may refuse a delete: that one is skipped and counted, so one locked object never keeps the rest.
+  async function forgetOlder() {
+    const target = config();
+    if (!target) throw new Error("Cloud backup is not set up.");
+    await backupNow();
+    const cutoff = readSnapshotKey(lastKey)?.time;
+    if (cutoff === undefined) throw new Error("The fresh backup did not finish.");
+    const r2 = r2For(target);
+    const me = installId();
+    const older = (await listSnapshots(r2)).map((o) => o.key).filter((k) => {
+      const info = readSnapshotKey(k);
+      return info !== null && info.time < cutoff && (info.owner === me || info.owner === null);
+    });
+    const gone = new Set<string>();
+    for (const key of older) {
+      try {
+        await r2.del(key);
+        gone.add(key);
+      } catch {
+        // refused by the bucket's lock
+      }
+    }
+    const known = await sentKeys();
+    if (known) await keepSent([...known].filter((k) => !gone.has(k)));
+    return { deleted: gone.size, refused: older.length - gone.size };
+  }
+
   // After every save: bursts of edits become one upload; a failed one retries while unlocked.
   // Auto backup off cancels a waiting one too.
   function schedule(delay = delayMs) {
@@ -171,6 +203,7 @@ export function createBackups({ store, installId, config, pro, snapshot, r2For, 
   return {
     schedule,
     backupNow,
+    forgetOlder,
     // After every unlock: a backup owed from before (failed, or the app was killed first) goes up.
     async onUnlocked() {
       if (owed === null) owed = (await store.read(PENDING)) !== null;

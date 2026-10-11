@@ -146,6 +146,7 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
     return { score, label };
   });
   handle("vault:copyText", async (text, id) => {
+    requireUnlocked();
     // Usernames, account numbers, serials: identifiers clear like a password, so a bank number does not stay on the clipboard.
     await clip.copyWithAutoClear(String(text));
     used(id);
@@ -168,11 +169,15 @@ function register({ handle, attempt, requireUnlocked, vault, biometric, sync, cl
     }
     return result;
   }
-  handle("vault:revealFile", () => shell.showItemInFolder(vault.status().path));
+  handle("vault:revealFile", () => {
+    requireUnlocked();
+    shell.showItemInFolder(vault.status().path);
+  });
 
   // Scan a 2FA QR code shown on screen. KAPEVault goes see-through for the capture so it never
   // covers the code; the key comes back to the form, which saves it like a typed one.
   handle("vault:scanQr", async () => {
+    requireUnlocked();
     const shown = windows.all().filter((w) => w.isVisible());
     for (const w of shown) w.setOpacity(0);
     let found = [];

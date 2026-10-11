@@ -155,6 +155,44 @@ export function ThemeSheet({ value, onPick, onClose }: { value: ThemeChoice; onP
   );
 }
 
+// After a master password change: backups made before it still open with the old password. Deleting them
+// is offered, never automatic (the PC's OlderBackupsNotice).
+function OlderBackups({ onDone }: { onDone: (s: CloudStatus) => void }) {
+  const host = useHost();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function forget() {
+    setBusy(true);
+    const result = await host.forgetOlderBackups();
+    setBusy(false);
+    setConfirming(false);
+    if (!result.ok) return setMessage(result.error);
+    setMessage(result.refused > 0 ? `Deleted ${result.deleted}. ${result.refused} could not be deleted: your bucket's lock holds them. Try again later.` : `Deleted ${result.deleted}. A fresh backup is saved under the new password.`);
+    onDone(await host.cloudStatus());
+  }
+
+  if (message) return <p className="text-[12.5px] leading-relaxed text-ink-2">{message}</p>;
+  return (
+    <div className="flex flex-col gap-3 rounded-[12px] bg-field px-3.5 py-3">
+      <p className="text-[12.5px] leading-relaxed text-ink-2">Backups made before your last master password change still open with the old password.</p>
+      {confirming ? (
+        <div className="flex gap-2">
+          <Button onClick={() => setConfirming(false)}>Cancel</Button>
+          <Button variant="danger" disabled={busy} onClick={forget}>
+            {busy ? "Deleting..." : "Confirm delete"}
+          </Button>
+        </div>
+      ) : (
+        <Button variant="danger" onClick={() => setConfirming(true)}>
+          Delete older backups
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function CloudSheet({ status, onStatus, onClose }: { status: CloudStatus; onStatus: (s: CloudStatus) => void; onClose: () => void }) {
   const host = useHost();
   return (
@@ -162,8 +200,10 @@ export function CloudSheet({ status, onStatus, onClose }: { status: CloudStatus;
       {() => (
         <div className="mt-3 flex flex-col gap-4">
           <p className="text-[12.5px] leading-relaxed text-ink-3">
-            {status.apart
-              ? "Backing up to your Cloudflare R2 bucket, without sync: the bucket holds another vault. Only the encrypted file is uploaded."
+            {status.carried
+              ? "This bucket came with the backup file. Check that it is yours, then turn on Back up automatically. Until then nothing is uploaded."
+              : status.apart
+              ?"Backing up to your Cloudflare R2 bucket, without sync: the bucket holds another vault. Only the encrypted file is uploaded."
               : "Connected to your Cloudflare R2 bucket. Only the encrypted file is uploaded."}
           </p>
           {status.connected && (
@@ -183,6 +223,7 @@ export function CloudSheet({ status, onStatus, onClose }: { status: CloudStatus;
                 </span>
                 <Switch label="Back up automatically" checked={status.auto} onChange={(auto) => host.setCloudAuto(auto).then(onStatus)} />
               </label>
+              {status.olderBackups && !status.carried && <OlderBackups onDone={onStatus} />}
             </>
           )}
         </div>

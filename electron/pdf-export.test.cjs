@@ -125,3 +125,17 @@ test("a failed print rejects, opens nothing and leaves no .pdf behind", async ()
   assert.deepEqual(calls.opened, []);
   assert.equal(fs.existsSync(picked), false);
 });
+
+test("a session that ended while the dialog was open renders, writes and opens nothing", async () => {
+  const picked = path.join(os.tmpdir(), `kapevault-print-locked-test-${process.pid}.pdf`);
+  const { deps, calls } = fakeElectron(picked);
+  let built = false;
+  await assert.rejects(
+    savePdfWithDialog(deps, { title: "Mock", defaultPath: "Mock.pdf", html: () => ((built = true), "<p></p>"), stillOpen: () => false }),
+    /locked while the save window was open/,
+  );
+  assert.equal(built, false);
+  assert.equal(calls.printed, 0);
+  assert.deepEqual(calls.opened, []);
+  assert.equal(fs.existsSync(picked), false);
+});

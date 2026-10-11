@@ -44,3 +44,72 @@ export function nextThrottle(state, result, { local = true, now }) {
   const failed = result.ok ? 0 : state.failed + 1;
   return { failed, nextAt: failed >= FREE_MISSES ? now + Math.min(MAX_UNLOCK_PAUSE_MS, 1000 * 2 ** (failed - FREE_MISSES)) : 0 };
 }
+
+// The count is kept per TARGET - the KDF salt of the vault file a guess is aimed at - so a success on
+// one file never clears the misses at another: at the lock screen a restored backup of your own and the
+// replaced real vault are two files, and unlocking the first used to wipe the count on the second.
+// ANY_TARGET holds a guess that names no file, and a count saved before targets existed. A success on
+// this vault clears its own target and ANY_TARGET (so a stale or unnamed count never locks it for good).
+export const ANY_TARGET = "?";
+const MAX_TARGETS = 16;
+
+/** @typedef {Record<string, ThrottleState>} ThrottleTargets */
+
+/**
+ * Every saved count, from the file's text. The old file ({ failed, nextAt }) is the ANY_TARGET count.
+ * @param {string | null | undefined} text @returns {ThrottleTargets}
+ */
+export function readTargets(text) {
+  try {
+    const { targets } = JSON.parse(text ?? "");
+    if (targets && typeof targets === "object" && !Array.isArray(targets)) {
+      /** @type {ThrottleTargets} */
+      const out = {};
+      for (const [key, value] of Object.entries(targets).slice(0, MAX_TARGETS)) {
+        const state = readThrottle(JSON.stringify(value));
+        if (state.failed > 0) out[key] = state;
+      }
+      return out;
+    }
+  } catch {
+    // none saved, or unreadable
+  }
+  const old = readThrottle(text);
+  return old.failed > 0 ? { [ANY_TARGET]: old } : {};
+}
+
+/** The file's text for these counts: the old shape while only ANY_TARGET has one, so an older build
+ * still reads it. @param {ThrottleTargets} targets */
+export function writeTargets(targets) {
+  const keys = Object.keys(targets);
+  if (keys.length === 1 && keys[0] === ANY_TARGET) return JSON.stringify(targets[ANY_TARGET]);
+  return JSON.stringify({ targets });
+}
+
+/** How long a guess at `key` waits, in ms (<= 0: none). @param {ThrottleTargets} targets @param {string} key @param {number} now */
+export const targetWait = (targets, key, now) => (targets[key] ? throttleWait(targets[key], now) : 0);
+
+/**
+ * The counts after a guess at `key`, or `targets` itself when nothing changes. The rules of nextThrottle
+ * apply to that target's count; a local success clears the target and ANY_TARGET.
+ * @param {ThrottleTargets} targets @param {string} key @param {{ ok: boolean, rule?: boolean, newer?: boolean }} result
+ * @param {{ local?: boolean, now: number }} context @returns {ThrottleTargets}
+ */
+export function nextTargets(targets, key, result, { local = true, now }) {
+  const current = targets[key] ?? { failed: 0, nextAt: 0 };
+  const next = nextThrottle(current, result, { local, now });
+  if (next === current) return targets;
+  const { [key]: _gone, [ANY_TARGET]: _any, ...rest } = targets;
+  if (next.failed === 0) return rest; // a success: this target and the unnamed count are cleared
+  // Over the cap, the counts with the fewest misses go (the oldest first among equals): a run of junk
+  // misses at other files must never push out the count at the file being guessed at.
+  const kept = Object.entries({ ...rest, [key]: next });
+  const drop = new Set(
+    kept
+      .map(([k, s], i) => ({ k, failed: s.failed, i }))
+      .sort((a, b) => a.failed - b.failed || a.i - b.i)
+      .slice(0, Math.max(0, kept.length - MAX_TARGETS))
+      .map((e) => e.k),
+  );
+  return Object.fromEntries(kept.filter(([k]) => !drop.has(k)));
+}

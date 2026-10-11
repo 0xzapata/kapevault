@@ -64,7 +64,8 @@ test("the kit says where the Forever Opener is and that it needs only a browser"
   const html = kitHtml(base);
   assert.ok(html.includes("KAPEVault Opener.html"));
   assert.ok(html.includes("opens a vault file in any web browser, offline"));
-  assert.ok(html.includes("in your bucket as kapevault/opener/kapevault-opener-0.1.0.html"));
+  assert.ok(html.includes("kapevault/opener/ folder (use the newest page)"), "points at the folder and the newest page, not a version that gets deleted");
+  assert.ok(!html.includes("kapevault-opener-0.1.0.html"));
   assert.ok(!kitHtml({ ...base, cloud: null }).includes("in your bucket"), "no bucket, no bucket line");
 });
 

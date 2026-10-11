@@ -34,8 +34,8 @@ export function searchText(entry: Entry, spaceName: string): string {
   return [entry.title, spaceName, entry.notes, entry.heldFor ?? "", ...entry.tags, ...specific].join(" ").toLowerCase();
 }
 
-export function titleScore(title: string, words: string[], query: string): number {
-  const t = title.toLowerCase();
+export function titleScore(title: unknown, words: string[], query: string): number {
+  const t = text(title).toLowerCase();
   if (t.startsWith(query)) return 3;
   const titleWords = t.split(/[\s\-_.@/]+/);
   if (words.some((w) => titleWords.some((tw) => tw.startsWith(w)))) return 2;
@@ -43,7 +43,9 @@ export function titleScore(title: string, words: string[], query: string): numbe
   return 0;
 }
 
-export const byTitle = (a: Entry, b: Entry) => a.title.localeCompare(b.title);
+export const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
+export const byTitle = (a: Entry, b: Entry) => text(a.title).localeCompare(text(b.title));
 
 export function sortEntries(entries: Entry[], sort: SortOrder): Entry[] {
   const list = [...entries];
@@ -52,7 +54,7 @@ export function sortEntries(entries: Entry[], sort: SortOrder): Entry[] {
       // Used items first, newest use on top; never-used ones follow alphabetically.
       return list.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0) || byTitle(a, b));
     case "edited":
-      return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || byTitle(a, b));
+      return list.sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)) || byTitle(a, b));
     default:
       return list.sort(byTitle);
   }

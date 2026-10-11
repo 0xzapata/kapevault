@@ -353,6 +353,12 @@ export function createMockHost(): VaultHost {
       cloud = { ...cloud, auto };
       return { ...cloud };
     },
+    async forgetOlderBackups() {
+      need();
+      await wait(600);
+      cloud = { ...cloud, olderBackups: undefined };
+      return { ok: true, deleted: 3, refused: 0 };
+    },
     // Any bucket holds the PC's vault here, so the page's question can be seen.
     async connectCloud(keys) {
       need();

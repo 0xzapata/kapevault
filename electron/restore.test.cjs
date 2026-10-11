@@ -172,3 +172,38 @@ async function otherVault(master) {
   await createVaultSession(file).create(master);
   return fs.readFileSync(file, "utf8");
 }
+
+// Audit run-1 4.1 (medium): unlocked in someone else's vault (a backup they handed over, or their
+// lock-screen restore), restoring your own vault back carried THEIR key, removals and R2 setup into it,
+// and cleared the slot copy still under your key. Only the same vault (sync.vaultId) carries anything.
+test("restoring your own vault while unlocked in another vault keeps your password, takes no cloud setup and keeps the slot", async () => {
+  const { file, vault, run, slot } = await setup();
+  const foreignFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-restore-foreign-")), "vault.kapevault");
+  const foreign = createVaultSession(foreignFile);
+  const FOREIGN1 = "foreign mock lantern phrase orbit gazelle";
+  const FOREIGN2 = "foreign mock harbor phrase second walnut";
+  await foreign.create(FOREIGN1);
+  foreign.revokeDevice("00000000-0000-4000-8000-0000000000dd");
+  assert.equal((await foreign.changeMaster(FOREIGN1, FOREIGN2)).ok, true);
+  foreign.setCloud({ endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "foreign-bucket", accessKeyId: "mock-key-foreign", secretAccessKey: "mock-secret", auto: true });
+  const foreignText = fs.readFileSync(foreignFile, "utf8");
+
+  const first = await run({ load: () => foreignText, master: FOREIGN2 });
+  assert.equal(first.keptCopy, true, "the owner's vault went to the slot");
+  assert.equal(vault.cloudConfig().bucket, "foreign-bucket");
+  const ownerCopy = fs.readFileSync(slot, "utf8");
+
+  const back = await run({ load: () => ownerCopy, fromReplaced: true });
+  assert.equal(back.ok, true);
+  assert.equal(back.keptKey, false, "never written under the other vault's password");
+  assert.equal(back.keptCloud, false, "never pointed at the other vault's bucket");
+  assert.equal(vault.cloudConfig(), null);
+  assert.ok(fs.existsSync(slot), "the copy under the owner's key is not deleted");
+
+  vault.lock();
+  const reopened = createVaultSession(file);
+  assert.equal((await reopened.unlock(FOREIGN2)).ok, false);
+  assert.equal((await reopened.unlock(MASTER)).ok, true);
+  assert.deepEqual(reopened.publicView().entries.map((e) => e.title).sort(), ["Mock current note", "Mock backup note"].sort());
+  assert.equal(reopened.cloudConfig(), null);
+});

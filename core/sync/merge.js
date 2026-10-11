@@ -3,6 +3,7 @@
 import { compare, max, ZERO } from "./hlc.js";
 import { splitGroups, SPACE_GROUP } from "./groups.js";
 import { canonical, contentHash, spaceGroups, spaceKey } from "./stamp.js";
+import { own } from "./shape.js";
 import { HISTORY_LIMIT } from "../entries.js";
 /** @import { Hlc } from "./hlc.js" */
 /** @import { VersionVector, GroupStamp, ItemMeta } from "./shape.js" */
@@ -82,27 +83,29 @@ export function adoptEpoch(local, remote, { sha256 }) {
   const entries = [...remote.entries];
   const theirIds = new Set(entries.map((e) => e.id));
   for (const item of local.entries) {
-    const own = mine.meta[item.id] ?? NO_META;
+    const stamps = own(mine.meta, item.id) ?? NO_META;
     // What the restored vault knows of this item: its versions, or its delete. An item it holds unstamped
     // has no version to see past; an id it never heard of is new here.
-    const known = theirs.meta[item.id]?.vv ?? theirs.gone[item.id]?.vv ?? (theirIds.has(item.id) ? {} : null);
-    if (!known && isEmpty(own.vv)) {
+    const known = own(theirs.meta, item.id)?.vv ?? own(theirs.gone, item.id)?.vv ?? (theirIds.has(item.id) ? {} : null);
+    if (!known && isEmpty(stamps.vv)) {
       entries.push(item);
       continue;
     }
-    const unseen = Object.keys(own.g).filter((name) => !seen(own.g[name], known ?? {}));
+    const unseen = Object.keys(stamps.g).filter((name) => !seen(stamps.g[name], known ?? {}));
     if (!unseen.length) continue;
-    const copy = conflictCopy({ item, meta: own }, unseen, "conflict copy", { devices, sha256 });
-    if (meta[copy.item.id]) continue; // the restored vault already holds this copy
+    // What the restored vault cleared stays cleared in the copy too.
+    const floors = { mine: own(mine.histFloor, item.id), theirs: own(theirs.histFloor, item.id) };
+    const copy = conflictCopy(withoutCleared({ item, meta: stamps, floor: floors.mine }, mergedFloor({ floor: floors.mine }, { floor: floors.theirs })), unseen, "conflict copy", { devices, sha256 });
+    if (own(meta, copy.item.id)) continue; // the restored vault already holds this copy
     entries.push(copy.item);
     meta[copy.item.id] = { ...copy.meta, h: contentHash(splitGroups(copy.item), sha256) };
   }
   const spaces = [...remote.spaces];
   for (const space of local.spaces) {
     const key = SPACES.key(space.id);
-    if (theirs.meta[key] || theirs.gone[key] || remote.spaces.some((s) => s.id === space.id)) continue;
+    if (own(theirs.meta, key) || own(theirs.gone, key) || remote.spaces.some((s) => s.id === space.id)) continue;
     spaces.push(space);
-    if (mine.meta[key]) meta[key] = mine.meta[key];
+    if (own(mine.meta, key)) meta[key] = mine.meta[key];
   }
   const sync = { ...theirs, clock: max(mine.clock, theirs.clock), keys: mergeKeys(mine.keys, theirs.keys), devices, meta };
   const data = { ...local, spaces, entries, sync };
@@ -170,9 +173,9 @@ const SPACES = { list: "spaces", key: spaceKey, groupsOf: spaceGroups, mergeTwo:
 // the delete) keeps the item, as that version alone: what the delete saw never rides back in with it.
 function mergeList(kind, local, remote, sync, context) {
   const sideOf = (item, meta, floor) => ({ item, meta: meta ?? NO_META, groups: kind.groupsOf(item), floor });
-  const read = (data) => new Map(data[kind.list].map((item) => [item.id, sideOf(item, data.sync.meta[kind.key(item.id)], data.sync.histFloor[kind.key(item.id)])]));
+  const read = (data) => new Map(data[kind.list].map((item) => [item.id, sideOf(item, own(data.sync.meta, kind.key(item.id)), own(data.sync.histFloor, kind.key(item.id)))]));
   const living = (id, version) => {
-    const tombstone = sync.gone[kind.key(id)];
+    const tombstone = own(sync.gone, kind.key(id));
     return version && !(tombstone && covers(tombstone.vv, version.meta.vv)) ? version : undefined;
   };
   const mine = read(local);
@@ -196,13 +199,13 @@ function mergeList(kind, local, remote, sync, context) {
     if (!copy) continue;
     const id = copy.item.id;
     const existing = merged.get(id);
-    const result = existing ? kind.mergeTwo(sideOf(existing.item, existing.meta, sync.histFloor[id]), sideOf(copy.item, copy.meta, sync.histFloor[id]), context) : { ...copy, copies: [] };
+    const result = existing ? kind.mergeTwo(sideOf(existing.item, existing.meta, own(sync.histFloor, id)), sideOf(copy.item, copy.meta, own(sync.histFloor, id)), context) : { ...copy, copies: [] };
     merged.set(id, result);
     queue.push(...result.copies);
   }
 
   const items = [];
-  const meta = {};
+  const meta = new Map();
   let untouched = true; // every item of this device came through as it was, and nothing else came in
   for (const [id, result] of merged) {
     const l = mine.get(id);
@@ -215,9 +218,9 @@ function mergeList(kind, local, remote, sync, context) {
     // repair() on open finds nothing to repair; an item this device kept as it was keeps its own.
     if (isEmpty(result.meta.vv)) continue;
     const h = item === l?.item && l.meta.h ? l.meta.h : contentHash(kind.groupsOf(item), context.sha256);
-    meta[kind.key(id)] = { vv: result.meta.vv, g: result.meta.g, h };
+    meta.set(kind.key(id), { vv: result.meta.vv, g: result.meta.g, h });
   }
-  return { items, meta, untouched: untouched && items.length === mine.size };
+  return { items, meta: Object.fromEntries(meta), untouched: untouched && items.length === mine.size };
 }
 
 /** @param {Side} L @param {Side} R @returns {Merged} */
@@ -253,18 +256,21 @@ function mergeEntry(L, R, context) {
   return {
     item: fields,
     meta: { vv: maxVv(L.meta.vv, R.meta.vv), g },
-    copies: [...lostGroups].map(([side, names]) => conflictCopy(side, names, "conflict copy", context)),
+    copies: [...lostGroups].map(([side, names]) => conflictCopy(withoutCleared(side, mergedFloor(L, R)), names, "conflict copy", context)),
   };
 }
 
-// A closed account is final: the tombstone stays as confirmGone left it, and whatever the other device
-// typed without having seen the closing is kept in a copy.
+// A closed account is final: the tombstone stays as confirmGone left it, and a secret the other device
+// typed without having seen the closing is kept in a copy. A title edit or a move is not worth one, and the
+// copy holds only the title, the space and those secrets: what the closing wiped never rides back in. It
+// holds no history either, so nothing a "Clear history" removed can return in it.
 function closeOver(closed, open, context) {
   const unseen = Object.keys(open.meta.g).filter((name) => !NOT_TYPED.has(name) && !seen(open.meta.g[name], closed.meta.vv));
+  const secrets = unseen.filter((name) => SECRET_GROUPS.includes(name));
   return {
     item: closed.item,
     meta: { vv: maxVv(closed.meta.vv, open.meta.vv), g: closed.meta.g },
-    copies: unseen.length ? [conflictCopy(open, unseen, "changed after closing", context)] : [],
+    copies: secrets.length ? [conflictCopy(open, secrets, "changed after closing", context, ["core", "space", ...secrets])] : [],
   };
 }
 
@@ -300,14 +306,8 @@ function mergeCodes(L, R) {
 function mergeHistory(L, R, lostPasswords) {
   const top = dominant(L, R);
   if (top) return { from: top }; // it has seen everything the other has, so it already holds the union
-  const floor = L.floor && R.floor ? max(L.floor, R.floor) : (L.floor ?? R.floor);
-  // A side that has not seen the latest "Clear history" still holds what was cleared. Older rows carry
-  // only a date, so every row up to the day of the clear goes.
-  const kept = (side) => {
-    const rows = side.item.history ?? [];
-    return !floor || (side.floor && compare(side.floor, floor) === 0) ? rows : rows.filter((row) => row.changedAt.slice(0, 10) > day(floor));
-  };
-  const [l, r] = [kept(L), kept(R)];
+  const floor = mergedFloor(L, R);
+  const [l, r] = [keptRows(L, floor), keptRows(R, floor)];
   const [from] = later("history", L, R);
   // Nothing to join: the list stays in the order it was written.
   if (!lostPasswords.length && same(l, r)) return { from, value: l.length ? { history: l } : {} };
@@ -316,16 +316,38 @@ function mergeHistory(L, R, lostPasswords) {
   return { from, value: history.length ? { history } : {} };
 }
 
+// The "Clear history" floor of two sides of one item: the later one.
+const mergedFloor = (L, R) => (L.floor && R.floor ? max(L.floor, R.floor) : (L.floor ?? R.floor));
+
+// A side's history rows that the floor leaves. A side that has not seen the latest "Clear history" still
+// holds what was cleared; older rows carry only a date, so every row up to the day of the clear goes (a row
+// with no date can not be told from one before it, so it goes too).
+function keptRows(side, floor) {
+  const rows = side.item.history ?? [];
+  return !floor || (side.floor && compare(side.floor, floor) === 0) ? rows : rows.filter((row) => typeof row.changedAt === "string" && row.changedAt.slice(0, 10) > day(floor));
+}
+
+// A side without the rows a "Clear history" removed, for a copy to be built from: a copy has no floor of
+// its own, so the cleared passwords would come back in it.
+function withoutCleared(side, floor) {
+  const rows = keptRows(side, floor);
+  if (rows === side.item.history || !side.item.history) return side;
+  const { history, ...rest } = side.item;
+  return { ...side, item: rows.length ? { ...rest, history: rows } : rest };
+}
+
 // The losing side's whole item, as a new item every device derives identically. It carries the losing
 // write as its only history; its id comes from the item, that write and the copy's content, so the same
 // copy made on two devices is one item, and two different copies of one write never overwrite each other.
-function conflictCopy(side, names, label, { devices, sha256 }) {
+// `only`: the groups the copy holds, when it is not the whole item.
+function conflictCopy(side, names, label, { devices, sha256 }, only) {
   const stamp = names.map((name) => side.meta.g[name]).reduce((a, b) => (compare(a.at, b.at) >= 0 ? a : b));
   const [device, n] = stamp.dot;
-  const { id, lastUsedAt, ...content } = side.item;
-  content.title = `${content.title} (${label}, ${devices[device]?.name ?? "another device"}, ${day(stamp.at)})`;
+  const { id, lastUsedAt, ...whole } = side.item;
+  const content = only ? Object.assign({}, ...only.map((name) => side.groups[name])) : whole;
+  content.title = `${content.title} (${label}, ${own(devices, device)?.name ?? "another device"}, ${day(stamp.at)})`;
   const item = { id: copyId(canonical([id, stamp.dot, content]), sha256), ...content };
-  const groups = new Set([...Object.keys(splitGroups(item)), ...Object.keys(side.meta.g)]);
+  const groups = new Set([...Object.keys(splitGroups(item)), ...(only ? [] : Object.keys(side.meta.g))]);
   return { item, meta: { vv: { [device]: n }, g: Object.fromEntries([...groups].map((name) => [name, stamp])) } };
 }
 
@@ -365,10 +387,11 @@ function mergeDevice(a, b) {
   return revokedAt ? { ...device, revokedAt } : device;
 }
 
+// Own keys only: a key named "toString" or "__proto__" is a plain key here, never a prototype member.
 function mergeRecords(a, b, both) {
-  const out = { ...a };
-  for (const [key, value] of Object.entries(b)) out[key] = key in a ? both(a[key], value) : value;
-  return out;
+  const out = new Map(Object.entries(a));
+  for (const [key, value] of Object.entries(b)) out.set(key, out.has(key) ? both(out.get(key), value) : value);
+  return Object.fromEntries(out);
 }
 
 // --- Causality and order -----------------------------------------------------------------------------
@@ -377,10 +400,10 @@ function mergeRecords(a, b, both) {
 const maxVv = (a, b) => mergeRecords(a, b, Math.max);
 
 /** Every write `other` has seen, `vv` has seen too. @param {VersionVector} vv @param {VersionVector} other */
-const covers = (vv, other) => Object.entries(other).every(([device, n]) => (vv[device] ?? 0) >= n);
+const covers = (vv, other) => Object.entries(other).every(([device, n]) => (own(vv, device) ?? 0) >= n);
 
 /** A group's write is known to `vv`. No stamp is the value every device started with. @param {GroupStamp | undefined} stamp @param {VersionVector} vv */
-const seen = (stamp, vv) => !stamp || (vv[stamp.dot[0]] ?? 0) >= stamp.dot[1];
+const seen = (stamp, vv) => !stamp || (own(vv, stamp.dot[0]) ?? 0) >= stamp.dot[1];
 
 // The side that has seen everything the other has, if exactly one has.
 function dominant(L, R) {

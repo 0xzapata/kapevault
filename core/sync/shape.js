@@ -135,7 +135,12 @@ export function revokeDevice(sync, { id, installId, now }) {
 }
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const isId = (value) => typeof value === "string" && value.length > 0 && value.length <= 128;
+// A name Object.prototype already has ("toString", "__proto__", ...) is no id: a lookup by it on a plain map finds
+// a function, not a record. Ids are UUIDs, install ids and "s:<uuid>" keys, so nothing real is refused.
+const isId = (value) => typeof value === "string" && value.length > 0 && value.length <= 128 && !(value in Object.prototype);
+
+/** A map's own member, never one it inherits from Object.prototype. @param {Record<string, any>} record @param {string} key */
+export const own = (record, key) => (Object.hasOwn(record, key) ? record[key] : undefined);
 const isCount = (value) => Number.isSafeInteger(value) && value >= 1;
 const SALT = /^[A-Za-z0-9+/]{22}==$/; // 16 bytes
 

@@ -19,6 +19,7 @@ const { openerHtml, openerKey } = require("./opener.cjs");
 const { createFolderCopy } = require("./folder-copy.cjs");
 const { createClipboard } = require("./clipboard.cjs");
 const { createUnlockThrottle } = require("./unlock-throttle.cjs");
+const { parseVaultFile } = require("./vault-crypto.cjs");
 const { createWindows } = require("./windows.cjs");
 const { recycleRenderer } = require("./renderer-recycle.cjs");
 const { createTrayIcon } = require("./tray.cjs");
@@ -93,7 +94,18 @@ const settings = createAppSettings(dataDir);
 const backupDelayMs = Number(devEnv.KAPEVAULT_BACKUP_DELAY_MS) || BACKUP_DELAY_MS;
 const cloud = createCloudBackup({ vault, endpoint: devEnv.KAPEVAULT_R2_ENDPOINT, delayMs: backupDelayMs, installId: () => settings.installId(), opener: { key: openerKey(app.getVersion()), html: () => openerHtml(app.getVersion()) } });
 // Unlock, change master password and every restore: see unlock-throttle.cjs.
-const throttledUnlock = createUnlockThrottle({ file: path.join(dataDir, "unlock-throttle.json") });
+// A local guess is counted against the vault file's own KDF salt, so unlocking a restored backup never clears
+// the misses at the vault it replaced (audit run-1 4.5).
+const throttledUnlock = createUnlockThrottle({
+  file: path.join(dataDir, "unlock-throttle.json"),
+  ownSalt: () => {
+    try {
+      return parseVaultFile(fs.readFileSync(vault.status().path))?.kdf.salt ?? null;
+    } catch {
+      return null;
+    }
+  },
+});
 // Sync with this bucket's other devices. Its status goes to every window; a merge shows at once. A
 // master password another device set, typed here, is a guess like any other (throttledUnlock); once
 // adopted, the key Windows Hello / Touch ID holds no longer opens the vault.

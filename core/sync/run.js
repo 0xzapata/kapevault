@@ -135,7 +135,8 @@ export function reviewView(before, result, changes, reasons) {
     reasons,
     added: changes.added.map(after),
     changed: changes.changed.map(after),
-    deleted: changes.deleted.map(titleIn(before.entries)),
+    // A move to the Trash is listed as a delete: it counts as one for review (reviewReasons).
+    deleted: [...changes.deleted.map(titleIn(before.entries)), ...(changes.trashed ?? []).map(after)],
     copies: changes.copies.map(after),
     secretItems: changes.secretItems,
   };

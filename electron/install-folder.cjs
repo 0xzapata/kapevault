@@ -36,10 +36,43 @@ function maskOf(rights) {
   return mask;
 }
 
-/** @param {string} sddl @returns {{ owner: string, aces: { type: string, mask: number, sid: string }[] }} */
+const ALLOW_TYPES = new Set(["A", "OA", "XA", "ZA"]); // plain, object, conditional (callback), compound
+
+// The top-level "(...)" groups of the D: part, each as its inside text. A conditional entry holds
+// parentheses of its own, so groups are found by depth, not by the first ")".
+function aceTexts(dacl) {
+  const out = [];
+  let depth = 0;
+  let from = -1;
+  for (let i = 0; i < dacl.length; i++) {
+    if (dacl[i] === "(" && depth++ === 0) from = i + 1;
+    else if (dacl[i] === ")" && depth > 0 && --depth === 0) out.push(dacl.slice(from, i));
+  }
+  return out;
+}
+
+/**
+ * unparsed: an allow entry this reader cannot size up (a conditional or object entry, a right code
+ * outside the table, a malformed entry). otherWriters counts it as a writer - an unreadable entry is
+ * never read as "nobody".
+ * @param {string} sddl @returns {{ owner: string, aces: { type: string, mask: number, sid: string, unparsed: boolean }[] }}
+ */
 function parseSddl(sddl) {
   const owner = /(?:^|[^A-Z])O:(S-[\d-]+|[A-Z]{2})/.exec(sddl)?.[1] ?? "";
-  const aces = [...sddl.matchAll(/\(([AD]);[^;]*;([^;]*);[^;]*;[^;]*;([^)]+)\)/g)].map((m) => ({ type: m[1], mask: maskOf(m[2]), sid: m[3] }));
+  const dacl = /(?:^|[^A-Z])D:(.*?)(?:S:.*)?$/s.exec(sddl)?.[1] ?? "";
+  const aces = aceTexts(dacl).map((text) => {
+    const f = text.split(";");
+    const type = f[0];
+    const sid = (f[5] ?? "").trim();
+    if (type === "A" || type === "D") {
+      try {
+        return { type, mask: maskOf(f[2] ?? ""), sid, unparsed: !sid };
+      } catch {
+        return { type, mask: CAN_REPLACE, sid, unparsed: true };
+      }
+    }
+    return { type, mask: CAN_REPLACE, sid, unparsed: true };
+  });
   return { owner, aces };
 }
 
@@ -49,7 +82,17 @@ function parseSddl(sddl) {
  */
 function otherWriters(sddl, user = "") {
   const { owner, aces } = parseSddl(sddl);
-  const named = aces.filter((a) => a.type === "A" && a.mask & CAN_REPLACE && !TRUSTED.has(a.sid) && a.sid !== owner && a.sid !== user).map((a) => NAMES[/** @type {keyof typeof NAMES} */ (a.sid)] ?? a.sid);
+  // The owner may change the folder's permissions just by owning it, unless an OWNER RIGHTS entry
+  // narrows that (the installer adds one). With the signed-in user known, an owner who is neither them
+  // nor a trusted account is a writer - a folder another account made ahead of the install.
+  const ownerRights = aces.find((a) => ALLOW_TYPES.has(a.type) && (a.sid === "OW" || a.sid === "S-1-3-4"));
+  const ownerNarrowed = ownerRights !== undefined && !ownerRights.unparsed && !(ownerRights.mask & CAN_REPLACE);
+  const ownerIsTrusted = !user || owner === user || TRUSTED.has(owner);
+  const name = (/** @type {string} */ sid) => NAMES[/** @type {keyof typeof NAMES} */ (sid)] ?? (sid || "an entry that could not be read");
+  const named = aces
+    .filter((a) => ALLOW_TYPES.has(a.type) && (a.unparsed || a.mask & CAN_REPLACE) && !TRUSTED.has(a.sid) && (a.sid !== owner || !ownerIsTrusted) && a.sid !== user)
+    .map((a) => name(a.sid));
+  if (owner && !ownerIsTrusted && !ownerNarrowed) named.push(name(owner));
   return [...new Set(named)];
 }
 

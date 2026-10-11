@@ -27,7 +27,7 @@ type CloudCalls = Pick<VaultHost, "cloudStatus" | "setCloudAuto" | "connectCloud
 export function createCloudConnect({ session, restore, syncer, bio, r2For, installId, now, onSync }: CloudConnectDeps): CloudCalls {
   function cloudStatus(): CloudStatus {
     const c = session.open?.data.cloud as CloudConfig | undefined;
-    return c ? { connected: true, url: `${c.endpoint}/${c.bucket}`, accessKeyId: c.accessKeyId, auto: c.auto, apart: Boolean(c.apart) } : { connected: false, url: "", accessKeyId: "", auto: false, apart: false };
+    return c ? { connected: true, url: `${c.endpoint}/${c.bucket}`, accessKeyId: c.accessKeyId, auto: c.auto, apart: Boolean(c.apart), ...(c.carried && { carried: true }), ...(session.open?.data.olderBackupsPending && { olderBackups: true }) } : { connected: false, url: "", accessKeyId: "", auto: false, apart: false };
   }
 
   // Whether a backup in the bucket is this vault: opened with the session key when it has this vault's
@@ -58,7 +58,9 @@ export function createCloudConnect({ session, restore, syncer, bio, r2For, insta
     async setCloudAuto(auto) {
       await session.change((data) => {
         if (!data.cloud) throw new Error("Cloud backup is not set up.");
-        data.cloud = { ...data.cloud, auto: Boolean(auto) };
+        // Turning backups on is the confirm for a bucket that came inside a backup file: the sheet showed it.
+        const { carried, ...own } = data.cloud as CloudConfig;
+        data.cloud = auto ? { ...own, auto: true } : { ...own, auto: false, ...(carried && { carried }) };
       });
       return cloudStatus();
     },

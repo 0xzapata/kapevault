@@ -279,6 +279,8 @@ export interface CloudStatus {
   accessKeyId: string;
   auto: boolean; // back up a few seconds after each change
   apart: boolean; // backup only: the bucket holds another vault ("Keep this phone's vault")
+  olderBackups?: boolean; // a master password change left older backups that still open with the old one
+  carried?: boolean; // the bucket came inside a restored backup file: nothing goes to it until backups are turned on here
 }
 
 // --- Settings (this phone only; never synced) -----------------------------------------------------
@@ -366,6 +368,9 @@ export interface VaultHost {
   adoptSyncKey(master: string): Promise<Result>; // SyncStatus.newMaster's password, typed once; a review follows
   cloudStatus(): Promise<CloudStatus>;
   setCloudAuto(auto: boolean): Promise<CloudStatus>;
+  // Delete this phone's backups from before the last master password change (a fresh one goes up first).
+  // refused: how many the bucket's lock would not delete.
+  forgetOlderBackups(): Promise<Result<{ deleted: number; refused: number }>>;
   // Settings > Backup and sync > Connect to R2, unlocked. A bucket with no other vault in it connects
   // and this vault starts backing up. A bucket holding ANOTHER vault (other device's, a different vault
   // id: sync would refuse it) connects nothing yet and names that backup; the page then asks:

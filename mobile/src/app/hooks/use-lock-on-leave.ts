@@ -49,6 +49,9 @@ export function useLockOnLeave(active: boolean, grace: LockGrace, lock: () => vo
     window.addEventListener("kapevault:background", leave.left);
     window.addEventListener("kapevault:resume", leave.back);
     document.addEventListener("visibilitychange", onVisibility);
+    // An unlock (or restore, or connect) can finish after the app was already left, when no listener existed
+    // to hear it: arm from the page's state now, so the grace period runs and coming back past it locks.
+    if (document.visibilityState === "hidden") leave.left();
     return () => {
       leave.stop();
       setCovered(false);

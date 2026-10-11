@@ -7,6 +7,16 @@ built and installed by hand; none was tagged.
 
 ## [Unreleased]
 
+### Security
+
+- Android: a bucket that came inside a restored backup file uploads nothing until you turn on Back up
+  automatically in Settings > Cloud backup.
+- Android: a restore keeps the device removals of the vault it replaces, also when the app locks during
+  the download, and never takes them from an unrelated vault.
+- Android: Delete older backups after a master password change; turning fingerprint unlock off and
+  changing settings refuse while locked; an oversized object in the bucket is never downloaded on restore.
+- Android: an unlock that finishes while the app is in the background still locks on leave.
+
 ## [Windows 0.1.4] - 2026-10-11
 
 The first release built by the Release workflow from the public repository.
@@ -107,6 +117,22 @@ The first release built by the Release workflow from the public repository.
   learn from it, Capacitor's WebView plugin has no methods, the HTTP plugin reaches Cloudflare R2 only, and
   a saved server path is dropped at start.
 - Android autofill no longer treats an empty record of an app's signing certificates as a match.
+- Restoring your own vault while another vault is open no longer takes that vault's master password,
+  device removals or cloud backup setup, and keeps the replaced copy (security audit run-1).
+- Unlock misses are counted per vault file, so unlocking a restored backup no longer resets the wait for
+  guesses at the vault it replaced.
+- Sync refuses item ids and device names like `toString` or `__proto__` instead of failing every merge.
+- A closed account's wiped secrets, and passwords cleared from history, no longer come back in a conflict
+  copy. Moves to the Trash count toward the sync review.
+- Older Forever Opener pages are removed from the cloud bucket; the Emergency Kit points to the newest.
+- A changed bucket URL or key ID never reuses the saved secret key.
+- Settings, Air Wall, Windows Hello turn-off, QR scan, copy and reveal refuse while the vault is locked.
+  Connecting cloud backup, deleting older backups, choosing the copy folder and saving a printout stop if
+  the vault locked meanwhile. A copy made while the clipboard is being cleared is still cleared later.
+- Office files open only when they really are Office files; links inside linked folders and at the
+  folder-copy name are refused; an encrypted copy cannot be saved into the vault's own folder.
+- A custom install folder is locked by the user's SID, with entries another account added removed.
+- The lock-file workflow runs no install scripts and hands its token only to the push step.
 
 ### Fixed
 
@@ -114,6 +140,11 @@ The first release built by the Release workflow from the public repository.
 - Reinstall finds the app where the installer wizard put it.
 - Android: every file is saved with a synced, atomic write, so a power cut cannot leave a half-written
   vault.
+- An item with a missing title no longer breaks the vault list's sort or search, and one malformed item
+  no longer stops the Forever Opener showing the rest.
+- A payee or due-to note converted on open no longer undoes a delete made on another device.
+- Importing a file with thousands of rows of one title no longer freezes the app; the 5000-item cap is
+  checked while reading.
 - Android covers the vault the moment you leave the app, and dates and times follow the phone's language.
 - Sync no longer downloads a newer device's snapshot again on every run.
 - Import brings in Bitwarden SSH keys as key items.

@@ -108,7 +108,7 @@ Groups are defined in `core/sync/groups.js`, the rules in `core/sync/merge.js`.
 | History | login `history` | union, dedupe by password, drop entries at or below `histFloor[id]` (compared at day granularity: the UTC day of a row's `changedAt`; rows from before 2026-09-28 carry only a local date), sort by (changedAt, password) desc, cap 10 |
 | Other secrets | `totp`, `qa` (questions), key `secret`, note `body`, device `dpw`, `wifi`, ID `idnum` (idNumber), `photo` (a device's label photo or an ID's) | causal LWW; loser -> conflict copy |
 | Recovery codes | `codes` | same set (hash of the code list) on both sides: `used` = OR per code, `paper` = causal LWW; different sets: causal LWW on the `codes` group's HLC (not `setAt`, a plain display date), loser -> conflict copy |
-| Lifecycle | `life` | causal LWW; a losing `life` write is dropped with no conflict copy (nobody types it, so there is nothing to preserve) - except `gone`, which is absorbing: a gone login stays the tombstone shape from `confirmGone`; any concurrent secret-group change goes to a conflict copy titled "changed after closing" |
+| Lifecycle | `life` | causal LWW; a losing `life` write is dropped with no conflict copy (nobody types it, so there is nothing to preserve) - except `gone`, which is absorbing: a gone login stays the tombstone shape from `confirmGone`; any concurrent secret-group change goes to a conflict copy titled "changed after closing", which holds the title, the space and only those secrets; a title edit, a move or a star makes no copy |
 | Trash | `trash` = `trashedAt` (a UTC ISO timestamp; missing = not in the Trash) | causal LWW; a losing `trash` write is dropped with no conflict copy (a trash, a restore and a trash on another device are not typed content). A trash on one device shows as trashed on the other, a restore restores it, and a trash beside an edit of the same item keeps both (the edit is in the Trash). The 30 days start at the later of `trashedAt` and the time of the `trash` group's sync stamp (`core/trash.js`): `trashedAt` is the trashing device's wall clock, and a phone months behind would otherwise purge a fresh trash on every device; its hybrid clock never trails what it had last synced. A local clock set ahead cannot be told from 30 quiet days, so it can delete only on that device: its purge is stamped with the same clock, and every other device refuses a snapshot whose clock is over a day ahead (3.4). A purge (30 days, "Delete now", "Empty Trash") is an ordinary delete: a tombstone, so a restore made without seeing the purge keeps the item as that version alone, like any edit that a delete never saw |
 | Bookkeeping | `lastUsedAt` | max; not versioned |
 | Spaces | `s:<id>` core (name) | causal LWW; a deleted space is a tombstone; entries whose space is gone show in Personal at read time (no stamp) |
@@ -237,6 +237,11 @@ Snapshot names are in [FORMAT.md](FORMAT.md) (Cloud backup names). Selection is 
   the restore's own upload (the vault may lock meanwhile), and Remove from sync is refused while a restore
   runs. A key set after the removal, or a removal with no new key yet, keeps the backup's key: the removed
   device never had it, or it still has today's too.
+- **Only the same vault carries anything** (audit run-1 4.1). The carry above, and the PC keeping this
+  device's R2 setup through an unlocked restore, apply only when the backup's `sync.vaultId` is the open
+  vault's. Unlocked in an unrelated vault (a file someone handed over, or one restored at the lock screen),
+  restoring your own vault back takes none of its key, removals or R2 setup, and the replaced-copy slot is
+  not cleared. The phone's `restoreCarry` follows the same rule.
 - What that leaves: a restore at the lock screen cannot read the vault it replaces, so it carries nothing:
   the restored vault has the backup's key and device list. After restoring a backup from before a lock-out
   there, remove the lost device again and change the master password BEFORE answering the sync question
@@ -274,7 +279,8 @@ snapshots.
 - Sync's own save never triggers sync. A merge whose canonical shared-state hash equals the pre-merge
   hash writes nothing and uploads nothing.
 - Unlock never waits on sync; sync runs after unlock.
-- **Mass-change gate** (`core/sync/review.js`): a merge that would delete more than 5 items, or more than
+- **Mass-change gate** (`core/sync/review.js`): a merge that would delete more than 5 items (a move to the
+  Trash counts as a delete, and the review lists it with them), or more than
   10% of entries when that is 3 or more, change secret groups on more than 20 items, replace the vault
   with a restored epoch, adopt a new key, or remove THIS device from sync (reason `removed`: after it this
   device syncs no more) shows a review ("<device> wants to delete 143 items") before it commits. The gate judges one merge at a time. It catches a bug or a mistake that would empty a

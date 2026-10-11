@@ -4,6 +4,7 @@
 // Pure: the same inputs always give the same output. Neither ever edits the sync object it is given.
 import { splitGroups, SPACE_GROUP } from "./groups.js";
 import { tick } from "./hlc.js";
+import { own } from "./shape.js";
 
 /** @import { Sync } from "./shape.js" */
 
@@ -61,11 +62,11 @@ export function repair(data, context) {
   const items = new Map(/** @type {[string, any][]} */ ([...data.entries.map((e) => [e.id, splitGroups(e)]), ...data.spaces.map((s) => [spaceKey(s.id), spaceGroups(s)])]));
   const changes = [];
   for (const [key, content] of items) {
-    const meta = sync.meta[key];
+    const meta = own(sync.meta, key);
     if (meta && meta.h !== contentHash(content, context.sha256)) changes.push({ key, content, changed: [...new Set([...Object.keys(content), ...Object.keys(meta.g)])] });
   }
   for (const key of Object.keys(sync.meta)) {
-    if (!items.has(key) && !sync.gone[key]) changes.push({ key, content: null });
+    if (!items.has(key) && !own(sync.gone, key)) changes.push({ key, content: null });
   }
   return record(sync, changes, context);
 }
@@ -109,7 +110,7 @@ function record(sync, changes, context) {
   const histFloor = { ...sync.histFloor };
   let stamped = false;
   for (const { key, content, changed = [], clearsHistory } of changes) {
-    const prev = meta[key];
+    const prev = own(meta, key);
     if (!content) {
       gone[key] = { vv: bump(prev?.vv, installId), at };
       delete meta[key];

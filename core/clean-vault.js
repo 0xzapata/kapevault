@@ -17,7 +17,8 @@ import { MAX_SPACE_PHOTO_BYTES } from "./spaces.js";
 // Deeper than any vault KAPEVault writes (entries > item > backup codes > paper copy is 5).
 export const MAX_DEPTH = 24;
 const MAX_ID = 128;
-const RESERVED = new Set(["__proto__", "constructor", "prototype"]);
+// Every name Object.prototype has, plus "prototype": as an id or a field it reads as a function on a plain map.
+const RESERVED = new Set([...Object.getOwnPropertyNames(Object.prototype), "prototype"]);
 
 /** @param {unknown} v @returns {v is Record<string, any>} */
 const isRecord = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -124,6 +125,7 @@ export function cleanVault(data) {
   const out = {};
   for (const [name, value] of Object.entries(data)) if (!RESERVED.has(name)) out[name] = value;
   if (Object.hasOwn(out, "cloud") && cloud(out.cloud) === undefined) delete out.cloud;
+  if (Object.hasOwn(out, "syncLog") && !Array.isArray(out.syncLog)) delete out.syncLog;
   if (Object.hasOwn(out, "genHistory")) {
     const kept = genHistory(out.genHistory);
     if (kept === undefined) delete out.genHistory;

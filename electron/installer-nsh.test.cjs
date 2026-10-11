@@ -17,9 +17,15 @@ test("a custom install folder is locked: no inherited rights, only the user, SYS
   assert.match(install, /\*S-1-5-18:\(OI\)\(CI\)F/, "SYSTEM by SID");
   assert.match(install, /\*S-1-5-32-544:\(OI\)\(CI\)F/, "Administrators by SID");
   assert.match(install, /\*S-1-5-32-545:\(OI\)\(CI\)RX/, "Users read and execute by SID");
-  assert.match(install, /USERDOMAIN/);
+  assert.match(install, /USERDOMAIN/, "the name form stays as the fallback");
   assert.match(install, /USERNAME/);
   assert.match(install, /:\(OI\)\(CI\)F"/, "the installing user gets full control");
+  assert.match(install, /whoami\.exe" \/user \/fo csv \/nh/, "the installing user's SID is read, not only the name");
+  assert.match(install, /grant:r "\$R3:\(OI\)\(CI\)F"/, "the grant uses that SID (or the fallback name) held in $R3");
+  assert.match(install, /\*\$R3/, "a SID is passed with the icacls * prefix");
+  assert.match(install, /icacls\.exe" "\$R2" \/reset/, "entries another account added are removed first");
+  assert.match(install, /\*S-1-3-4:\(OI\)\(CI\)RX/, "OWNER RIGHTS is narrowed to read and execute");
+  assert.doesNotMatch(install, /\/setowner/, "a standard user cannot set an owner (Access is denied)");
   assert.doesNotMatch(install, /Authenticated Users|BUILTIN\\|Everyone/i, "no group is named in a language-bound way");
 });
 

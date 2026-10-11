@@ -52,7 +52,7 @@ test("a peer's malformed fields are dropped one by one, never thrown on", () => 
   assert.deepEqual(sync.keys, [{ salt: SALT, n: 1, at: [0, 0, ""], by: "" }]);
   assert.deepEqual(sync.meta.e1, { vv: { [PC]: 2 }, g: { core: { dot: [PC, 2], at: [900, 0, PC] } } }, "uncovered dots, bad counters, bad times and a bad hash go");
   assert.equal(sync.meta.e2, undefined);
-  assert.ok(Object.hasOwn(sync.meta, "__proto__") && Object.getPrototypeOf(sync.meta) === Object.prototype, "a __proto__ id stays a plain key");
+  assert.ok(!Object.hasOwn(sync.meta, "__proto__") && Object.getPrototypeOf(sync.meta) === Object.prototype, "a __proto__ id (audit run-1 4.6: any Object.prototype member name) is dropped, never a key or a prototype");
   assert.deepEqual(Object.keys(sync.gone), ["e3"]);
   assert.deepEqual(sync.histFloor, { e1: [7, 0, PC] });
   assert.deepEqual(sync.devices, { [PC]: { name: "Mock PC", platform: "win32", addedAt: [1, 0, PC] } });

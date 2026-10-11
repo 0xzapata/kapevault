@@ -2,6 +2,7 @@
 // vault with a restored one, move to another master password, or remove this device from sync waits
 // until the user has looked.
 // Pure: the host merges, asks reviewReasons, and commits only on [] or the user's Apply.
+import { isTrashed } from "../entries.js";
 import { splitGroups } from "./groups.js";
 import { SECRET_GROUPS } from "./merge.js";
 import { canonical } from "./stamp.js";
@@ -28,14 +29,16 @@ export function readCopyTitle(title) {
 
 /**
  * What a sync would do to this device's items, by id. A use elsewhere (lastUsedAt) is not a change.
- * secretItems: changed items whose secrets changed (a password, a 2FA key...).
+ * secretItems: changed items whose secrets changed (a password, a 2FA key...). trashed: items that went to
+ * the Trash (also in `changed`): a move there is a delete that is only undoable for 30 days, so the gate
+ * counts it like one.
  * @param {{ entries: any[] }} before @param {{ entries: any[] }} after
- * @returns {{ added: string[], changed: string[], deleted: string[], copies: string[], secretItems: number }}
+ * @returns {{ added: string[], changed: string[], deleted: string[], trashed: string[], copies: string[], secretItems: number }}
  */
 export function syncChanges(before, after) {
   const was = new Map(before.entries.map((e) => [e.id, e]));
-  /** @type {{ added: string[], changed: string[], deleted: string[], copies: string[], secretItems: number }} */
-  const out = { added: [], changed: [], deleted: [], copies: [], secretItems: 0 };
+  /** @type {{ added: string[], changed: string[], deleted: string[], trashed: string[], copies: string[], secretItems: number }} */
+  const out = { added: [], changed: [], deleted: [], trashed: [], copies: [], secretItems: 0 };
   for (const entry of after.entries) {
     const old = was.get(entry.id);
     was.delete(entry.id);
@@ -45,6 +48,7 @@ export function syncChanges(before, after) {
       const differs = (name) => canonical(then[name]) !== canonical(now[name]);
       if (!Object.keys({ ...then, ...now }).some(differs)) continue;
       out.changed.push(entry.id);
+      if (isTrashed(entry) && !isTrashed(old)) out.trashed.push(entry.id);
       if (SECRET_GROUPS.some(differs)) out.secretItems++;
     }
   }
@@ -53,18 +57,18 @@ export function syncChanges(before, after) {
 }
 
 /**
- * Why a sync must wait for the user, or [] when it may go ahead: more than 5 deletes, or more than 10%
- * of the items when that is 3 or more, secrets changed on more than 20 items, a restored vault (epoch),
+ * Why a sync must wait for the user, or [] when it may go ahead: more than 5 deletes (a move to the Trash
+ * counts as one), or more than 10% of the items when that is 3 or more, secrets changed on more than 20 items, a restored vault (epoch),
  * another master password (key), this device removed from sync by another one (removed: after it, this
  * device syncs no more until it joins again).
- * @param {{ deleted: string[], secretItems: number }} changes @param {number} entryCount this device's items before the sync
+ * @param {{ deleted: string[], trashed?: string[], secretItems: number }} changes @param {number} entryCount this device's items before the sync
  * @param {{ epoch?: boolean, key?: boolean, removed?: boolean }} [also]
  * @returns {("deletes" | "secrets" | "epoch" | "key" | "removed")[]}
  */
 export function reviewReasons(changes, entryCount, { epoch = false, key = false, removed = false } = {}) {
   /** @type {("deletes" | "secrets" | "epoch" | "key" | "removed")[]} */
   const reasons = [];
-  const deleted = changes.deleted.length;
+  const deleted = changes.deleted.length + (changes.trashed?.length ?? 0);
   const bigShare = deleted >= REVIEW_LIMITS.deleteShareMin && deleted > entryCount * REVIEW_LIMITS.deleteShare;
   if (deleted > REVIEW_LIMITS.deletes || bigShare) reasons.push("deletes");
   if (changes.secretItems > REVIEW_LIMITS.secretItems) reasons.push("secrets");

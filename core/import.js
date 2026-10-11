@@ -10,7 +10,7 @@ import { GRAB, KINDS, LINK_TYPES, SIGN_IN, cleanText, isTrashed, upsertEntry } f
 import { parseTotp } from "./totp.js";
 /** @import { VaultData } from "./entries.js" */
 
-const MAX_IMPORT_ITEMS = 5000; // far above real use; stops a crafted file freezing the app
+export const MAX_IMPORT_ITEMS = 5000; // far above real use; stops a crafted file freezing the app
 
 // An import file is deleted after import, so a field that would be silently blanked (a password
 // typed as a number, kind "Login") must stop the whole import instead.

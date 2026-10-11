@@ -41,7 +41,7 @@ test("pruning keeps the newest 20, then one per day for 60 days, and never touch
 test("configFromInput checks the URL and keys, and a blank secret keeps the saved one", () => {
   assert.throws(() => configFromInput({ url: "https://example.com/b", accessKeyId: "k", secretAccessKey: "s" }), /S3 API URL/);
   assert.throws(() => configFromInput({ url: URL_OK, accessKeyId: "k", secretAccessKey: "" }), /secret/);
-  const saved = { secretAccessKey: "old-secret", auto: false };
+  const saved = { endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "vault-backups", accessKeyId: "key", secretAccessKey: "old-secret", auto: false };
   assert.deepEqual(configFromInput({ url: URL_OK, accessKeyId: " key ", secretAccessKey: "" }, saved), {
     endpoint: "https://0123abcd.r2.cloudflarestorage.com",
     bucket: "vault-backups",
@@ -434,4 +434,62 @@ test("forgetting older backups goes past a refused delete and counts what is lef
   assert.deepEqual(result, { deleted: 2, refused: 1 });
   assert.ok(bucket.objects.has(keys[0]));
   assert.ok(!bucket.objects.has(keys[1]) && !bucket.objects.has(keys[2]), "the ones after the refusal are still deleted");
+});
+
+// Audit run-1 4.8: an Emergency Kit printed under an older app version points at that version's opener
+// object, which was never re-verified. Once per bucket per run, every other opener object is deleted.
+test("opener objects of other app versions are deleted once the current one is in place", async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
+  const vault = createVaultSession(file);
+  await vault.create("correct horse battery orbit gazelle");
+  vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "key-id-123", secretAccessKey: "mock-r2-secret" }));
+  const OLD = "kapevault/opener/kapevault-opener-0.0.1.html";
+  const KEY = "kapevault/opener/kapevault-opener-0.0.2.html";
+  const REAL = "<!doctype html><title>mock opener</title>";
+  const bucket = fakeBucket();
+  bucket.objects.set(OLD, Buffer.from("<script>planted</script>"));
+  bucket.objects.set("kapevault/other/keep.txt", Buffer.from("not an opener"));
+  const cloud = createCloudBackup({ vault, installId: () => ID, opener: { key: KEY, html: () => REAL }, transport: bucket.transport });
+  await cloud.backupNow();
+  await until(() => !bucket.objects.has(OLD));
+  assert.equal(bucket.objects.get(KEY)?.toString(), REAL, "the current page stays");
+  assert.ok(bucket.objects.has("kapevault/other/keep.txt"), "nothing outside the opener folder is touched");
+  assert.equal(bucket.log.filter((l) => l === `DELETE ${KEY}`).length, 0);
+});
+
+test("a failed opener clean-up never fails the backup", async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
+  const vault = createVaultSession(file);
+  await vault.create("correct horse battery orbit gazelle");
+  vault.setCloud(configFromInput({ url: URL_OK, accessKeyId: "key-id-123", secretAccessKey: "mock-r2-secret" }));
+  const OLD = "kapevault/opener/kapevault-opener-0.0.1.html";
+  const bucket = fakeBucket();
+  bucket.objects.set(OLD, Buffer.from("x"));
+  const transport = async (req) => (req.method === "DELETE" && decodeURIComponent(req.url).endsWith(OLD) ? { status: 403, body: Buffer.from("<Error><Code>AccessDenied</Code></Error>") } : bucket.transport(req));
+  const cloud = createCloudBackup({ vault, installId: () => ID, opener: { key: "kapevault/opener/kapevault-opener-0.0.2.html", html: () => "<html></html>" }, transport });
+  await cloud.backupNow();
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(cloud.status().state, "ok");
+  assert.ok(bucket.objects.has(OLD), "left for a later run");
+});
+
+// Audit run-1 section 6: a synced or restored config is re-checked on every use, bucket included.
+test("a saved config whose bucket is not a plain bucket name is refused", async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-test-")), "vault.kapevault");
+  const vault = createVaultSession(file);
+  await vault.create("correct horse battery orbit gazelle");
+  const config = { endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "vault-backups/../other", accessKeyId: "k", secretAccessKey: "s", auto: true };
+  const bucket = fakeBucket();
+  const cloud = createCloudBackup({ vault: { ...vault, status: vault.status, cloudConfig: () => config, openSnapshot: vault.openSnapshot }, installId: () => ID, transport: bucket.transport });
+  await assert.rejects(cloud.list(), /not an R2 bucket/);
+  assert.equal(bucket.log.length, 0, "nothing was sent");
+});
+
+test("changing the URL or the key ID drops the saved secret", () => {
+  const saved = { endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "vault-backups", accessKeyId: "key-id-123", secretAccessKey: "old-secret", auto: true };
+  const input = { url: URL_OK, accessKeyId: "key-id-123", secretAccessKey: "" };
+  assert.equal(configFromInput(input, saved).secretAccessKey, "old-secret", "same URL and key ID keep it");
+  assert.throws(() => configFromInput({ ...input, accessKeyId: "other-key" }, saved), /secret/);
+  assert.throws(() => configFromInput({ ...input, url: "https://ffff0000.r2.cloudflarestorage.com/vault-backups" }, saved), /secret/);
+  assert.throws(() => configFromInput({ ...input, url: "https://0123abcd.r2.cloudflarestorage.com/other-bucket" }, saved), /secret/);
 });

@@ -165,7 +165,7 @@ export function SettingsTab({ onRestoreFile }: { onRestoreFile: () => void }) {
         {cloud && !cloud.connected ? (
           <NavRow icon={<Icon tone="--color-sys-teal"><CloudCheck size={15} weight="fill" /></Icon>} label="Connect to R2" value="No backup yet" onClick={() => setOpen("connect")} />
         ) : (
-          <NavRow icon={<Icon tone="--color-sys-teal"><CloudCheck size={15} weight="fill" /></Icon>} label="Cloud backup" value={cloud ? (cloud.apart ? "Backup only" : "Connected") : ""} onClick={() => setOpen("cloud")} />
+          <NavRow icon={<Icon tone="--color-sys-teal"><CloudCheck size={15} weight="fill" /></Icon>} label="Cloud backup" value={cloud ? (cloud.apart ? "Backup only" : cloud.carried ? "Check bucket" : "Connected") : ""} onClick={() => setOpen("cloud")} />
         )}
         <button type="button" onClick={syncNow} disabled={syncing || !cloud?.connected} className={`press ${rowBase} focus-ring [--focus-ring-offset:-2px]`}>
           <Icon tone="--color-sys-green">

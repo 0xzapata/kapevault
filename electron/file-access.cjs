@@ -31,11 +31,27 @@ function isInside(root, target) {
 // Real location on disk (links followed). Missing paths throw, which callers treat as "not allowed".
 const real = (p) => fs.realpathSync.native(p);
 
-// \\server\share, //server/share, \\?\ and \\.\ device paths. Merely looking one up makes Windows
+// \\server\share, //server/share, \\?\ and \\.\ device paths, and the NT form \??\UNC\server\share. Merely looking one up makes Windows
 // contact that host and offer it the user's NTLM password hash (and freezes this thread for ~20s
 // if nothing answers - measured), so a network path is never touched unless it sits
 // inside a network folder the user linked.
-const isNetworkPath = (p) => /^[\\/]{2}/.test(p);
+const isNetworkPath = (p) => /^[\\/]{2}/.test(p) || /^[\\/]\?\?[\\/]/.test(p);
+
+// True when a name under `root` goes through a symlink or junction. Looked at by name (lstat never
+// follows the last part, and every earlier part is checked first), so nothing here resolves a link:
+// resolving one that points at \\host\share would contact that host from main. The root itself is the
+// user's own pick and is not looked at. A part that is not there stops the walk (the real lookup that
+// follows refuses it).
+function goesThroughLink(root, target) {
+  let at = root;
+  for (const part of path.relative(root, target).split(path.sep).filter(Boolean)) {
+    at = path.join(at, part);
+    const found = fs.lstatSync(at, { throwIfNoEntry: false });
+    if (!found) return false;
+    if (found.isSymbolicLink()) return true;
+  }
+  return false;
+}
 
 // "report.pdf:hidden" is an NTFS alternate data stream, not the file it looks like.
 const hasStreamName = (p) => process.platform === "win32" && p.slice(2).includes(":");
@@ -57,7 +73,9 @@ function resolveInRoot(allowedRoots, root, rel = "") {
   const cleanRoot = path.resolve(root);
   if (!allowedRoots.some((r) => path.resolve(r) === cleanRoot)) throw new Error("Folder is not linked in the vault");
   const target = path.resolve(cleanRoot, rel);
-  if (!isInside(cleanRoot, target) || !isInside(real(cleanRoot), real(target))) throw new Error("Path leaves the linked folder");
+  if (!isInside(cleanRoot, target)) throw new Error("Path leaves the linked folder");
+  if (goesThroughLink(cleanRoot, target)) throw new Error("Path goes through a link");
+  if (!isInside(real(cleanRoot), real(target))) throw new Error("Path leaves the linked folder");
   return target;
 }
 
@@ -69,6 +87,9 @@ function checkPath(allowedRoots, target) {
   if (hasStreamName(clean)) throw new Error("Not a file path");
   const roots = allowedRoots.map((r) => path.resolve(r)).filter((r) => isInside(r, clean));
   if (roots.length === 0) throw new Error("Path is outside linked folders");
+  // Before any call that resolves links: a symlink inside a linked folder is never followed (the file
+  // browser does not list one either), so a link to \\host\share cannot make main contact that host.
+  if (roots.every((r) => goesThroughLink(r, clean))) throw new Error("Path goes through a link");
   const onDisk = real(clean);
   if (!realRoots(roots).some((r) => isInside(r, onDisk))) throw new Error("Path is outside linked folders");
   return onDisk;
@@ -142,4 +163,28 @@ function canOpenInApp(file) {
   return OPENABLE.has(path.extname(name).toLowerCase());
 }
 
-module.exports = { resolveInRoot, checkPath, listDir, readTextHead, canOpenInApp, revealTarget, isInside, isNetworkPath };
+// Types that are ZIP packages: Office and OpenDocument documents. A file with one of these names that
+// is not a ZIP (an RTF, an old binary .doc/.xls with macros) is sniffed and run by the Office app
+// whatever the name says, so it is only revealed.
+const ZIP_PACKAGES = new Set(".docx .xlsx .pptx .docm .xlsm .pptm .odt .ods .odp".split(" "));
+
+// What the name allows, plus what is really there: a regular file (not a folder named "x.pdf"), and a
+// ZIP header (PK\x03\x04) for a package type. Reads 4 bytes; false on any error.
+function isGenuineOpenable(file) {
+  try {
+    if (!canOpenInApp(file)) return false;
+    if (!fs.statSync(file).isFile()) return false;
+    if (!ZIP_PACKAGES.has(path.extname(file).toLowerCase())) return true;
+    const fd = fs.openSync(file, "r");
+    try {
+      const head = Buffer.alloc(4);
+      return fs.readSync(fd, head, 0, 4, 0) === 4 && head.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { resolveInRoot, checkPath, listDir, readTextHead, canOpenInApp, isGenuineOpenable, revealTarget, isInside, isNetworkPath };

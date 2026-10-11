@@ -83,7 +83,7 @@ const PORTS = [
       withHeader(
         'import type { Entry } from "../host/types";\nimport type { SortOrder } from "./filter";\nimport { signInOption } from "./sign-in";\nimport { deviceTypeLabel } from "./entries";\n\n',
         s,
-        ["searchText", "titleScore", "byTitle", "sortEntries"],
+        ["searchText", "titleScore", "text", "byTitle", "sortEntries"],
       ),
   ],
 ].map(([from, to, make]) => [path.join(pc, from), path.join(mobile, to), make]);

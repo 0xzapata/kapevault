@@ -5,7 +5,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { writeFileAtomic } = require("./atomic-write.cjs");
-const { isNetworkPath } = require("./file-access.cjs");
+const { isNetworkPath, isInside } = require("./file-access.cjs");
 const { writeOpenerBeside, checkOpenerBeside } = require("./opener.cjs");
 const { MAX_VAULT_BYTES } = require("./vault-crypto.cjs");
 
@@ -13,6 +13,7 @@ const COPY_NAME = "KAPEVault backup.kapevault";
 /** @type {{ at: number | null, error: string, opener: any }} */
 const NOTHING_YET = { at: null, error: "", opener: null };
 const FOREIGN = "That folder holds a copy of a different vault. Restore it, move it out of the folder, or choose another folder.";
+const LINKED = "The copy's name in that folder is a link or shortcut, which KAPEVault never follows. Delete it, or choose another folder.";
 
 // The folder as it will be saved, or a plain reason. Network paths are refused by name before any
 // disk call (touching one offers Windows' NTLM hash to that host).
@@ -23,6 +24,20 @@ function checkCopyFolder(dir, vaultDir) {
   if (!fs.statSync(folder, { throwIfNoEntry: false })?.isDirectory()) throw new Error("That folder is not there.");
   if (folder.toLowerCase() === path.resolve(vaultDir).toLowerCase()) throw new Error("Choose a folder outside KAPEVault's own.");
   return folder;
+}
+
+// True when `file` would land inside the vault's own folder (links followed on the parts that exist).
+function insideVaultFolder(vaultPath, file) {
+  const real = (p) => {
+    try {
+      return fs.realpathSync.native(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  const fold = (p) => (process.platform === "win32" ? p.toLowerCase() : p);
+  const target = path.join(real(path.dirname(path.resolve(file))), path.basename(file));
+  return isInside(fold(real(path.dirname(vaultPath))), fold(target));
 }
 
 // The vault file as it is, written atomically, with the Forever Opener beside it: "Save encrypted
@@ -37,7 +52,7 @@ function copyVaultWithOpener(vaultPath, file, version) {
 }
 
 function reason(e) {
-  if (e.message === FOREIGN) return FOREIGN;
+  if (e.message === FOREIGN || e.message === LINKED) return e.message;
   if (e.code === "ENOENT") return "The folder is not there. Plug the drive in, or choose another folder.";
   if (e.code === "EACCES" || e.code === "EPERM") return "KAPEVault may not write to that folder.";
   return "Could not copy the vault to that folder.";
@@ -52,8 +67,12 @@ function createFolderCopy({ vaultPath, folder, setFolder, ownsFile, version, del
 
   // Never over a copy this vault cannot prove is its own: another vault's (a dead PC's only copy, a
   // second PC sharing the folder) or a file that is not one. No copy there yet is fine.
+  // A symlink or junction at the copy's name is refused unread: following it would read, then judge, a
+    // file somewhere else (a network share included). The write itself renames over the name, so it
+    // replaces a link and never follows one.
   function refuseForeign(dir) {
     const file = path.join(dir, COPY_NAME);
+    if (fs.lstatSync(file, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(LINKED);
     const size = fs.statSync(file, { throwIfNoEntry: false })?.size;
     if (size === undefined) return;
     if (size > MAX_VAULT_BYTES || !ownsFile(fs.readFileSync(file))) throw new Error(FOREIGN);
@@ -113,7 +132,10 @@ function createFolderCopy({ vaultPath, folder, setFolder, ownsFile, version, del
     const dir = folder();
     let at = last.at;
     try {
-      if (dir && at === null) at = fs.statSync(path.join(dir, COPY_NAME)).mtimeMs;
+      if (dir && at === null) {
+        const found = fs.lstatSync(path.join(dir, COPY_NAME)); // a link is not a copy: its target's time is not ours
+        if (!found.isSymbolicLink()) at = found.mtimeMs;
+      }
     } catch {
       // no copy there yet, or the drive is out
     }
@@ -135,4 +157,4 @@ function createFolderCopy({ vaultPath, folder, setFolder, ownsFile, version, del
   return { schedule, flush, choose, stop, status, checkOpener };
 }
 
-module.exports = { createFolderCopy, checkCopyFolder, copyVaultWithOpener, COPY_NAME };
+module.exports = { createFolderCopy, checkCopyFolder, copyVaultWithOpener, insideVaultFolder, COPY_NAME };

@@ -18,6 +18,7 @@ export interface CloudConfig extends R2Target {
   secretAccessKey: string;
   auto: boolean;
   apart?: boolean; // backup only: the bucket holds another vault, so nothing is merged from it
+  carried?: boolean; // came inside a restored backup file: nothing is uploaded or synced until the user confirms it (Cloud backup)
 }
 export interface R2Object {
   key: string;

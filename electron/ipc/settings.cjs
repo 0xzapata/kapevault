@@ -19,7 +19,9 @@ function register({ handle, attempt, requireUnlocked, settings, airWall, install
     oldInstall: devEnv.KAPEVAULT_DATA_DIR ? null : oldInstallPath(),
   });
   handle("app:getSettings", () => appSettings());
+  // The locked UI never writes settings (it only reads them), so a locked vault refuses.
   handle("app:setSettings", (patch) => {
+    requireUnlocked();
     settings.set(patch);
     applySettings();
     return appSettings();
@@ -41,7 +43,12 @@ function register({ handle, attempt, requireUnlocked, settings, airWall, install
   // Air Wall: a Windows Firewall rule that keeps this exe off the internet (the page asks, Windows
   // prompts). Test touches the network only when clicked.
   handle("airwall:status", () => attempt(async () => ({ status: await airWall.status() })));
-  handle("airwall:set", (on) => attempt(async () => ({ status: await airWall.set(Boolean(on)) })));
+  handle("airwall:set", (on) =>
+    attempt(async () => {
+      requireUnlocked();
+      return { status: await airWall.set(Boolean(on)) };
+    }),
+  );
   handle("airwall:test", () => attempt(async () => ({ result: await airWall.test() })));
 
   // Listed in Security when another account on this PC can change the folder KAPEVault runs from.

@@ -120,3 +120,18 @@ test("the Trash view holds only trashed items, and searches them", () => {
   assert.equal(matchesView(login(), "trash"), false);
   assert.deepEqual(titles(search([trashed, note({ trashedAt: "2026-03-02T00:00:00.000Z" })], "old", { view: "trash" })), ["Old mail"]);
 });
+
+// Audit run-1 4.3: a restored or synced entry can lack a title (or hold a non-text one); the list must still sort and search.
+test("an entry with a missing or non-text title or updatedAt never throws in any sort or search", () => {
+  const noTitle = { ...login({ id: "no-title", username: "test.user" }), title: undefined } as unknown as Entry;
+  const numTitle = { ...login({ id: "num-title" }), title: 5, updatedAt: undefined } as unknown as Entry;
+  const entries = [login({ id: "a", title: "Alpha" }), noTitle, numTitle, login({ id: "b", title: "Beta" })];
+  const sorts: SortOrder[] = ["title", "recent", "edited"];
+  for (const sort of sorts) {
+    assert.equal(sortEntries(entries, sort).length, 4, sort);
+    assert.equal(search(entries, "", { sort }).length, 4, sort);
+    assert.deepEqual(search(entries, "test.user", { sort }).map((e) => e.id), ["no-title"], sort);
+    assert.deepEqual(search(entries, "alp", { sort }).map((e) => e.id), ["a"], sort);
+  }
+  assert.deepEqual(sortEntries(entries, "title").map((e) => e.id).slice(2), ["a", "b"]);
+});

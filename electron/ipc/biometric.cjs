@@ -32,7 +32,9 @@ function register({ handle, attempt, vault, biometric, biometricName, biometricK
       return { status: await biometricStatus() };
     }),
   );
+  // Turning it off is Settings' (unlocked); the lock screen never calls it.
   handle("biometric:disable", async () => {
+    if (!vault.status().unlocked) throw new Error("Unlock the vault first.");
     await biometricKeyChanged();
     return biometricStatus();
   });

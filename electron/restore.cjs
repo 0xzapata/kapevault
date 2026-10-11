@@ -2,6 +2,8 @@
 // The order and the refusals live here, apart from Electron, so tests can hold them; main.cjs wires
 // the IPC and what follows a restore (the unlock it broadcasts, turning biometrics off).
 // device: "PC" or "Mac", for the page's words.
+const { parseVaultFile } = require("../core/index.js");
+
 function createRestores({ vault, cloud, throttledUnlock, device }) {
   // Before any restore replaces the vault on this device, it is kept: uploaded to the SAVED bucket when
   // the vault is unlocked with cloud backup on, otherwise copied beside it as it is on disk (one slot,
@@ -59,7 +61,8 @@ function createRestores({ vault, cloud, throttledUnlock, device }) {
     const text = await load();
     // The backup's own password, not this vault's: a success never clears the miss count (audit finding L1
     // in SECURITY-AUDIT-2026-09-28.md: restoring your own backup at the lock screen reset it between guesses).
-    const check = await throttledUnlock(() => vault.verifyBackup(text, String(master ?? "")), { local: false });
+    // salt: the backup file's own, so its misses count against that file even after another vault unlocks (audit run-1 4.5).
+    const check = await throttledUnlock(() => vault.verifyBackup(text, String(master ?? "")), { local: false, salt: parseVaultFile(text)?.kdf.salt });
     if (!check.ok) return check;
     // check.carry: what the vault here keeps through the restore (its device removals, and its key after a
     // lock-out), read before keepBeforeRestore's upload; its key copy is wiped with the backup's.
@@ -88,9 +91,13 @@ function createRestores({ vault, cloud, throttledUnlock, device }) {
     // Restoring the slot itself, the slot follows what happened: the vault it replaces was staged and
     // takes it, or went to R2 (or there was none) and the slot would only repeat the restored vault.
     // Nothing kept: the slot stays, as the confirm said.
+    // A different vault (check.sameVault false, audit run-1 4.1) keeps neither this vault's R2 setup nor
+    // the slot clear: the setup belongs to the vault it replaces, and the slot copy is still the only one
+    // under the restored vault's own key until it is written.
     let slot;
-    if (fromReplaced && keep) slot = keep.kept === "local" ? "staged" : "clear";
-    const { slotOk, ...result } = vault.commitRestore(text, check.opened, { cloud: keep?.cloud ?? null, slot, carry: check.carry });
+    if (fromReplaced && keep) slot = keep.kept === "local" ? "staged" : check.sameVault ? "clear" : undefined;
+    const cloud = check.sameVault ? (keep?.cloud ?? null) : null;
+    const { slotOk, ...result } = vault.commitRestore(text, check.opened, { cloud, slot, carry: check.carry });
     onRestored(result);
     return { ...result, keptCopy: keep?.kept === "local" && slotOk };
   }

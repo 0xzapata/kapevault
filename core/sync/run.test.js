@@ -114,6 +114,13 @@ test("a review names the devices and the items by title; a deleted item by its t
   assert.equal(nameOf({}, "x"), "Another device");
 });
 
+test("a review lists a move to the Trash with the deletes, as the review counts it", () => {
+  const before = { entries: [{ id: "gone", title: "Mock gone" }, { id: "binned", title: "Mock binned" }] };
+  const result = { data: { entries: [{ id: "binned", title: "Mock binned" }] }, merged: [{ name: "Mock Phone" }] };
+  const changes = { added: [], changed: ["binned"], deleted: ["gone"], trashed: ["binned"], copies: [], secretItems: 0 };
+  assert.deepEqual(reviewView(before, result, changes, ["deletes"]).deleted, ["Mock gone", "Mock binned"]);
+});
+
 test("a review names each device once, however many of its snapshots it merges", () => {
   // Two snapshots of one PC in one sync read "Changes from Mock PC B and Mock PC B wait for you" (e2e, 2026-10-10).
   const result = { data: { entries: [] }, merged: [{ name: "Mock PC B" }, { name: "Mock PC C" }, { name: "Mock PC B" }] };

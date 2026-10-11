@@ -9,12 +9,25 @@ const { savePdfWithDialog } = require("../pdf-export.cjs");
 const { handBackHtml, HAND_BACK_MARGIN_IN } = require("../hand-back.cjs");
 const { evacuationHtml, EVACUATION_MARGIN_IN } = require("../evacuation.cjs");
 const { openerHtml, openerSha256, OPENER_NAME } = require("../opener.cjs");
-const { copyVaultWithOpener } = require("../folder-copy.cjs");
+const { copyVaultWithOpener, insideVaultFolder } = require("../folder-copy.cjs");
 const { writeFileAtomic } = require("../atomic-write.cjs");
 
 function register({ handle, attempt, requireUnlocked, vault, folderCopy, windows }) {
-  // A printout: the save dialog, the PDF, then the PDF viewer (pdf-export.cjs).
-  const printPdf = (options) => savePdfWithDialog({ BrowserWindow, dialog, shell, parent: windows.main() }, options);
+  // The session as it is now: the returned check is true only while that same session is still open
+  // (a lock, or a lock and unlock, in between makes it false). Throws when the vault is locked now.
+  const sameSession = () => {
+    const { generation } = vault.syncBase();
+    return () => {
+      try {
+        return vault.syncBase().generation === generation;
+      } catch {
+        return false;
+      }
+    };
+  };
+  // A printout: the save dialog, the PDF, then the PDF viewer (pdf-export.cjs). The items were read
+  // before the dialog opened, so the session is checked again when it returns.
+  const printPdf = (options) => savePdfWithDialog({ BrowserWindow, dialog, shell, parent: windows.main() }, { ...options, stillOpen: sameSession() });
 
   // Local backup: the encrypted vault file exactly as on disk, somewhere the user picks (USB, Drive).
   handle("backup:saveCopy", () =>
@@ -27,6 +40,8 @@ function register({ handle, attempt, requireUnlocked, vault, folderCopy, windows
         properties: ["dontAddToRecent"],
       });
       if (canceled || !filePath) return { canceled: true };
+      // Never into the vault's own folder: a typed name there could replace the live file or the replaced-vault slot.
+      if (insideVaultFolder(vault.status().path, filePath)) throw new Error("Choose a place outside KAPEVault's own folder, such as a USB drive or Documents.");
       // The Forever Opener goes beside it, so the copy opens even where KAPEVault is not installed.
       const opener = copyVaultWithOpener(vault.status().path, filePath, app.getVersion());
       return { name: path.basename(filePath), opener };
@@ -99,8 +114,10 @@ function register({ handle, attempt, requireUnlocked, vault, folderCopy, windows
   handle("backup:chooseFolder", () =>
     attempt(async () => {
       requireUnlocked();
+      const stillOpen = sameSession();
       const { canceled, filePaths } = await dialog.showOpenDialog(windows.main(), { title: "Keep a copy of the vault in this folder", properties: ["openDirectory", "createDirectory", "dontAddToRecent"] });
       if (canceled || !filePaths[0]) return { canceled: true };
+      if (!stillOpen()) throw new Error("The vault locked while the folder window was open. Unlock it and choose the folder again.");
       return { status: folderCopy.choose(filePaths[0]) };
     }),
   );

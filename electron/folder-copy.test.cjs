@@ -266,3 +266,39 @@ test("settings.json keeps the folder as a path only; the page cannot set it, a n
   fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ ...saved, copyFolder: "\\\\mock-host\\share" }));
   assert.equal(createAppSettings(dir).copyFolder(), "");
 });
+
+// A link at `at` pointing at `to` (a file or a folder); a file symlink needs Developer Mode on Windows,
+// so a junction (a folder) is the fallback. False when neither can be made here.
+function makeLink(to, at) {
+  for (const [dest, type] of [[to, "file"], [path.dirname(to), "junction"]]) {
+    try {
+      fs.symlinkSync(dest, at, type);
+      return true;
+    } catch {
+      // try the next kind
+    }
+  }
+  return false;
+}
+
+test("a link or junction at the copy's name is refused unread, by choose, copyNow and status; its target is untouched", (t) => {
+  const { copy, target, copied } = setup(t); // ownsFile is always true here, so only the link check can refuse
+  const outside = tempDir("outside");
+  const secret = path.join(outside, "elsewhere.kapevault");
+  fs.writeFileSync(secret, "OUTSIDE");
+  if (!makeLink(secret, copied())) return t.skip("this PC allows neither a symlink nor a junction");
+  assert.throws(() => copy.choose(target), /link or shortcut/);
+  assert.equal(fs.readFileSync(secret, "utf8"), "OUTSIDE");
+  assert.deepEqual(fs.readdirSync(outside), ["elsewhere.kapevault"]);
+  // The folder kept in settings from before the link appeared: copyNow reports it and writes nothing there.
+  const kept = setup(t);
+  kept.copy.choose(kept.target);
+  fs.rmSync(kept.copied());
+  const linked = path.join(tempDir("outside"), "elsewhere.kapevault");
+  fs.writeFileSync(linked, "OUTSIDE");
+  assert.ok(makeLink(linked, kept.copied()));
+  kept.copy.schedule();
+  kept.copy.flush();
+  assert.match(kept.copy.status().error, /link or shortcut/);
+  assert.equal(fs.readFileSync(linked, "utf8"), "OUTSIDE");
+});

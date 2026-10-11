@@ -82,3 +82,28 @@ test("a dev run, another OS, or a folder that cannot be read raises nothing", as
   assert.deepEqual(await installFolderWriters({ packaged: true, platform: "win32", execPath: "C:\\a\\b.exe", writers: async () => null }), []);
   assert.deepEqual(await installFolderWriters({ packaged: true, platform: "win32", execPath: "C:\\a\\b.exe", writers: async () => [] }), []);
 });
+
+test("an entry this reader cannot size up is a writer, never 'nobody': conditional, unknown right code, malformed", () => {
+  // A conditional (callback) allow entry for Everyone: its condition could be anything.
+  assert.deepEqual(otherWriters(`O:${ME}D:(A;OICI;FA;;;SY)(XA;OICI;FA;;;WD;(@User.Title == "x"))`, ME), ["Everyone"]);
+  // A conditional entry whose condition holds parentheses of its own is still one entry.
+  assert.deepEqual(otherWriters(`O:${ME}D:(XA;;FA;;;BU;((@User.a == 1) && (@User.b == 2)))(A;;FA;;;${ME})`, ME), ["Users"]);
+  // A right code outside the table (DC) used to throw and read as an empty list.
+  assert.deepEqual(otherWriters(`O:${ME}D:(A;OICI;DC;;;AU)(A;OICI;FA;;;${ME})`, ME), ["Authenticated Users"]);
+  // An object entry and an entry with no SID.
+  assert.deepEqual(otherWriters(`O:${ME}D:(OA;;CC;bf967a86-0de6-11d0-a285-00aa003049e2;;S-1-5-21-1-2-3-1500)`, ME), ["S-1-5-21-1-2-3-1500"]);
+  assert.deepEqual(otherWriters(`O:${ME}D:(A;;FA)`, ME), ["an entry that could not be read"]);
+  // A conditional DENY only shrinks the list, like a plain deny.
+  assert.deepEqual(otherWriters(`O:${ME}D:(XD;;FA;;;BU;(@User.a == 1))(A;;FA;;;${ME})`, ME), []);
+  assert.deepEqual(parseSddl(`D:(XA;;FA;;;WD;(@User.a == 1))`).aces.map((a) => [a.type, a.sid, a.unparsed]), [["XA", "WD", true]]);
+});
+
+test("a folder owned by another account is a writer unless OWNER RIGHTS narrows it; the user's own folder is not", () => {
+  const THEM = "S-1-5-21-400883919-3398603373-3929718506-1002";
+  const made = `O:${THEM}G:${THEM}D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;${ME})`;
+  assert.deepEqual(otherWriters(made, ME), [THEM], "owner is someone else: they can rewrite the permissions");
+  assert.deepEqual(otherWriters(`O:${THEM}G:${THEM}D:PAI(A;OICI;0x1200a9;;;OW)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;${ME})`, ME), [], "an OWNER RIGHTS read entry cancels the implicit rights");
+  assert.deepEqual(otherWriters(`O:${THEM}D:PAI(A;OICI;FA;;;OW)(A;OICI;FA;;;${ME})`, ME), [THEM], "an OWNER RIGHTS entry that still grants write does not");
+  assert.deepEqual(otherWriters(SAFE, ME), [], "owned by the signed-in user");
+  assert.deepEqual(otherWriters(`O:BAD:(A;;FA;;;${ME})`, ME), [], "owned by Administrators");
+});

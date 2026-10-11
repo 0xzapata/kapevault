@@ -141,11 +141,17 @@ export function createRealHost(deps: HostDeps): VaultHost {
     onSync: emitSync,
   });
   const { need, change } = session;
+  // This phone's R2 setup as backups and sync may use it: not one that came inside a restored backup file
+  // and has not been confirmed on Cloud backup yet (cloud-connect setCloudAuto).
+  const confirmedCloud = () => {
+    const c = session.open?.data.cloud as CloudConfig | undefined;
+    return c && !c.carried ? c : null;
+  };
 
   const backups = createBackups({
     store,
     installId: () => installId,
-    config: () => session.open?.data.cloud ?? null,
+    config: confirmedCloud,
     pro: () => pro.owned,
     snapshot() {
       const key = session.open?.key;
@@ -206,7 +212,7 @@ export function createRealHost(deps: HostDeps): VaultHost {
       model: deps.model,
       now,
       base: () => (session.open ? { generation: session.generation, revision: session.revision, data: session.open.data } : null),
-      config: () => (session.open?.data.cloud as CloudConfig | undefined) ?? null,
+      config: confirmedCloud,
       pro: () => pro.owned,
       r2: r2For,
       openSnapshot,
@@ -335,6 +341,7 @@ export function createRealHost(deps: HostDeps): VaultHost {
     },
 
     async disableBiometric() {
+      need();
       await bio.disable();
     },
 
@@ -469,7 +476,17 @@ export function createRealHost(deps: HostDeps): VaultHost {
     onSync: syncEvents.add,
     async syncNow() {
       if (!need().cloud) return { ok: false, error: "Cloud backup is not set up." };
+      if (!confirmedCloud()) return { ok: false, error: "Check the bucket in Settings > Cloud backup first." };
       return syncer.syncNow();
+    },
+    async forgetOlderBackups() {
+      need();
+      if (!confirmedCloud()) return { ok: false, error: "Cloud backup is not set up." };
+      return attempt(async () => {
+        const { deleted, refused } = await backups.forgetOlder();
+        if (refused === 0) await change((data) => void delete data.olderBackupsPending, { backup: false }); // old-password snapshots are still there while any delete is refused
+        return { deleted, refused };
+      }, "Could not delete the older backups.");
     },
     async applySync() {
       need();
@@ -490,6 +507,7 @@ export function createRealHost(deps: HostDeps): VaultHost {
     },
     async setSettings(patch) {
       await ready;
+      need(); // Settings is an unlocked screen: a locked vault takes no changes from the page
       settings = cleanSettings(patch, settings);
       await saveSettings(store, installId, settings);
       await applyCapture();

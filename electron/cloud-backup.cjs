@@ -33,12 +33,14 @@ async function listSnapshots(r2) {
   return lists;
 }
 
-// Settings form -> a checked config. A blank secret keeps the saved one.
+// Settings form -> a checked config. A blank secret keeps the saved one - only while the bucket and key ID
+// stay the same, so a changed URL or key ID never sends the saved secret to a place it was not saved for.
 function configFromInput(input, saved) {
   const target = parseR2Url(input?.url);
   if (!target) throw new Error("Paste the bucket's S3 API URL, like https://<account-id>.r2.cloudflarestorage.com/<bucket>.");
   const accessKeyId = String(input.accessKeyId ?? "").trim();
-  const secretAccessKey = String(input.secretAccessKey ?? "").trim() || saved?.secretAccessKey || "";
+  const sameTarget = saved && saved.endpoint === target.endpoint && saved.bucket === target.bucket && saved.accessKeyId === accessKeyId;
+  const secretAccessKey = String(input.secretAccessKey ?? "").trim() || (sameTarget ? saved.secretAccessKey : "") || "";
   if (!accessKeyId || !secretAccessKey) throw new Error("Enter the access key ID and secret access key.");
   return { ...target, accessKeyId, secretAccessKey, auto: saved?.auto ?? true };
 }
@@ -126,13 +128,17 @@ function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transp
   // A config also comes out of a synced or restored vault (cleanVault checks it there too): never sign and
   // send for anything but an R2 bucket. The test override is exempt.
   const clientFor = (config) => {
-    if (!endpoint && parseR2Url(`${config.endpoint}/${config.bucket}`)?.endpoint !== config.endpoint) throw new Error("The saved backup is not an R2 bucket. Connect to R2 again in Settings.");
+    const target = parseR2Url(`${config.endpoint}/${config.bucket}`);
+    if (!endpoint && (target?.endpoint !== config.endpoint || target?.bucket !== config.bucket)) throw new Error("The saved backup is not an R2 bucket. Connect to R2 again in Settings.");
     return createR2Client({ ...config, endpoint: endpoint || config.endpoint, allowHttp: Boolean(endpoint), transport });
   };
 
   // The opener is not secret: it holds no vault data. Once per bucket per run it is read back and
   // compared byte for byte - a page someone changed in the bucket must not sit beside the backups as
   // ours - and put back when it is missing or different (anything larger than the real page is).
+  // Then every other object in the opener folder (earlier app versions' pages, which nothing re-checks
+  // and an older Emergency Kit may still point at) is deleted. Best effort, once per run: a refused
+  // delete (a Bucket Lock) or a failed listing never fails a backup.
   // Not awaited by a backup, so a slow upload never holds up quitting or a restore; a failure is
   // forgotten and the next backup tries again.
   function sendOpener(r2, config) {
@@ -145,9 +151,16 @@ function createCloudBackup({ vault, endpoint, delayMs, installId, opener, transp
         if (e.message !== OVERSIZED) throw e;
         return "larger";
       });
-      if (Buffer.isBuffer(there) && there.equals(real)) return;
-      await r2.put(opener.key, real);
-      if (there !== null) openerReplaced = true;
+      if (!(Buffer.isBuffer(there) && there.equals(real))) {
+        await r2.put(opener.key, real);
+        if (there !== null) openerReplaced = true;
+      }
+      try {
+        const folder = opener.key.slice(0, opener.key.lastIndexOf("/") + 1);
+        for (const o of await r2.list(folder)) if (o.key !== opener.key && o.key.startsWith(folder)) await r2.del(o.key).catch(() => {});
+      } catch {
+        // left for the next run
+      }
     })().catch(() => openerIn.delete(bucket));
   }
 

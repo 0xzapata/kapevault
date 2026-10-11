@@ -9,13 +9,27 @@ function register({ handle, attempt, vault, cloud, sync, broadcast, devEnv }) {
   // Cloud backup. A change to its setup changes what sync can do too, so the sync line hears of it
   // (cloudChanged).
   const cloudStatus = () => ({ settings: vault.status().unlocked ? vault.cloudView() : null, last: cloud.status(), openerReplaced: cloud.openerReplaced() });
+  // The session as it is now: the returned check is true only while that same session is still open
+  // (backup.cjs does the same). Throws when the vault is locked now.
+  const sameSession = () => {
+    const { generation } = vault.syncBase();
+    return () => {
+      try {
+        return vault.syncBase().generation === generation;
+      } catch {
+        return false;
+      }
+    };
+  };
   const cloudChanged = () => (broadcast("sync:status", sync.status()), cloudStatus());
 
   handle("cloud:status", () => cloudStatus());
   handle("cloud:connect", (input) =>
     attempt(async () => {
+      const stillOpen = sameSession();
       const config = cloud.configFromInput(input, vault.cloudConfig());
       await cloud.list(input); // prove the URL and keys work before saving them
+      if (!stillOpen()) throw new Error("The vault locked while the connection was tested. Unlock it and connect again.");
       vault.setCloud(config);
       await cloud.backupNow();
       return { status: cloudChanged() };
@@ -31,8 +45,10 @@ function register({ handle, attempt, vault, cloud, sync, broadcast, devEnv }) {
   });
   handle("cloud:forgetOlder", () =>
     attempt(async () => {
+      const stillOpen = sameSession();
       const { deleted, refused } = await cloud.forgetOlder();
-      if (refused === 0) vault.clearOlderBackups(); // old-password snapshots are still there while any delete is refused
+      // Another session (or none) is not the one whose old snapshots these were: its flag stays, the next forget retries.
+      if (refused === 0 && stillOpen()) vault.clearOlderBackups(); // old-password snapshots are still there while any delete is refused
       return { deleted, refused, status: cloudStatus() };
     }),
   );

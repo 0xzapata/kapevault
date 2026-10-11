@@ -1,7 +1,7 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { adoptEpoch, carryLockOut, isNewerEpoch, isNewerKey, merge, sharedState, VaultMismatchError } from "./merge.js";
+import { adoptEpoch, carryLockOut, isNewerEpoch, isNewerKey, merge, SECRET_GROUPS, sharedState, VaultMismatchError } from "./merge.js";
 import { splitGroups } from "./groups.js";
 import { syncChanges } from "./review.js";
 import { SHARED_FIELDS, addKey, newEpoch, revokeDevice, validSync } from "./shape.js";
@@ -114,7 +114,7 @@ function checkMerge(a, b, result) {
           continue;
         }
         const value = groups[name];
-        if (!value || (name === "pw" && !value.password) || (closed(got) && !closed(entry) && (name === "fav" || name === "space"))) continue;
+        if (!value || (name === "pw" && !value.password) || (closed(got) && !closed(entry) && !SECRET_GROUPS.includes(name))) continue; // only a secret typed after the closing is kept in a copy
         const kept =
           holds(name, value, splitGroups(got)[name]) ||
           (name === "pw" && (got.history?.some((h) => h.password === value.password) || got.history?.length === 10)) ||
@@ -751,7 +751,7 @@ test("what the host gates on: the report says only whether anything came in; syn
   checkMerge(before, phone.data, data);
   assert.deepEqual(report, { unchanged: false, epochDiffers: false });
   const numbered = before.entries.filter((e) => /^Mock \d$/.test(e.title)).map((e) => e.id);
-  assert.deepEqual(syncChanges(before, data), { added: [], changed: [find(pc, "Mock Bank").id], deleted: numbered, copies: [], secretItems: 1 });
+  assert.deepEqual(syncChanges(before, data), { added: [], changed: [find(pc, "Mock Bank").id], deleted: numbered, trashed: [], copies: [], secretItems: 1 });
 });
 
 test("merge reads no clock and makes no random value", (t) => {
