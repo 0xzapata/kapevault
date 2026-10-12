@@ -3,26 +3,25 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const { spawnSync } = require("node:child_process");
 const { seeded, MASTER } = require("../electron/fixtures/vault-session-helpers.cjs");
+const { totpCode } = require("../electron/totp.cjs");
 
 const ROOT = path.join(__dirname, "..");
 const KEY = "JBSWY3DPEHPK3PXPJBSW";
 
 // { code, stdout, stderr } of one run; KAPEVAULT_MASTER is the vault's master unless env says otherwise.
 function cli(dir, args, { input, env, stdio = "pipe" } = {}) {
-  try {
-    const stdout = execFileSync(process.execPath, ["cli/kapevault.cjs", ...args], {
-      cwd: ROOT,
-      input,
-      encoding: "utf8",
-      stdio,
-      env: { ...process.env, KAPEVAULT_DATA_DIR: dir, KAPEVAULT_MASTER: MASTER, ...env },
-    });
-    return { code: 0, stdout, stderr: "" };
-  } catch (e) {
-    return { code: e.status, stdout: e.stdout, stderr: e.stderr };
-  }
+  const { status, stdout, stderr, error } = spawnSync(process.execPath, ["cli/kapevault.cjs", ...args], {
+    cwd: ROOT,
+    input,
+    encoding: "utf8",
+    timeout: 15_000,
+    stdio,
+    env: { ...process.env, KAPEVAULT_DATA_DIR: dir, KAPEVAULT_MASTER: MASTER, ...env },
+  });
+  if (error) throw error;
+  return { code: status, stdout, stderr };
 }
 
 // A vault holding the helpers' GitHub login (me / s3cret-pass!) in Personal.
@@ -34,6 +33,12 @@ async function vaultDir() {
 const json = (run) => {
   assert.equal(run.code, 0, run.stderr);
   return JSON.parse(run.stdout);
+};
+
+const assertOtp = (code) => {
+  const now = Date.now();
+  const expected = [-30_000, 0, 30_000].map((offset) => totpCode(`otpauth://totp/x?secret=${KEY}`, now + offset).code);
+  assert.ok(expected.includes(code), `Expected ${expected.join(" or ")}, got ${code}`);
 };
 
 // One login made through `item create`, read by the four tests after it.
@@ -68,7 +73,7 @@ test("item get --format json reveals the password and gives the current OTP code
   assert.equal(got.id, item.id);
   assert.equal(got.fields.find((f) => f.id === "password").value, item.fields.find((f) => f.id === "password").value);
   assert.equal(got.fields.find((f) => f.id === "username").value, "bob");
-  assert.match(got.fields.find((f) => f.type === "OTP").value, /^\d{6}$/);
+  assertOtp(got.fields.find((f) => f.type === "OTP").value);
 });
 
 test("item get without --reveal hides the password", async () => {
@@ -86,11 +91,11 @@ test("read op://Personal/<title>/password gives the created password", async () 
   assert.equal(run.stdout, `${item.fields.find((f) => f.id === "password").value}\n`);
 });
 
-test("read ?attribute=otp gives a 6-digit code", async () => {
+test("read ?attribute=otp gives the current OTP code", async () => {
   const { dir } = await created;
   const run = cli(dir, ["read", "-n", "op://Personal/Bank/password?attribute=otp"]);
   assert.equal(run.code, 0, run.stderr);
-  assert.match(run.stdout, /^\d{6}$/);
+  assertOtp(run.stdout);
 });
 
 test("inject replaces two references in one line", async () => {
