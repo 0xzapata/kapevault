@@ -251,6 +251,52 @@ test("while app.pid names a live app, writes are refused and reads still work", 
   assert.equal(read.stdout, "me\n");
 });
 
+test("an unreadable app.pid stops a write", async () => {
+  const { dir } = await vaultDir();
+  fs.mkdirSync(path.join(dir, "app.pid"));
+  const before = fs.readFileSync(path.join(dir, "vault.kapevault"));
+  const run = cli(dir, ["item", "edit", "GitHub", "username=changed"]);
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /EISDIR/);
+  assert.deepEqual(fs.readFileSync(path.join(dir, "vault.kapevault")), before);
+});
+
+test("all vault writes refuse an app.pid that appears after unlock", async () => {
+  const commands = [
+    ["vault", "create", "Team"],
+    ["vault", "edit", "Personal", "--name", "Renamed"],
+    ["item", "create", "--category", "note", "--title", "Plan", "body=x"],
+    ["item", "edit", "GitHub", "username=changed"],
+    ["item", "delete", "GitHub"],
+    ["item", "move", "GitHub", "--destination-vault", "Team"],
+  ];
+  for (const args of commands) {
+    const { dir, vault } = await vaultDir();
+    vault.addSpace("Team");
+    const before = fs.readFileSync(path.join(dir, "vault.kapevault"));
+    const preload = path.join(dir, "app-after-unlock.cjs");
+    fs.writeFileSync(preload, `
+const fs = require("node:fs");
+const sessions = require(${JSON.stringify(path.join(ROOT, "electron/vault-session.cjs"))});
+const create = sessions.createVaultSession;
+sessions.createVaultSession = (...args) => {
+  const vault = create(...args);
+  const unlock = vault.unlock;
+  vault.unlock = async (master) => {
+    const result = await unlock(master);
+    fs.writeFileSync(${JSON.stringify(path.join(dir, "app.pid"))}, ${JSON.stringify(String(process.pid))});
+    return result;
+  };
+  return vault;
+};
+`);
+    const run = cli(dir, args, { env: { NODE_OPTIONS: `--require=${preload}` } });
+    assert.equal(run.code, 1, args.join(" "));
+    assert.match(run.stderr, /KAPEVault is open\. Quit it first, then run this command again\./);
+    assert.deepEqual(fs.readFileSync(path.join(dir, "vault.kapevault")), before);
+  }
+});
+
 test("item delete moves the item out of item list", async () => {
   const { dir } = await vaultDir();
   const run = cli(dir, ["item", "delete", "GitHub"]);

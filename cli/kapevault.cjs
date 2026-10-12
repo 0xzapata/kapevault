@@ -146,12 +146,15 @@ function dataDir(flag) {
 const readText = (file) => {
   try {
     return fs.readFileSync(file, "utf8");
-  } catch {
-    return null;
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
   }
 };
 
 // electron/main.cjs writes app.pid while the app runs. A pid that names no process is a crash's leftover.
+// ponytail: app.pid is advisory: two CLI writers can still race. Upgrade to one lock file held by the
+// app and the CLI through the write in electron/vault-session.cjs.
 function refuseWhileAppOpen(dir) {
   const file = path.join(dir, "app.pid");
   const content = readText(file);
@@ -412,6 +415,7 @@ const COMMANDS = {
     run: async (g, [name]) => {
       need(name, "vault create <name>");
       const { vault } = await open(g, true);
+      refuseWhileAppOpen(dataDir(g["data-dir"]));
       const { vault: view, id } = vault.addSpace(name);
       const space = spaceJson(view, spaceOf(view, id));
       show(g, space, () => spaceTable([space]));
@@ -423,6 +427,7 @@ const COMMANDS = {
       need(name && g.name, "vault edit <vault> --name <new name>");
       const { vault, view } = await open(g, true);
       const { id } = findSpace(view, name);
+      refuseWhileAppOpen(dataDir(g["data-dir"]));
       const after = vault.renameSpace(id, g.name);
       const space = spaceJson(after, spaceOf(after, id));
       show(g, space, () => spaceTable([space]));
@@ -466,6 +471,7 @@ const COMMANDS = {
       for (const [name, value] of fields) fieldOf(kind, name).set(input, value);
       apply(input, g, fromStdin ? args.slice(1) : args);
       if (g["dry-run"]) return print(JSON.stringify(input, null, 2));
+      refuseWhileAppOpen(dataDir(g["data-dir"]));
       const saved = vault.saveEntry(input);
       showItem(g, vault, saved.vault, saved.id);
     },
@@ -478,6 +484,7 @@ const COMMANDS = {
       const e = findItem(view, name, g.vault);
       // The view's fields are saveEntry's input, secrets left out (kept). Its questions carry no answers:
       // sent back, they would wipe them; left undefined, they stay.
+      refuseWhileAppOpen(dataDir(g["data-dir"]));
       const saved = vault.saveEntry(apply({ ...e, questions: undefined }, g, assignments));
       showItem(g, vault, saved.vault, e.id);
     },
@@ -487,6 +494,7 @@ const COMMANDS = {
     run: async (g, [name]) => {
       need(name, "item delete <item>");
       const { vault, view } = await open(g, true);
+      refuseWhileAppOpen(dataDir(g["data-dir"]));
       vault.deleteEntry(findItem(view, name, g.vault).id);
     },
   },
@@ -495,6 +503,7 @@ const COMMANDS = {
     run: async (g, [name]) => {
       need(name && g["destination-vault"], "item move <item> --current-vault <vault> --destination-vault <vault>");
       const { vault, view } = await open(g, true);
+      refuseWhileAppOpen(dataDir(g["data-dir"]));
       vault.moveEntry(findItem(view, name, g["current-vault"]).id, findSpace(view, g["destination-vault"]).id);
     },
   },
