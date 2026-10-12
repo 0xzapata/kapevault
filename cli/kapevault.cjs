@@ -340,16 +340,25 @@ function output(g, content) {
   print(file);
 }
 
-// Copies a child's output with every secret replaced by MASK. Text near the end of what came so far can be
-// the start of a secret split across two chunks, so it waits for the next chunk (or the end). A match that
-// starts before the wait zone is always whole: no secret is longer than the zone plus one.
-// ponytail: a prompt's last characters wait for more output; flush on a short timer if an interactive command needs them.
+// Copies a child's output with every secret replaced by MASK. Only a suffix that starts a secret waits
+// for the next chunk (or the end), so ordinary prompts reach the terminal at once.
 function maskInto(from, to, secrets) {
   const sorted = [...new Set(secrets.filter(Boolean))].sort((a, b) => b.length - a.length);
   const any = new RegExp(sorted.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
   let held = "";
   const pass = (final) => {
-    const limit = final ? held.length : Math.max(0, held.length - sorted[0].length + 1);
+    let keep = 0;
+    if (!final) {
+      for (const s of sorted) {
+        for (let k = Math.min(s.length - 1, held.length); k > keep; k--) {
+          if (held.endsWith(s.slice(0, k))) {
+            keep = k;
+            break;
+          }
+        }
+      }
+    }
+    const limit = held.length - keep;
     let out = "";
     let at = 0;
     for (const m of held.matchAll(any)) {

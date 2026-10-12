@@ -3,7 +3,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { seeded, MASTER } = require("../electron/fixtures/vault-session-helpers.cjs");
 const { totpCode } = require("../electron/totp.cjs");
 
@@ -162,6 +162,57 @@ test("run --no-masking passes the secret through", async () => {
   const run = cli(dir, ["run", "--no-masking", "--", process.execPath, "-e", "console.log(process.env.X)"], { env: { X: "op://Personal/GitHub/password" } });
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.stdout, "s3cret-pass!\n");
+});
+
+test("run shows a prompt before the child waits for a line from stdin", async (t) => {
+  const { dir } = await vaultDir();
+  const script = "process.stdout.write('Password: '); const rl = require('node:readline').createInterface({ input: process.stdin }); rl.once('line', (line) => { rl.close(); process.stdin.pause(); setTimeout(() => process.stdout.write(line + '\\n'), 300); });";
+  const child = spawn(process.execPath, ["cli/kapevault.cjs", "run", "--", process.execPath, "-e", script], {
+    cwd: ROOT,
+    stdio: "pipe",
+    env: { ...process.env, KAPEVAULT_DATA_DIR: dir, KAPEVAULT_MASTER: MASTER, X: "op://Personal/GitHub/password" },
+  });
+  const timer = setTimeout(() => child.kill("SIGTERM"), 15_000);
+  t.after(() => {
+    clearTimeout(timer);
+    child.kill("SIGTERM");
+  });
+  let stdout = "";
+  let stderr = "";
+  let fed = false;
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+    if (!fed && stdout === "Password: ") {
+      fed = true;
+      child.stdin.end("child input\n");
+    }
+  });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  const code = await new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  assert.equal(code, 0, stderr);
+  assert.equal(fed, true, "the parent saw the prompt before it sent the child's input");
+  assert.equal(stdout, "Password: child input\n");
+});
+
+test("run masks a secret split across writes with a 50 ms gap", async () => {
+  const { dir } = await vaultDir();
+  const script = "process.stdout.write(process.env.X.slice(0, 4)); setTimeout(() => process.stdout.write(process.env.X.slice(4) + '\\n'), 50);";
+  const run = cli(dir, ["run", "--", process.execPath, "-e", script], { env: { X: "op://Personal/GitHub/password" } });
+  assert.equal(run.code, 0, run.stderr);
+  assert.equal(run.stdout, "<concealed by KAPEVault>\n");
+});
+
+test("run masks a secret on stderr", async () => {
+  const { dir } = await vaultDir();
+  const run = cli(dir, ["run", "--", process.execPath, "-e", "console.error(process.env.X)"], { env: { X: "op://Personal/GitHub/password" } });
+  assert.equal(run.code, 0, run.stderr);
+  assert.equal(run.stdout, "");
+  assert.equal(run.stderr, "<concealed by KAPEVault>\n");
 });
 
 test("item edit changes the username and keeps the password", async () => {
