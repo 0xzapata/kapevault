@@ -14,7 +14,6 @@ const { Writable } = require("node:stream");
 const { isatty } = require("node:tty");
 const { spawn } = require("node:child_process");
 const { parseArgs, parseEnv } = require("node:util");
-const { readTargets, targetWait } = require("../core/index.js");
 const { createVaultSession } = require("../electron/vault-session.cjs");
 const { createUnlockThrottle } = require("../electron/unlock-throttle.cjs");
 const { createAppSettings } = require("../electron/app-settings.cjs");
@@ -216,11 +215,9 @@ async function open(g, write = false, alreadyReadMaster) {
   const vault = createVaultSession(file, { installId: () => settings.installId() });
   // The app's own throttle file and target (electron/main.cjs), so the app and the CLI share one miss count.
   const throttleFile = path.join(dir, "unlock-throttle.json");
-  const targets = readTargets(readText(throttleFile));
-  const wait = Math.max(0, ...Object.keys(targets).map((k) => targetWait(targets, k, Date.now())));
-  if (wait > 0) process.stderr.write(`Too many wrong passwords, waiting ${Math.ceil(wait / 1000)}s\n`);
   const throttledUnlock = createUnlockThrottle({
     file: throttleFile,
+    onWait: (ms) => process.stderr.write(`Too many wrong passwords, waiting ${Math.ceil(ms / 1000)}s\n`),
     ownSalt: () => {
       try {
         return parseVaultFile(fs.readFileSync(file))?.kdf.salt ?? null;

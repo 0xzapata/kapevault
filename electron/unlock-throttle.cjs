@@ -11,8 +11,8 @@ const OTHER_FILE = "?other"; // the count of guesses at another file that names 
 
 // file: unlock-throttle.json beside the vault. ownSalt(): the KDF salt of the vault file here (null when
 // unreadable), the target of every local guess. Returns throttledUnlock(attemptUnlock, { local, salt }).
-/** @param {{ file: string, now?: () => number, ownSalt?: () => string | null }} options */
-function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => null }) {
+/** @param {{ file: string, now?: () => number, ownSalt?: () => string | null, onWait?: (ms: number) => void }} options */
+function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => null, onWait = (_ms) => {} }) {
   let throttle = readTargets(readText());
   let unlockQueue = Promise.resolve();
 
@@ -30,7 +30,7 @@ function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => nu
       if (Object.keys(throttle).length === 0) fs.rmSync(file, { force: true });
       else writeFileAtomic(file, writeTargets(throttle));
     } catch {
-      // the count still holds in memory for this run
+      // the unlock result still returns if the count cannot be saved
     }
   }
 
@@ -40,13 +40,17 @@ function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => nu
   /** @param {() => any} attemptUnlock @param {{ local?: boolean, salt?: string }} [options] */
   function throttledUnlock(attemptUnlock, { local = true, salt } = {}) {
     const run = unlockQueue.then(async () => {
+      throttle = readTargets(readText());
       // A guess at another file that names none gets its own count, which an own-vault success never clears:
       // only ANY_TARGET (an unnamed guess at this vault, or an old file's count) is cleared that way.
       const key = salt || (local ? ownSalt() || ANY_TARGET : OTHER_FILE);
       // The longest pause of any file: dropping the oldest kept count (core MAX_TARGETS) must never give a
       // guesser free guesses back, so junk misses at other files cost as much as guessing on.
       const wait = Math.max(0, ...Object.keys(throttle).map((k) => targetWait(throttle, k, now())));
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (wait > 0) {
+        onWait(wait);
+        await new Promise((r) => setTimeout(r, wait));
+      }
       const result = await attemptUnlock();
       const next = nextTargets(throttle, key, result, { local, now: now() });
       if (next !== throttle) {

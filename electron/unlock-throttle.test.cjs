@@ -12,7 +12,7 @@ function setup() {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-throttle-")), "unlock-throttle.json");
   const clock = { t: 1_000_000 };
   const now = () => clock.t;
-  const make = () => createUnlockThrottle({ file, now });
+  const make = (onWait) => createUnlockThrottle({ file, now, onWait });
   const saved = () => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null);
   // One guess, then the clock moves past any pause it set.
   const guess = async (throttled, result, options) => {
@@ -36,6 +36,18 @@ test("the miss count persists across a restart", async () => {
   assert.equal(saved().failed, 4);
 });
 
+test("two instances on one file share alternating misses", async () => {
+  const { make, saved, guess } = setup();
+  const first = make();
+  const second = make();
+  await guess(first, MISS);
+  assert.equal(saved().failed, 1);
+  await guess(second, MISS);
+  assert.equal(saved().failed, 2);
+  await guess(first, MISS);
+  assert.equal(saved().failed, 3);
+});
+
 test("after 5 misses the pause doubles from 1s and is capped at 30s", async () => {
   const { clock, make, saved } = setup();
   const throttled = make();
@@ -51,11 +63,14 @@ test("after 5 misses the pause doubles from 1s and is capped at 30s", async () =
 
 test("the next guess waits out the pause", async () => {
   const { make } = setup();
-  const throttled = make();
+  const waits = [];
+  const throttled = make((ms) => waits.push(ms));
   for (let i = 0; i < 5; i++) await throttled(async () => MISS); // the 5th sets a 1s pause
+  assert.deepEqual(waits, []);
   const started = Date.now(); // the test clock stands still, so the 1s pause is real time
   await throttled(async () => MISS);
   assert.ok(Date.now() - started >= 900, "the sixth guess waited about a second");
+  assert.deepEqual(waits, [1000]);
 });
 
 test("a success on the local vault deletes the file", async () => {
