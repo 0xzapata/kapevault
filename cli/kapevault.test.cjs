@@ -67,6 +67,21 @@ test("item create makes a login with a generated password and a 2FA key", async 
   assert.equal(password.type, "CONCEALED");
 });
 
+test("item create accepts the JSON from --dry-run", async () => {
+  const { dir } = await vaultDir();
+  const dryRun = cli(dir, ["item", "create", "--dry-run", "--category", "login", "--title", "Preview", "username=bob", "password=preview-secret"]);
+  const preview = json(dryRun);
+  assert.equal(typeof preview.spaceId, "string");
+  assert.equal(json(cli(dir, ["item", "list", "--format", "json"])).length, 1);
+  const item = json(cli(dir, ["item", "create", "-", "--format", "json"], { input: dryRun.stdout }));
+  assert.equal(item.title, "Preview");
+  assert.equal(item.vault.id, preview.spaceId);
+  assert.equal(item.fields.find((f) => f.id === "username").value, "bob");
+  assert.equal(item.fields.find((f) => f.id === "password").value, "preview-secret");
+  const saved = json(cli(dir, ["item", "get", item.id, "--format", "json"]));
+  assert.deepEqual(saved, item);
+});
+
 test("item get --format json reveals the password and gives the current OTP code", async () => {
   const { dir, item } = await created;
   const got = json(cli(dir, ["item", "get", "Bank", "--format", "json"]));

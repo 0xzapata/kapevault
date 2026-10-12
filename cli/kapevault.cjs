@@ -310,7 +310,7 @@ function templateFields(t) {
   if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error("The template must be a JSON object.");
   const entries = Array.isArray(t.fields)
     ? t.fields.filter((f) => !(f?.type === "OTP" && /^\d{6,8}$/.test(f.value))).map((f) => [f?.label ?? f?.id, f?.value])
-    : Object.entries(t).filter(([k]) => !["kind", "category", "title", "tags", "favorite"].includes(k));
+    : Object.entries(t).filter(([k]) => !["kind", "category", "title", "tags", "favorite", "id", "spaceId"].includes(k));
   return entries.map(([k, v]) => [String(k), String(v ?? "")]).filter(([, v]) => v);
 }
 
