@@ -100,6 +100,20 @@ test("inject replaces two references in one line", async () => {
   assert.equal(run.stdout, "a=me b=s3cret-pass!\n");
 });
 
+test("read -o refuses an existing file unless --force replaces it with the requested mode", async () => {
+  const { dir } = await vaultDir();
+  const file = path.join(dir, "secret.txt");
+  fs.writeFileSync(file, "old contents\n", { mode: 0o600 });
+  const refused = cli(dir, ["read", "op://Personal/GitHub/password", "-o", file]);
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /already exists\. Pass --force to replace it\./);
+  assert.equal(fs.readFileSync(file, "utf8"), "old contents\n");
+  const run = cli(dir, ["read", "op://Personal/GitHub/password", "-o", file, "-f", "--file-mode", "0640"]);
+  assert.equal(run.code, 0, run.stderr);
+  assert.equal(fs.readFileSync(file, "utf8"), "s3cret-pass!\n");
+  assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+});
+
 test("run masks a resolved secret in the command's output", async () => {
   const { dir } = await vaultDir();
   const run = cli(dir, ["run", "--", process.execPath, "-e", "console.log(process.env.X, process.env.KAPEVAULT_MASTER)"], { env: { X: "op://Personal/GitHub/password" } });

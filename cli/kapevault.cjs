@@ -19,6 +19,7 @@ const { createVaultSession } = require("../electron/vault-session.cjs");
 const { createUnlockThrottle } = require("../electron/unlock-throttle.cjs");
 const { createAppSettings } = require("../electron/app-settings.cjs");
 const { parseVaultFile } = require("../electron/vault-crypto.cjs");
+const { writeFileAtomic } = require("../electron/atomic-write.cjs");
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version;
 const MASK = "<concealed by KAPEVault>";
@@ -328,9 +329,10 @@ function output(g, content) {
   const file = g["out-file"];
   if (!file) return process.stdout.write(content);
   if (!/^0?[0-7]{3}$/.test(g["file-mode"])) throw new Error("--file-mode must be an octal mode like 0600.");
-  if (g.force) fs.rmSync(file, { force: true });
+  const mode = Number.parseInt(g["file-mode"], 8);
   try {
-    fs.writeFileSync(file, content, { mode: Number.parseInt(g["file-mode"], 8), flag: "wx" });
+    if (g.force) writeFileAtomic(file, content, { mode });
+    else fs.writeFileSync(file, content, { mode, flag: "wx" });
   } catch (e) {
     if (e.code === "EEXIST") throw new Error(`${file} already exists. Pass --force to replace it.`);
     throw e;
