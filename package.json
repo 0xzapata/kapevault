@@ -10,6 +10,9 @@
   },
   "type": "module",
   "main": "electron/main.cjs",
+  "bin": {
+    "kapevault": "cli/kapevault.cjs"
+  },
   "scripts": {
     "dev": "vite",
     "app:dev": "node scripts/dev.mjs",
@@ -19,7 +22,7 @@
     "postbuild": "node scripts/write-version.mjs && node scripts/third-party-notices.mjs",
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.js.json",
-    "test": "node --test \"electron/*.test.cjs\" \"core/**/*.test.js\" \"src/**/*.test.ts\"",
+    "test": "node --test \"electron/*.test.cjs\" \"core/**/*.test.js\" \"src/**/*.test.ts\" \"cli/*.test.cjs\"",
     "e2e": "npm run build && node scripts/e2e.cjs && node scripts/e2e-v2.cjs && node scripts/e2e-held-for.cjs && node scripts/e2e-recovery-codes.cjs && node scripts/e2e-lie-keeper.cjs && node scripts/e2e-shrink-queue.cjs && node scripts/e2e-where-is-it.cjs && node scripts/e2e-sticker-capture.cjs && node scripts/e2e-id.cjs && node scripts/e2e-air-wall.cjs && node scripts/e2e-opener.cjs && node scripts/e2e-carryover.cjs && node scripts/e2e-sync.cjs",
     "design": "npm run build && node scripts/design-shots.cjs",
     "logos:check": "node scripts/logo-sheet.cjs",
@@ -65,6 +68,8 @@
       "electron/**/*",
       "!electron/*.test.cjs",
       "!electron/fixtures/**/*",
+      "cli/**/*",
+      "!cli/*.test.cjs",
       "core/**/*",
       "!core/**/*.test.js",
       "!core/sync/test-helpers.js",
