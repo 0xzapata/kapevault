@@ -192,7 +192,9 @@ function prompt() {
   });
 }
 
-async function masterPassword(g) {
+/** @param {string} [alreadyReadMaster] */
+async function masterPassword(g, alreadyReadMaster) {
+  if (alreadyReadMaster !== undefined) return alreadyReadMaster;
   if (g["password-stdin"]) return readLine();
   if (process.env.KAPEVAULT_MASTER) return process.env.KAPEVAULT_MASTER;
   if (isatty(0)) return prompt();
@@ -201,12 +203,13 @@ async function masterPassword(g) {
 
 // ponytail: no signin daemon, so every command pays one scrypt unlock (about 100 to 300 ms). Add a
 // session cache like `op signin` when scripts call this in tight loops.
-async function open(g, write = false) {
+/** @param {string} [alreadyReadMaster] */
+async function open(g, write = false, alreadyReadMaster) {
   const dir = dataDir(g["data-dir"]);
   const file = path.join(dir, "vault.kapevault");
   if (!fs.existsSync(file)) throw new Error(`There is no vault at ${file}. Create one in the KAPEVault app, or pass --data-dir.`);
   if (write) refuseWhileAppOpen(dir);
-  const master = await masterPassword(g);
+  const master = await masterPassword(g, alreadyReadMaster);
   if (!master) throw new Error("Master password required: set KAPEVAULT_MASTER or pass --password-stdin.");
   const settings = createAppSettings(dir);
   const vault = createVaultSession(file, { installId: () => settings.installId() });
@@ -520,13 +523,14 @@ const COMMANDS = {
   run: {
     options: { "env-file": { type: "string", multiple: true }, "no-masking": { type: "boolean" } },
     run: async (g, command) => {
+      const master = g["password-stdin"] ? readLine() : undefined;
       need(command[0], "run [--env-file <file>]... -- <command> [args...]");
       // Later env files win, and every env file wins over the shell. The master password never reaches the child.
       const { KAPEVAULT_MASTER: _master, ...env } = Object.assign({ ...process.env }, ...(g["env-file"] ?? []).map((file) => parseEnv(fs.readFileSync(file, "utf8"))));
       const refs = Object.keys(env).filter((k) => REF.test(env[k] ?? ""));
       const secrets = [];
       if (refs.length) {
-        const { vault, view } = await open(g);
+        const { vault, view } = await open(g, false, master);
         for (const k of refs) {
           env[k] = resolve(vault, view, env[k]);
           secrets.push(env[k]);

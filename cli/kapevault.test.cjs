@@ -10,13 +10,13 @@ const ROOT = path.join(__dirname, "..");
 const KEY = "JBSWY3DPEHPK3PXPJBSW";
 
 // { code, stdout, stderr } of one run; KAPEVAULT_MASTER is the vault's master unless env says otherwise.
-function cli(dir, args, { input, env } = {}) {
+function cli(dir, args, { input, env, stdio = "pipe" } = {}) {
   try {
     const stdout = execFileSync(process.execPath, ["cli/kapevault.cjs", ...args], {
       cwd: ROOT,
       input,
       encoding: "utf8",
-      stdio: "pipe",
+      stdio,
       env: { ...process.env, KAPEVAULT_DATA_DIR: dir, KAPEVAULT_MASTER: MASTER, ...env },
     });
     return { code: 0, stdout, stderr: "" };
@@ -105,6 +105,37 @@ test("run masks a resolved secret in the command's output", async () => {
   const run = cli(dir, ["run", "--", process.execPath, "-e", "console.log(process.env.X, process.env.KAPEVAULT_MASTER)"], { env: { X: "op://Personal/GitHub/password" } });
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.stdout, "<concealed by KAPEVault> undefined\n");
+});
+
+test("run --password-stdin consumes the master line without secret references", async () => {
+  const { dir } = await vaultDir();
+  const input = path.join(dir, "stdin");
+  fs.writeFileSync(input, "SYNTHETIC_MASTER\nchild input\n");
+  const fd = fs.openSync(input, "r");
+  try {
+    const run = cli(dir, ["run", "--password-stdin", "--", "cat"], { stdio: [fd, "pipe", "pipe"] });
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.stdout, "child input\n");
+  } finally {
+    fs.closeSync(fd);
+  }
+});
+
+test("run --password-stdin unlocks references and leaves the child's input", async () => {
+  const { dir } = await vaultDir();
+  const input = path.join(dir, "stdin");
+  fs.writeFileSync(input, `${MASTER}\nchild input\n`);
+  const fd = fs.openSync(input, "r");
+  try {
+    const run = cli(dir, ["run", "--password-stdin", "--", "cat"], {
+      stdio: [fd, "pipe", "pipe"],
+      env: { KAPEVAULT_MASTER: "wrong master", X: "op://Personal/GitHub/password" },
+    });
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.stdout, "child input\n");
+  } finally {
+    fs.closeSync(fd);
+  }
 });
 
 test("run --no-masking passes the secret through", async () => {
