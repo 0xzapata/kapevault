@@ -98,6 +98,44 @@ cannot buy Pro.
 
 The file format is in [FORMAT.md](FORMAT.md) and the backup and phone sync design in [SYNC.md](SYNC.md).
 
+## Command line
+
+`cli/kapevault.cjs` reads and edits the vault from a terminal. Its commands and flags follow the
+1Password `op` CLI, so `op://` references and `.env` files written for `op` work unchanged.
+`kapevault://` references work too.
+
+Run it with `node cli/kapevault.cjs` from a checkout. After `npm link`, run it as `kapevault` or
+`npx kapevault`. Run `node cli/kapevault.cjs --help` to see all commands.
+
+It opens `vault.kapevault` in the app's data folder: `%APPDATA%\KAPEVault` on Windows,
+`~/Library/Application Support/KAPEVault` on macOS, and `~/.config/KAPEVault` on Linux. Set
+`KAPEVAULT_DATA_DIR` or pass `--data-dir` to use another folder.
+
+Each command unlocks the vault with your master password. It does not keep a session. The password
+comes from the first of these that is set:
+
+1. `--password-stdin`: one line on stdin.
+2. The `KAPEVAULT_MASTER` environment variable. It does the job of `OP_SERVICE_ACCOUNT_TOKEN`.
+3. A prompt, when stdin is a terminal.
+
+Wrong passwords count against the same unlock throttle as the app. `run` removes `KAPEVAULT_MASTER`
+from the environment of the command it starts.
+
+```sh
+kapevault item get GitHub --fields username,password --reveal
+kapevault read "op://Personal/GitHub/password"
+echo 'DB_PASSWORD={{ op://Personal/Postgres/password }}' | kapevault inject -o .env
+DB_PASSWORD=op://Personal/Postgres/password kapevault run -- node server.js
+```
+
+`run` replaces each secret in the command's output with `<concealed by KAPEVault>`. Pass
+`--no-masking` to turn this off.
+
+Quit the desktop app before a command that writes (`item create`, `item edit`, `item delete`,
+`item move`, `vault create`, `vault edit`). The app saves the vault it holds in memory over the file,
+so a change made while it runs is lost. These commands stop with an error while the app is open.
+Commands that only read work while the app is open.
+
 ## Security
 
 - What KAPEVault defends against, and where it stops: [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
