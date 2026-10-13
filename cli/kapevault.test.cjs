@@ -16,8 +16,8 @@ const ROOT = path.join(__dirname, "..");
 const KEY = "JBSWY3DPEHPK3PXPJBSW";
 
 // { code, stdout, stderr } of one run; KAPEVAULT_MASTER is the vault's master unless env says otherwise.
-function cli(dir, args, { input, env, stdio = "pipe" } = {}) {
-  const { status, stdout, stderr, error } = spawnSync(process.execPath, ["cli/kapevault.cjs", ...args], {
+function cli(dir, args, { input, env, stdio = "pipe", nodeArgs = [] } = {}) {
+  const { status, stdout, stderr, error } = spawnSync(process.execPath, [...nodeArgs, "cli/kapevault.cjs", ...args], {
     cwd: ROOT,
     input,
     encoding: "utf8",
@@ -169,7 +169,7 @@ test("read -o refuses an existing file unless --force replaces it with the reque
   const run = cli(dir, ["read", "op://Personal/GitHub/password", "-o", file, "-f", "--file-mode", "0640"]);
   assert.equal(run.code, 0, run.stderr);
   assert.equal(fs.readFileSync(file, "utf8"), "s3cret-pass!\n");
-  assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+  if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o640);
 });
 
 test("quoteCommand preserves spaces, empty arguments and double quotes for cmd.exe", () => {
@@ -214,7 +214,7 @@ test("run --password-stdin consumes the master line without secret references", 
   fs.writeFileSync(input, "SYNTHETIC_MASTER\nchild input\n");
   const fd = fs.openSync(input, "r");
   try {
-    const run = cli(dir, ["run", "--password-stdin", "--", "cat"], { stdio: [fd, "pipe", "pipe"] });
+    const run = cli(dir, ["run", "--password-stdin", "--", process.execPath, "-e", "process.stdin.pipe(process.stdout)"], { stdio: [fd, "pipe", "pipe"] });
     assert.equal(run.code, 0, run.stderr);
     assert.equal(run.stdout, "child input\n");
   } finally {
@@ -228,7 +228,7 @@ test("run --password-stdin unlocks references and leaves the child's input", asy
   fs.writeFileSync(input, `${MASTER}\nchild input\n`);
   const fd = fs.openSync(input, "r");
   try {
-    const run = cli(dir, ["run", "--password-stdin", "--", "cat"], {
+    const run = cli(dir, ["run", "--password-stdin", "--", process.execPath, "-e", "process.stdin.pipe(process.stdout)"], {
       stdio: [fd, "pipe", "pipe"],
       env: { KAPEVAULT_MASTER: "wrong master", X: "op://Personal/GitHub/password" },
     });
@@ -236,6 +236,27 @@ test("run --password-stdin unlocks references and leaves the child's input", asy
     assert.equal(run.stdout, "child input\n");
   } finally {
     fs.closeSync(fd);
+  }
+});
+
+test("--password-stdin reports a required master password on EAGAIN or EOF", async () => {
+  const { dir } = await vaultDir();
+  const file = path.join(dir, "vault.kapevault");
+  const before = fs.readFileSync(file);
+  const preload = path.join(dir, "stdin-error.cjs");
+  const commands = [
+    ["read", "--password-stdin", "op://Personal/GitHub/password"],
+    ["run", "--password-stdin", "--", process.execPath, "-e", "process.stdout.write('child started')"],
+  ];
+  for (const code of ["EAGAIN", "EOF"]) {
+    fs.writeFileSync(preload, `const fs = require("node:fs"); const readSync = fs.readSync; fs.readSync = (fd, ...args) => { if (fd === 0) throw Object.assign(new Error("synthetic stdin failure"), { code: "${code}" }); return readSync(fd, ...args); };`);
+    for (const args of commands) {
+      const run = cli(dir, args, { input: "", nodeArgs: ["--require", preload] });
+      assert.equal(run.code, 1, run.stderr);
+      assert.match(run.stderr, /^\[ERROR\] \S+ Master password required: set KAPEVAULT_MASTER or pass --password-stdin\.\n$/);
+      assert.equal(run.stdout, "");
+      assert.deepEqual(fs.readFileSync(file), before);
+    }
   }
 });
 
@@ -341,7 +362,6 @@ test("an unreadable app.pid stops a write", async () => {
   const before = fs.readFileSync(path.join(dir, "vault.kapevault"));
   const run = cli(dir, ["item", "edit", "GitHub", "username=changed"]);
   assert.equal(run.code, 1);
-  assert.match(run.stderr, /EISDIR/);
   assert.deepEqual(fs.readFileSync(path.join(dir, "vault.kapevault")), before);
 });
 

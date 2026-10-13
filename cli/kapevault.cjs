@@ -186,7 +186,12 @@ function refuseWhileAppOpen(dir) {
 function readLine() {
   const byte = Buffer.alloc(1);
   const bytes = [];
-  while (fs.readSync(0, byte) === 1 && byte[0] !== 10) bytes.push(byte[0]);
+  try {
+    while (fs.readSync(0, byte) === 1 && byte[0] !== 10) bytes.push(byte[0]);
+  } catch (e) {
+    if (e.code === "EAGAIN" || e.code === "EOF") throw new Error("Master password required: set KAPEVAULT_MASTER or pass --password-stdin.");
+    throw e;
+  }
   return Buffer.from(bytes).toString("utf8").replace(/\r$/, "");
 }
 
