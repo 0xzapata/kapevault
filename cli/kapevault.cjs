@@ -305,9 +305,9 @@ function showItem(g, vault, view, id) {
   print(pairs([...head, ...fields.map((r) => [r.label, shown(r, g.reveal)])]));
 }
 
-// A template from stdin: op's `item get` JSON ({ category, fields: [{ label, value }] }) or a flat
-// { kind, title, username, ... }. item get's OTP value is the current code (the key never leaves the
-// vault), so a copied item comes without 2FA rather than failing on it.
+// A template from stdin: op's `item get` JSON ({ category, fields: [{ label, value }] }).
+// item get's OTP value is the current code (the key never leaves the vault), so a copied item comes
+// without 2FA rather than failing on it.
 // JSON.parse's own error quotes the text, which holds secrets.
 function parseTemplate(json) {
   try {
@@ -321,7 +321,7 @@ function templateFields(t) {
   if (!t || typeof t !== "object" || Array.isArray(t)) throw new Error("The template must be a JSON object.");
   const entries = Array.isArray(t.fields)
     ? t.fields.filter((f) => !(f?.type === "OTP" && /^\d{6,8}$/.test(f.value))).map((f) => [f?.label ?? f?.id, f?.value])
-    : Object.entries(t).filter(([k]) => !["kind", "category", "title", "tags", "favorite", "id", "spaceId"].includes(k));
+    : [];
   return entries.map(([k, v]) => [String(k), String(v ?? "")]).filter(([, v]) => v);
 }
 
@@ -474,12 +474,18 @@ const COMMANDS = {
       const { vault, view } = await open(g);
       const t = fromStdin ? parseTemplate(fs.readFileSync(0, "utf8")) : {};
       const fields = templateFields(t);
-      const kind = kindOf(need(g.category ?? t.category ?? t.kind, "item create --category <category> --title <title>"));
-      const space = g.vault === undefined ? view.spaces.find((s) => s.kind === "personal") : findSpace(view, g.vault);
+      const kind = kindOf(need(g.category ?? t.category, "item create --category <category> --title <title>"));
+      const vaultName = g.vault ?? t.vault?.id ?? t.vault?.name;
+      const space = vaultName === undefined ? view.spaces.find((s) => s.kind === "personal") : findSpace(view, vaultName);
+      if (!space) throw new Error("There is no personal vault. Pass --vault.");
+      /** @type {Record<string, any>} */
       const input = { kind, spaceId: space.id, title: String(t.title ?? ""), tags: Array.isArray(t.tags) ? t.tags.map(String) : [], favorite: t.favorite === true };
       for (const [name, value] of fields) writeField(input, fieldOf(kind, name), value);
       apply(input, g, fromStdin ? args.slice(1) : args);
-      if (g["dry-run"]) return print(JSON.stringify(input, null, 2));
+      if (g["dry-run"]) {
+        const fields = FIELDS[kind].map((f) => fieldJson(f, String(input[f.prop] ?? ""))).filter((r) => r.value);
+        return print(JSON.stringify({ ...itemJson(view, input), fields }, null, 2));
+      }
       const saved = vault.saveEntry(input);
       showItem(g, vault, saved.vault, saved.id);
     },

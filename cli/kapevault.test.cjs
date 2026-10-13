@@ -68,19 +68,51 @@ test("item create makes a login with a generated password and a 2FA key", async 
   assert.equal(password.type, "CONCEALED");
 });
 
-test("item create accepts the JSON from --dry-run", async () => {
-  const { dir } = await vaultDir();
-  const dryRun = cli(dir, ["item", "create", "--dry-run", "--category", "login", "--title", "Preview", "username=bob", "password=preview-secret"]);
+test("item create accepts the JSON from --dry-run and honors its vault", async () => {
+  const { dir, vault } = await vaultDir();
+  vault.addSpace("Team");
+  const dryRun = cli(dir, ["item", "create", "--dry-run", "--vault", "Team", "--category", "login", "--title", "Preview", "username=bob", "password=preview-secret"]);
   const preview = json(dryRun);
-  assert.equal(typeof preview.spaceId, "string");
+  assert.equal(preview.category, "LOGIN");
+  assert.equal(preview.vault.name, "Team");
   assert.equal(json(cli(dir, ["item", "list", "--format", "json"])).length, 1);
   const item = json(cli(dir, ["item", "create", "-", "--format", "json"], { input: dryRun.stdout }));
   assert.equal(item.title, "Preview");
-  assert.equal(item.vault.id, preview.spaceId);
+  assert.equal(item.vault.name, "Team");
+  assert.equal(item.vault.id, preview.vault.id);
   assert.equal(item.fields.find((f) => f.id === "username").value, "bob");
   assert.equal(item.fields.find((f) => f.id === "password").value, "preview-secret");
   const saved = json(cli(dir, ["item", "get", item.id, "--format", "json"]));
   assert.deepEqual(saved, item);
+});
+
+test("item create from item get JSON keeps the source vault", async () => {
+  const { dir, vault } = await vaultDir();
+  const spaceId = vault.addSpace("Team").id;
+  const { id } = vault.saveEntry({ kind: "login", spaceId, title: "Team login", username: "bob", password: "team-secret" });
+  const template = cli(dir, ["item", "get", id, "--format", "json"]);
+  assert.equal(template.code, 0, template.stderr);
+  const copy = json(cli(dir, ["item", "create", "-", "--title", "Copy", "--format", "json"], { input: template.stdout }));
+  assert.equal(copy.title, "Copy");
+  assert.equal(copy.vault.id, spaceId);
+  assert.equal(copy.vault.name, "Team");
+  assert.equal(copy.fields.find((f) => f.id === "password").value, "team-secret");
+  assert.deepEqual(json(cli(dir, ["item", "get", copy.id, "--format", "json"])), copy);
+});
+
+test("item create without a personal vault asks for --vault", async () => {
+  const { dir } = await vaultDir();
+  const file = path.join(dir, "vault.kapevault");
+  const opened = await openFile(MASTER, JSON.parse(fs.readFileSync(file, "utf8")));
+  opened.data.spaces.forEach((s) => { s.kind = "client"; });
+  delete opened.data.sync;
+  fs.writeFileSync(file, JSON.stringify(encryptWithKey(opened.key, opened.kdf, opened.salt, opened.data)));
+  opened.key.fill(0);
+  const before = fs.readFileSync(file);
+  const run = cli(dir, ["item", "create", "--category", "note", "--title", "Plan", "body=x"]);
+  assert.equal(run.code, 1);
+  assert.ok(run.stderr.includes("There is no personal vault. Pass --vault."), run.stderr);
+  assert.deepEqual(fs.readFileSync(file), before);
 });
 
 test("item get --format json reveals the password and gives the current OTP code", async () => {
