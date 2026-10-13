@@ -107,6 +107,8 @@ The file format is in [FORMAT.md](FORMAT.md) and the backup and phone sync desig
 Run it with `node cli/kapevault.cjs` from a checkout. After `npm link`, run it as `kapevault` or
 `npx kapevault`. Run `node cli/kapevault.cjs --help` to see all commands.
 
+On Windows, `npm link` puts `kapevault.cmd` and `kapevault.ps1` on `PATH`, so `kapevault` works in both cmd.exe and PowerShell.
+
 It opens `vault.kapevault` in the app's data folder: `%APPDATA%\KAPEVault` on Windows,
 `~/Library/Application Support/KAPEVault` on macOS, and `~/.config/KAPEVault` on Linux. Set
 `KAPEVAULT_DATA_DIR` or pass `--data-dir` to use another folder.
@@ -126,6 +128,13 @@ kapevault item get GitHub --fields username,password --reveal
 kapevault read "op://Personal/GitHub/password"
 echo 'DB_PASSWORD={{ op://Personal/Postgres/password }}' | kapevault inject -o .env
 DB_PASSWORD=op://Personal/Postgres/password kapevault run -- node server.js
+```
+
+```powershell
+kapevault item get GitHub --fields username,password --reveal
+kapevault read "op://Personal/GitHub/password"
+'DB_PASSWORD={{ op://Personal/Postgres/password }}' | kapevault inject -o .env
+$env:DB_PASSWORD = "op://Personal/Postgres/password"; kapevault run -- node server.js
 ```
 
 `run` replaces each secret in the command's output with `<concealed by KAPEVault>`. Pass
