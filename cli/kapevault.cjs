@@ -16,7 +16,7 @@ const { spawn } = require("node:child_process");
 const { parseArgs, parseEnv } = require("node:util");
 const { createVaultSession } = require("../electron/vault-session.cjs");
 const { createUnlockThrottle } = require("../electron/unlock-throttle.cjs");
-const { createAppSettings } = require("../electron/app-settings.cjs");
+const { readInstallId } = require("../electron/app-settings.cjs");
 const { parseVaultFile } = require("../electron/vault-crypto.cjs");
 const { writeFileAtomic } = require("../electron/atomic-write.cjs");
 
@@ -213,8 +213,7 @@ async function open(g, alreadyReadMaster) {
   if (!fs.existsSync(file)) throw new Error(`There is no vault at ${file}. Create one in the KAPEVault app, or pass --data-dir.`);
   const master = await masterPassword(g, alreadyReadMaster);
   if (!master) throw new Error("Master password required: set KAPEVAULT_MASTER or pass --password-stdin.");
-  const settings = createAppSettings(dir);
-  const vault = createVaultSession(file, { installId: () => settings.installId(), beforeWrite: () => refuseWhileAppOpen(dir) });
+  const vault = createVaultSession(file, { installId: () => readInstallId(dir), beforeWrite: () => refuseWhileAppOpen(dir) });
   // The app's own throttle file and target (electron/main.cjs), so the app and the CLI share one miss count.
   const throttleFile = path.join(dir, "unlock-throttle.json");
   const throttledUnlock = createUnlockThrottle({

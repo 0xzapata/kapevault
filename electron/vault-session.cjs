@@ -54,6 +54,7 @@ const sha256 = (text) => crypto.createHash("sha256").update(text, "utf8").digest
 // sync's own save, which must not start another sync.
 // installId(): this install's id, which sync stamps changes with ("" when settings.json could not be
 // read this run: nothing is stamped, and the next open's repair catches up).
+/** @param {string} filePath @param {{ onPersist?: (change: { bySync: boolean }) => void, installId?: () => string, beforeWrite?: () => void }} [options] */
 function createVaultSession(filePath, { onPersist = (_change) => {}, installId = () => "", beforeWrite = () => {} } = {}) {
   sweepStale(path.dirname(filePath)); // temp files a hard kill left beside the vault
   const replaced = createReplacedCopy(filePath);

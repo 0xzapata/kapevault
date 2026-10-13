@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { createAppSettings } = require("./app-settings.cjs");
+const { createAppSettings, readInstallId } = require("./app-settings.cjs");
 
 const ID = "0f8f5a0e-1c2d-4e3f-8a9b-0c1d2e3f4a5b";
 const tempDir = () => fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-settings-"));
@@ -29,6 +29,30 @@ test("hide from screen capture: on by default, only a boolean turns it off, and 
   assert.equal(settings.set({ hideFromCapture: "false" }).hideFromCapture, true, "a string is ignored");
   assert.equal(settings.set({ hideFromCapture: false }).hideFromCapture, false);
   assert.equal(createAppSettings(dir).get().hideFromCapture, false);
+});
+
+test("readInstallId leaves damaged settings.json in place", () => {
+  const dir = tempDir();
+  const file = path.join(dir, "settings.json");
+  const damaged = `{"installId": "${ID}", "theme": "da`;
+  fs.writeFileSync(file, damaged);
+  assert.equal(readInstallId(dir), "");
+  assert.equal(fs.readFileSync(file, "utf8"), damaged);
+  assert.deepEqual(fs.readdirSync(dir), ["settings.json"]);
+});
+
+test("readInstallId returns only a saved valid install id and never writes", () => {
+  const dir = tempDir();
+  assert.equal(readInstallId(dir), "");
+  assert.deepEqual(fs.readdirSync(dir), []);
+  const file = path.join(dir, "settings.json");
+  for (const id of [ID, "not-an-id", null, 36, undefined]) {
+    const saved = JSON.stringify({ installId: id, theme: "dark" });
+    fs.writeFileSync(file, saved);
+    assert.equal(readInstallId(dir), id === ID ? ID : "");
+    assert.equal(fs.readFileSync(file, "utf8"), saved);
+    assert.deepEqual(fs.readdirSync(dir), ["settings.json"]);
+  }
 });
 
 test("a saved install id is kept", () => {
