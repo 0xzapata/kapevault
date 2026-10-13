@@ -55,32 +55,32 @@ function kindOf(name) {
 }
 
 /**
- * The names a user types for one field of a kind: get reads it from the public view or the session, set
- * puts it in saveEntry's input. names[0] is the label printed.
- * @typedef {{ names: string[], get: (e: Record<string, any>, vault: Vault) => string, set: (input: Record<string, any>, value: string) => void, type?: string, purpose?: string }} Field
+ * The names a user types for one field of a kind, and the stored prop they address. names[0] is the label printed.
+ * @typedef {{ names: string[], prop: string, type?: string, purpose?: string, parse?: (value: string) => any, secret?: boolean }} Field
  * @typedef {ReturnType<typeof createVaultSession>} Vault
  */
-/** @param {string[]} names @param {string} [prop] @param {Partial<Field>} [extra] @returns {Field} */
-const text = (names, prop = names[0], extra = {}) => ({ names, get: (e) => String(e[prop] ?? ""), set: (input, v) => { input[prop] = v; }, ...extra });
-/** @param {string[]} names @param {string} [prop] @param {Partial<Field>} [extra] @returns {Field} */
-const secret = (names, prop = names[0], extra = {}) => ({ ...text(names, prop, extra), type: "CONCEALED", get: (e, vault) => vault.getSecret(e.id, prop) });
-const NOTES = text(["notes", "notesPlain"], "notes", { purpose: "NOTES" });
+/** @param {string[]} names @param {Partial<Field>} [options] @returns {Field} */
+const text = (names, { prop = names[0], type, purpose, parse } = {}) => ({ names, prop, type, purpose, parse });
+/** @param {string[]} names @param {Partial<Field>} [opts] @returns {Field} */
+const secret = (names, opts) => ({ ...text(names, { ...opts, type: "CONCEALED" }), secret: true });
+const NOTES = text(["notes", "notesPlain"], { purpose: "NOTES" });
+// core/public-view.js secretOf is the source of truth for which props are secrets.
 /** @type {Record<string, Field[]>} */
 const FIELDS = {
   login: [
-    text(["username"], "username", { purpose: "USERNAME" }),
-    secret(["password"], "password", { purpose: "PASSWORD" }),
-    text(["url", "website"], "url", { type: "URL" }),
-    { names: ["one-time password", "otp", "totp"], type: "OTP", get: (e, vault) => (e.hasTotp ? vault.getTotpCode(e.id).code : ""), set: (input, v) => { input.totp = v; } },
+    text(["username"], { purpose: "USERNAME" }),
+    secret(["password"], { purpose: "PASSWORD" }),
+    text(["url", "website"], { type: "URL" }),
+    text(["one-time password", "otp", "totp"], { prop: "totp", type: "OTP" }),
     NOTES,
   ],
-  note: [secret(["notesPlain", "body"], "body"), NOTES],
-  key: [secret(["credential", "secret"], "secret"), text(["keyId"]), text(["url"], "url", { type: "URL" }), text(["expires"]), NOTES],
+  note: [secret(["notesPlain", "body"], { prop: "body" }), NOTES],
+  key: [secret(["credential", "secret"], { prop: "secret" }), text(["keyId"]), text(["url"], { type: "URL" }), text(["expires"]), NOTES],
   link: [text(["location"]), text(["linkType"]), NOTES],
-  thing: [text(["room"]), text(["spot"]), { ...text(["grab"]), set: (input, v) => { input.grab = Number(v); } }, text(["expires"]), NOTES],
+  thing: [text(["room"]), text(["spot"]), text(["grab"], { parse: Number }), text(["expires"]), NOTES],
   device: [
     ...["type", "model", "serial", "imei", "mac"].map((name) => text([name])),
-    text(["adminUrl"], "adminUrl", { type: "URL" }),
+    text(["adminUrl"], { type: "URL" }),
     text(["adminUser"]),
     secret(["adminPassword"]),
     text(["ssid"]),
@@ -90,7 +90,20 @@ const FIELDS = {
   id: [text(["idType"]), secret(["idNumber"]), NOTES],
 };
 // Readable and settable by name, but printed in the item's header rather than as fields.
-const HEADER = [text(["title"]), { names: ["tags"], get: (e) => e.tags.join(","), set: (input, v) => { input.tags = list(v); } }];
+const HEADER = [text(["title"]), text(["tags"], { parse: list })];
+
+/** @param {Vault} vault @param {Record<string, any>} e @param {Field} f */
+function readField(vault, e, f) {
+  if (f.secret) return vault.getSecret(e.id, f.prop);
+  if (f.prop === "totp") return e.hasTotp ? vault.getTotpCode(e.id).code : "";
+  const value = e[f.prop];
+  return Array.isArray(value) ? value.join(",") : String(value ?? "");
+}
+
+/** @param {Record<string, any>} input @param {Field} f @param {string} v */
+function writeField(input, f, v) {
+  input[f.prop] = f.parse ? f.parse(v) : v;
+}
 
 function fieldOf(kind, name) {
   const field = [...FIELDS[kind], ...HEADER].find((f) => f.names.some((n) => norm(n) === norm(name)));
@@ -100,7 +113,7 @@ function fieldOf(kind, name) {
 
 /** @param {Field} f @param {string} value */
 const fieldJson = (f, value) => ({ id: f.names[0], label: f.names[0], value, type: f.type ?? "STRING", ...(f.purpose && { purpose: f.purpose }) });
-const row = (vault, e, f) => fieldJson(f, f.get(e, vault));
+const row = (vault, e, f) => fieldJson(f, readField(vault, e, f));
 const shown = (r, reveal) => (r.type === "CONCEALED" && !reveal ? "[use --reveal]" : r.value);
 
 // `section.field[type]=value`, as op takes it: the section and the type are dropped. The text is never
@@ -258,7 +271,7 @@ function resolve(vault, view, ref) {
   if (!m || parts.length < 3 || parts.length > 4 || (m[2] && !/^attribute=t?otp$/i.test(m[2]))) throw new Error(`"${ref}" is not a secret reference: use op://<vault>/<item>/<field>.`);
   const e = findItem(view, parts[1], parts[0]);
   if (m[2]) return vault.getTotpCode(e.id).code;
-  return fieldOf(e.kind, parts[parts.length - 1]).get(e, vault);
+  return readField(vault, e, fieldOf(e.kind, parts[parts.length - 1]));
 }
 
 const print = (out) => process.stdout.write(`${out}\n`);
@@ -313,12 +326,12 @@ function templateFields(t) {
 }
 
 function apply(input, g, assignments) {
-  if (g.title !== undefined) input.title = g.title;
-  if (g.tags !== undefined) input.tags = list(g.tags);
+  for (const name of ["title", "tags", "url"]) {
+    if (g[name] !== undefined) writeField(input, fieldOf(input.kind, name), g[name]);
+  }
   if (g.favorite) input.favorite = true;
-  if (g.url !== undefined) fieldOf(input.kind, "url").set(input, g.url);
-  if (g["generate-password"] !== undefined) fieldOf(input.kind, "password").set(input, generatePassword(g["generate-password"]));
-  for (const [name, value] of assignments.map(assignment)) fieldOf(input.kind, name).set(input, value);
+  if (g["generate-password"] !== undefined) writeField(input, fieldOf(input.kind, "password"), generatePassword(g["generate-password"]));
+  for (const [name, value] of assignments.map(assignment)) writeField(input, fieldOf(input.kind, name), value);
   return input;
 }
 
@@ -464,7 +477,7 @@ const COMMANDS = {
       const kind = kindOf(need(g.category ?? t.category ?? t.kind, "item create --category <category> --title <title>"));
       const space = g.vault === undefined ? view.spaces.find((s) => s.kind === "personal") : findSpace(view, g.vault);
       const input = { kind, spaceId: space.id, title: String(t.title ?? ""), tags: Array.isArray(t.tags) ? t.tags.map(String) : [], favorite: t.favorite === true };
-      for (const [name, value] of fields) fieldOf(kind, name).set(input, value);
+      for (const [name, value] of fields) writeField(input, fieldOf(kind, name), value);
       apply(input, g, fromStdin ? args.slice(1) : args);
       if (g["dry-run"]) return print(JSON.stringify(input, null, 2));
       const saved = vault.saveEntry(input);
