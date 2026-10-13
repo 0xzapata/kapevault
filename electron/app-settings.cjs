@@ -156,4 +156,13 @@ function createAppSettings(dataDir) {
   return { get, set, windowBounds, saveWindowBounds, installId: getInstallId, renewInstallId, copyFolder: () => copyFolder, setCopyFolder, updateCheck: () => ({ ...updateCheck }), setUpdateCheck };
 }
 
-module.exports = { createAppSettings, SESSION_LIMIT_HOURS };
+function readInstallId(dataDir) {
+  try {
+    const id = JSON.parse(fs.readFileSync(path.join(dataDir, "settings.json"), "utf8")).installId;
+    return typeof id === "string" && /^[0-9a-f-]{36}$/.test(id) ? id : "";
+  } catch {
+    return "";
+  }
+}
+
+module.exports = { createAppSettings, readInstallId, SESSION_LIMIT_HOURS };

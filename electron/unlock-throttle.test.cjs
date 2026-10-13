@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { createUnlockThrottle } = require("./unlock-throttle.cjs");
 const { MAX_UNLOCK_PAUSE_MS } = require("../core/index.js");
+const { seeded } = require("./fixtures/vault-session-helpers.cjs");
 
 // A throttle on a fresh file with a clock the test moves: the pause is always over before the next
 // guess, so nothing here waits on a real timer.
@@ -12,7 +13,7 @@ function setup() {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kapevault-throttle-")), "unlock-throttle.json");
   const clock = { t: 1_000_000 };
   const now = () => clock.t;
-  const make = () => createUnlockThrottle({ file, now });
+  const make = (onWait) => createUnlockThrottle({ file, now, onWait });
   const saved = () => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null);
   // One guess, then the clock moves past any pause it set.
   const guess = async (throttled, result, options) => {
@@ -26,6 +27,18 @@ function setup() {
 const MISS = { ok: false, error: "Wrong master password" };
 const HIT = { ok: true };
 
+test("vaultFile supplies the current salt and an unreadable file falls back to the unnamed target", async () => {
+  const { file: vaultFile } = await seeded();
+  const salt = JSON.parse(fs.readFileSync(vaultFile, "utf8")).kdf.salt;
+  const { file, saved } = setup();
+  const throttled = createUnlockThrottle({ file, vaultFile });
+  await throttled(async () => MISS);
+  assert.deepEqual(saved().targets, { [salt]: { failed: 1, nextAt: 0 } });
+  fs.writeFileSync(vaultFile, "not a vault");
+  await throttled(async () => MISS);
+  assert.deepEqual(saved().targets, { [salt]: { failed: 1, nextAt: 0 }, "?": { failed: 1, nextAt: 0 } });
+});
+
 test("the miss count persists across a restart", async () => {
   const { make, saved, guess } = setup();
   const first = make();
@@ -34,6 +47,41 @@ test("the miss count persists across a restart", async () => {
   const again = make(); // quit and relaunch
   await guess(again, MISS);
   assert.equal(saved().failed, 4);
+});
+
+test("six refused saves keep their misses in memory for the seventh save", async (t) => {
+  const { make, saved, guess } = setup();
+  const throttled = make();
+  const refused = t.mock.method(fs, "renameSync", () => { throw new Error("mock disk refused"); });
+  for (let i = 0; i < 6; i++) await guess(throttled, MISS);
+  assert.equal(saved(), null);
+  refused.mock.restore();
+  await guess(throttled, MISS);
+  assert.equal(saved().failed, 7);
+});
+
+test("a success in another instance clears a count this instance still holds", async () => {
+  const { make, saved, guess } = setup();
+  const first = make();
+  const second = make();
+  for (let i = 0; i < 3; i++) await guess(first, MISS);
+  assert.equal(saved().failed, 3);
+  await guess(second, HIT);
+  assert.equal(saved(), null);
+  await guess(first, MISS);
+  assert.equal(saved().failed, 1);
+});
+
+test("two instances on one file share alternating misses", async () => {
+  const { make, saved, guess } = setup();
+  const first = make();
+  const second = make();
+  await guess(first, MISS);
+  assert.equal(saved().failed, 1);
+  await guess(second, MISS);
+  assert.equal(saved().failed, 2);
+  await guess(first, MISS);
+  assert.equal(saved().failed, 3);
 });
 
 test("after 5 misses the pause doubles from 1s and is capped at 30s", async () => {
@@ -51,11 +99,14 @@ test("after 5 misses the pause doubles from 1s and is capped at 30s", async () =
 
 test("the next guess waits out the pause", async () => {
   const { make } = setup();
-  const throttled = make();
+  const waits = [];
+  const throttled = make((ms) => waits.push(ms));
   for (let i = 0; i < 5; i++) await throttled(async () => MISS); // the 5th sets a 1s pause
+  assert.deepEqual(waits, []);
   const started = Date.now(); // the test clock stands still, so the 1s pause is real time
   await throttled(async () => MISS);
   assert.ok(Date.now() - started >= 900, "the sixth guess waited about a second");
+  assert.deepEqual(waits, [1000]);
 });
 
 test("a success on the local vault deletes the file", async () => {

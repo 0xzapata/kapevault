@@ -54,7 +54,8 @@ const sha256 = (text) => crypto.createHash("sha256").update(text, "utf8").digest
 // sync's own save, which must not start another sync.
 // installId(): this install's id, which sync stamps changes with ("" when settings.json could not be
 // read this run: nothing is stamped, and the next open's repair catches up).
-function createVaultSession(filePath, { onPersist = (_change) => {}, installId = () => "" } = {}) {
+/** @param {string} filePath @param {{ onPersist?: (change: { bySync: boolean }) => void, installId?: () => string, beforeWrite?: () => void }} [options] */
+function createVaultSession(filePath, { onPersist = (_change) => {}, installId = () => "", beforeWrite = () => {} } = {}) {
   sweepStale(path.dirname(filePath)); // temp files a hard kill left beside the vault
   const replaced = createReplacedCopy(filePath);
   const { settleBeforeWrite, keepReplacedCopy, stageReplacedCopy, settleStagedCopy, isReplacedCopy, proveCopy, replacedCopyInfo, deleteReplacedCopy } = replaced;
@@ -117,6 +118,7 @@ function createVaultSession(filePath, { onPersist = (_change) => {}, installId =
   // as this device's edit would win conflicts it never took part in.
   function persist({ backup = true, bySync = false } = {}) {
     try {
+      beforeWrite();
       settleBeforeWrite();
       // Items 30 days in the Trash go with any save of ours, so stamp() sees the delete and sync carries
       // it. Not on sync's own save: merge never edits what it writes.
@@ -344,7 +346,7 @@ function createVaultSession(filePath, { onPersist = (_change) => {}, installId =
     publicView,
   };
   const { linkedFolders, openTarget, handBack, getSecret, getPassword, getTotpCode, followUpsDue, getRecoveryCodes } = createReads(ctx);
-  const { saveEntry, importEntries, deleteEntry, restoreEntry, deleteForever, emptyTrash, toggleFavorite, moveEntry, setRecoveryCodes, markRecoveryCode, addPaperCopy, removePaperCopy, setLifecycle, confirmGone, touch, addSpace, renameSpace, setSpacePhoto, deleteSpace, clearHistory, recordGenerated, generatedList, getGenerated, clearGenerated } = createItems(ctx);
+  const { saveEntry, patchEntry, importEntries, deleteEntry, restoreEntry, deleteForever, emptyTrash, toggleFavorite, moveEntry, setRecoveryCodes, markRecoveryCode, addPaperCopy, removePaperCopy, setLifecycle, confirmGone, touch, addSpace, renameSpace, setSpacePhoto, deleteSpace, clearHistory, recordGenerated, generatedList, getGenerated, clearGenerated } = createItems(ctx);
   const { syncBase, openSnapshot, ownsFile, openWithPassword, commitSync, startEpoch, revokeDevice, keepSyncLog } = createSyncSide(ctx);
   const { cloudConfig, cloudView, clearOlderBackups, setCloud, setCloudAuto, verifyBackup, commitRestore } = createBackup(ctx);
 
@@ -360,6 +362,7 @@ function createVaultSession(filePath, { onPersist = (_change) => {}, installId =
     openTarget,
     handBack,
     saveEntry,
+    patchEntry,
     importEntries,
     deleteEntry,
     restoreEntry,

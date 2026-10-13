@@ -16,6 +16,6 @@
     "useUnknownInCatchVariables": false,
     "types": ["node"]
   },
-  "include": ["core/**/*.js", "electron/**/*.cjs"],
+  "include": ["core/**/*.js", "electron/**/*.cjs", "cli/**/*.cjs"],
   "exclude": ["electron/fixtures", "**/*.test.js", "**/*.test.cjs", "core/sync/test-helpers.js"]
 }

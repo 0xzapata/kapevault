@@ -4,16 +4,26 @@
 // is the PC's queue and file around it. The count and the next allowed time live in a file, so
 // quitting and relaunching does not reset them; a success deletes it.
 const fs = require("node:fs");
+const { parseVaultFile } = require("./vault-crypto.cjs");
 const { writeFileAtomic } = require("./atomic-write.cjs");
 const { ANY_TARGET, nextTargets, readTargets, targetWait, writeTargets } = require("../core/index.js");
 
 const OTHER_FILE = "?other"; // the count of guesses at another file that names no salt
 
-// file: unlock-throttle.json beside the vault. ownSalt(): the KDF salt of the vault file here (null when
-// unreadable), the target of every local guess. Returns throttledUnlock(attemptUnlock, { local, salt }).
-/** @param {{ file: string, now?: () => number, ownSalt?: () => string | null }} options */
-function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => null }) {
-  let throttle = readTargets(readText());
+// file: unlock-throttle.json beside vaultFile. Its KDF salt is the target of every local guess
+// (null when unreadable). ownSalt() can supply it instead. Returns throttledUnlock(attemptUnlock, { local, salt }).
+/** @param {{ file: string, vaultFile?: string, now?: () => number, ownSalt?: () => string | null, onWait?: (ms: number) => void }} options */
+function createUnlockThrottle({ file, vaultFile, now = () => Date.now(), ownSalt, onWait = (_ms) => {} }) {
+  const currentSalt = ownSalt ?? (() => {
+    try {
+      return vaultFile ? parseVaultFile(fs.readFileSync(vaultFile))?.kdf.salt ?? null : null;
+    } catch {
+      return null;
+    }
+  });
+  /** @type {import("../core/unlock-throttle.js").ThrottleTargets} */
+  let throttle = {};
+  let unsaved = false; // the last save was refused: memory holds counts the file lacks
   let unlockQueue = Promise.resolve();
 
   function readText() {
@@ -29,8 +39,9 @@ function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => nu
     try {
       if (Object.keys(throttle).length === 0) fs.rmSync(file, { force: true });
       else writeFileAtomic(file, writeTargets(throttle));
+      unsaved = false;
     } catch {
-      // the count still holds in memory for this run
+      unsaved = true; // the unlock result still returns; the count waits in memory for the next save
     }
   }
 
@@ -40,13 +51,26 @@ function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => nu
   /** @param {() => any} attemptUnlock @param {{ local?: boolean, salt?: string }} [options] */
   function throttledUnlock(attemptUnlock, { local = true, salt } = {}) {
     const run = unlockQueue.then(async () => {
+      // The file is the shared truth (the app and the CLI both write it): a success elsewhere that cleared a
+      // count must not come back from this instance's memory. Only a count a refused save kept here is merged in.
+      const targets = readTargets(readText());
+      if (unsaved) {
+        for (const [key, state] of Object.entries(throttle)) {
+          const stored = targets[key];
+          if (!stored || state.failed > stored.failed || (state.failed === stored.failed && state.nextAt > stored.nextAt)) targets[key] = state;
+        }
+      }
+      throttle = targets;
       // A guess at another file that names none gets its own count, which an own-vault success never clears:
       // only ANY_TARGET (an unnamed guess at this vault, or an old file's count) is cleared that way.
-      const key = salt || (local ? ownSalt() || ANY_TARGET : OTHER_FILE);
+      const key = salt || (local ? currentSalt() || ANY_TARGET : OTHER_FILE);
       // The longest pause of any file: dropping the oldest kept count (core MAX_TARGETS) must never give a
       // guesser free guesses back, so junk misses at other files cost as much as guessing on.
       const wait = Math.max(0, ...Object.keys(throttle).map((k) => targetWait(throttle, k, now())));
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      if (wait > 0) {
+        onWait(wait);
+        await new Promise((r) => setTimeout(r, wait));
+      }
       const result = await attemptUnlock();
       const next = nextTargets(throttle, key, result, { local, now: now() });
       if (next !== throttle) {

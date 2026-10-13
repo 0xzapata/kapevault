@@ -1,6 +1,6 @@
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import { HISTORY_LIMIT, KINDS, upsertEntry } from "./entries.js";
+import { HISTORY_LIMIT, KINDS, patchEntry, upsertEntry } from "./entries.js";
 
 // upsertEntry's rules per kind, pinned field by field: what a save keeps, cleans, defaults and refuses.
 const NOW = Date.UTC(2026, 8, 29, 4); // noon in PHT: the same local day everywhere near UTC+8 and UTC
@@ -53,6 +53,24 @@ test("login: history, 2FA, sign-in, via, questions, and what an edit keeps", () 
   assert.equal(save(data, { ...common, id: via.id, kind: "login", signIn: "passkey" }).signIn, "passkey");
   assert.equal(save(data, { ...common, title: "Mock New", kind: "login", signIn: "passkey" }).signIn, "password");
   assert.throws(() => upsertEntry(data, { ...common, kind: "login", totp: "not a key!" }), /not a valid 2FA setup key/);
+});
+
+test("patchEntry changes only the username and edit date, keeping the password, 2FA and question answer", () => {
+  const data = vault();
+  const login = save(data, { ...common, kind: "login", username: "me", password: "one", totp: "JBSWY3DPEHPK3PXP", questions: [{ question: "Pet?", answer: "Mock" }] });
+  const before = { ...login, updatedAt: "2026-09-28" };
+  data.entries = [before];
+  assert.equal(patchEntry(data, login.id, { username: "new-me" }), login.id);
+  assert.deepEqual(data.entries[0], { ...before, username: "new-me", updatedAt: TODAY });
+});
+
+test("patchEntry never redirects to another item through changes.id", () => {
+  const data = vault();
+  const first = save(data, { ...common, kind: "note", title: "First", body: "one" });
+  const second = save(data, { ...common, kind: "note", title: "Second", body: "two" });
+  assert.equal(patchEntry(data, first.id, { id: second.id, title: "Patched" }), first.id);
+  assert.equal(data.entries.find((e) => e.id === first.id).title, "Patched");
+  assert.deepEqual(data.entries.find((e) => e.id === second.id), second);
 });
 
 test("note and key: a secret left undefined keeps the stored one; an expiry is a real day", () => {

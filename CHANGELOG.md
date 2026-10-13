@@ -7,6 +7,12 @@ built and installed by hand; none was tagged.
 
 ## [Unreleased]
 
+### Added
+
+- Desktop: a `kapevault` command line (`cli/kapevault.cjs`) with the `item`, `vault`, `read`, `inject` and
+  `run` commands and `op://` references of the 1Password `op` CLI. Commands that write refuse while the
+  desktop app is open.
+
 ### Security
 
 - Android: a bucket that came inside a restored backup file uploads nothing until you turn on Back up

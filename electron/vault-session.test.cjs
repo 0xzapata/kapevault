@@ -177,6 +177,17 @@ test("a save the disk refuses is not kept in memory: a retry adds it once, a fai
   assert.deepEqual(again.publicView().entries.map((e) => e.title).sort(), ["GitHub", "Mock note"]);
 });
 
+test("a beforeWrite refusal leaves the file and the public view unchanged", async () => {
+  const { file, spaceId } = await seeded();
+  const vault = createVaultSession(file, { beforeWrite: () => { throw new Error("mock write refused"); } });
+  assert.equal((await vault.unlock(MASTER)).ok, true);
+  const before = fs.readFileSync(file);
+  const view = vault.publicView();
+  assert.throws(() => vault.saveEntry({ kind: "note", spaceId, title: "Mock note", body: "b" }), /mock write refused/);
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.deepEqual(vault.publicView(), view);
+});
+
 test("a failed master password change keeps the old password and does not flag older backups", async (t) => {
   const { file, vault, spaceId } = await seeded();
   vault.setCloud({ endpoint: "https://0123abcd.r2.cloudflarestorage.com", bucket: "mock-bucket", accessKeyId: "mock-key", secretAccessKey: "mock-secret", auto: false });

@@ -67,6 +67,15 @@ if (devEnv.KAPEVAULT_DATA_DIR) app.setPath("userData", dataDir);
 // it just exits, no window.
 const askedToQuit = process.argv.includes("--quit");
 if (!app.requestSingleInstanceLock(askedToQuit ? { quit: true } : undefined) || askedToQuit) app.exit(0);
+// The command-line KAPEVault (cli/kapevault.cjs) refuses to write while this names a live app: this
+// copy rewrites the whole vault from memory on its next save. Only the copy holding the lock writes it,
+// in case a second copy runs on for a moment after exit(). A failed write only turns that check off.
+const pidFile = path.join(dataDir, "app.pid");
+try {
+  if (app.hasSingleInstanceLock() && !askedToQuit) fs.writeFileSync(pidFile, String(process.pid));
+} catch {
+  // the CLI then writes while the app runs, as before this file existed
+}
 app.on("second-instance", (_event, _argv, _cwd, data) => (/** @type {any} */ (data)?.quit === true ? app.quit() : windows.showMain()));
 const legacyDir = devEnv.KAPEVAULT_LEGACY_DIR || (devEnv.KAPEVAULT_DATA_DIR ? null : path.join(app.getPath("appData"), "BOVault"));
 try {
@@ -98,13 +107,7 @@ const cloud = createCloudBackup({ vault, endpoint: devEnv.KAPEVAULT_R2_ENDPOINT,
 // the misses at the vault it replaced (audit run-1 4.5).
 const throttledUnlock = createUnlockThrottle({
   file: path.join(dataDir, "unlock-throttle.json"),
-  ownSalt: () => {
-    try {
-      return parseVaultFile(fs.readFileSync(vault.status().path))?.kdf.salt ?? null;
-    } catch {
-      return null;
-    }
-  },
+  vaultFile: vault.status().path,
 });
 // Sync with this bucket's other devices. Its status goes to every window; a merge shows at once. A
 // master password another device set, typed here, is a guess like any other (throttledUnlock); once
@@ -430,6 +433,7 @@ app.on("before-quit", (e) => {
     .then(() => clip.clearCopiedPassword())
     .finally(() => {
       shutdownDone = true;
+      fs.rmSync(pidFile, { force: true });
       tray.destroy();
       app.quit();
     });

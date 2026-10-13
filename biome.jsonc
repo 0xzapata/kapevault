@@ -6,6 +6,7 @@
       "src/**",
       "core/**",
       "electron/**",
+      "cli/**",
       "scripts/**",
       "mobile/src/**",
       "mobile/scripts/**",
