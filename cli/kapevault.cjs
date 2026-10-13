@@ -382,6 +382,31 @@ function maskInto(from, to, secrets) {
   from.on("end", () => pass(true));
 }
 
+const quoteCommand = (argv) => argv.map((arg) => (arg === "" || /[ \t&()[\]{}^=;!'+,`~<>|"]/.test(arg) ? `"${arg.replaceAll('"', '""')}"` : arg)).join(" ");
+
+// Node's CVE-2024-27980 fix rejects direct .cmd/.bat spawns, so only those files need cmd.exe.
+/** @param {string[]} argv @param {import("node:child_process").SpawnOptions} options */
+function spawnCommand(argv, options) {
+  if (process.platform !== "win32") return spawn(argv[0], argv.slice(1), options);
+  const env = options.env ?? process.env;
+  const keys = Object.keys(env).sort();
+  const envValue = (name) => env[keys.find((key) => key.toUpperCase() === name) ?? name];
+  const dirs = path.isAbsolute(argv[0]) || /[/\\]/.test(argv[0]) ? [""] : (envValue("PATH") ?? process.env.PATH ?? "").split(path.delimiter);
+  const extensions = ["", ...(envValue("PATHEXT") ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)];
+  const command = dirs.flatMap((dir) => extensions.map((ext) => path.resolve(dir.replace(/^"|"$/g, ""), argv[0] + ext))).find((file) => {
+    try {
+      return fs.statSync(file).isFile();
+    } catch {
+      return false;
+    }
+  }) ?? argv[0];
+  if (/\.(cmd|bat)$/i.test(command)) {
+    const quoted = `"${quoteCommand([command, ...argv.slice(1)])}"`;
+    return spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", quoted], { ...options, windowsVerbatimArguments: true });
+  }
+  return spawn(command, argv.slice(1), options);
+}
+
 /** @type {import("node:util").ParseArgsOptionsConfig} */
 const GLOBAL = {
   format: { type: "string", default: "human" },
@@ -559,7 +584,7 @@ const COMMANDS = {
         vault.lock();
       }
       const masking = !g["no-masking"] && secrets.some(Boolean);
-      const child = spawn(command[0], command.slice(1), { env, stdio: masking ? ["inherit", "pipe", "pipe"] : "inherit" });
+      const child = spawnCommand(command, { env, stdio: masking ? ["inherit", "pipe", "pipe"] : "inherit" });
       if (masking) {
         maskInto(child.stdout, process.stdout, secrets);
         maskInto(child.stderr, process.stderr, secrets);
@@ -599,7 +624,7 @@ async function main(argv) {
   await command.run(values, [...positionals, ...rest]);
 }
 
-module.exports = { maskInto };
+module.exports = { maskInto, quoteCommand };
 
 if (require.main === module) {
   main(process.argv.slice(2)).catch((e) => {

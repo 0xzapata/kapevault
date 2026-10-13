@@ -6,7 +6,7 @@ const path = require("node:path");
 const { randomInt } = require("node:crypto");
 const { once } = require("node:events");
 const { PassThrough } = require("node:stream");
-const { maskInto } = require("./kapevault.cjs");
+const { maskInto, quoteCommand } = require("./kapevault.cjs");
 const { spawn, spawnSync } = require("node:child_process");
 const { seeded, MASTER } = require("../electron/fixtures/vault-session-helpers.cjs");
 const { openFile, encryptWithKey } = require("../electron/vault-crypto.cjs");
@@ -170,6 +170,35 @@ test("read -o refuses an existing file unless --force replaces it with the reque
   assert.equal(run.code, 0, run.stderr);
   assert.equal(fs.readFileSync(file, "utf8"), "s3cret-pass!\n");
   assert.equal(fs.statSync(file).mode & 0o777, 0o640);
+});
+
+test("quoteCommand preserves spaces, empty arguments and double quotes for cmd.exe", () => {
+  assert.equal(quoteCommand(["a b", "", 'say "hi"', "plain"]), '"a b" "" "say ""hi""" plain');
+  for (const char of "\t&()[]{}^=;!'+,`~<>|") assert.equal(quoteCommand([`a${char}b`]), `"a${char}b"`);
+});
+
+test("run starts a .cmd command on PATH and preserves its arguments", { skip: process.platform !== "win32" }, async () => {
+  const { dir } = await vaultDir();
+  fs.writeFileSync(path.join(dir, "echo-args.cmd"), "@echo %1 %2\r\n");
+  const run = cli(dir, ["run", "--", "echo-args.cmd", "one", "two words"], { env: { PATH: `${dir}${path.delimiter}${process.env.PATH}` } });
+  assert.equal(run.code, 0, run.stderr);
+  assert.ok(run.stdout.startsWith('one "two words"'), run.stdout);
+});
+
+test("run honors PATHEXT order and batch paths with spaces, including a nonzero exit", { skip: process.platform !== "win32" }, async () => {
+  const { dir } = await vaultDir();
+  const bin = path.join(dir, "tool launchers");
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "echo-args.bat"), '@echo bat %1 %2\r\n@exit /b 7\r\n');
+  const cmd = path.join(bin, "echo-args.CMD");
+  fs.writeFileSync(cmd, "@echo cmd %1 %2\r\n");
+  const env = { PATH: `${bin}${path.delimiter}${process.env.PATH}`, PATHEXT: ".BAT;.CMD" };
+  const run = cli(dir, ["run", "--", "echo-args", "one", "two words"], { env });
+  assert.equal(run.code, 7, run.stderr);
+  assert.ok(run.stdout.startsWith('bat one "two words"'), run.stdout);
+  const explicit = cli(dir, ["run", "--", cmd, "one", "two words"], { env: { PATH: "" } });
+  assert.equal(explicit.code, 0, explicit.stderr);
+  assert.ok(explicit.stdout.startsWith('cmd one "two words"'), explicit.stdout);
 });
 
 test("run masks a resolved secret in the command's output", async () => {
