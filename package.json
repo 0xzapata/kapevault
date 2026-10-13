@@ -68,8 +68,6 @@
       "electron/**/*",
       "!electron/*.test.cjs",
       "!electron/fixtures/**/*",
-      "cli/**/*",
-      "!cli/*.test.cjs",
       "core/**/*",
       "!core/**/*.test.js",
       "!core/sync/test-helpers.js",

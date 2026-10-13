@@ -17,7 +17,6 @@ const { parseArgs, parseEnv } = require("node:util");
 const { createVaultSession } = require("../electron/vault-session.cjs");
 const { createUnlockThrottle } = require("../electron/unlock-throttle.cjs");
 const { readInstallId } = require("../electron/app-settings.cjs");
-const { parseVaultFile } = require("../electron/vault-crypto.cjs");
 const { writeFileAtomic } = require("../electron/atomic-write.cjs");
 
 const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8")).version;
@@ -232,13 +231,7 @@ async function open(g, alreadyReadMaster) {
   const throttledUnlock = createUnlockThrottle({
     file: throttleFile,
     onWait: (ms) => process.stderr.write(`Too many wrong passwords, waiting ${Math.ceil(ms / 1000)}s\n`),
-    ownSalt: () => {
-      try {
-        return parseVaultFile(fs.readFileSync(file))?.kdf.salt ?? null;
-      } catch {
-        return null;
-      }
-    },
+    vaultFile: file,
   });
   const result = await throttledUnlock(() => vault.unlock(master));
   if (!result.ok) throw new Error(result.error);
@@ -394,6 +387,7 @@ const GLOBAL = {
   format: { type: "string", default: "human" },
   "data-dir": { type: "string" },
   "password-stdin": { type: "boolean" },
+  // Accepted for op script compatibility.
   "no-color": { type: "boolean" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean" },
@@ -501,6 +495,7 @@ const COMMANDS = {
     },
   },
   "item delete": {
+    // --archive is accepted for op script compatibility.
     options: { ...VAULT, archive: { type: "boolean" } },
     run: async (g, [name]) => {
       need(name, "item delete <item>");
@@ -587,26 +582,28 @@ async function main(argv) {
   // A bare --generate-password takes the default recipe instead of the next word.
   const head = (end < 0 ? argv : argv.slice(0, end)).map((a) => (a === "--generate-password" ? "--generate-password=" : a));
   const rest = end < 0 ? [] : argv.slice(end + 1);
-  const loose = parseArgs({ args: head, options: GLOBAL, strict: false, allowPositionals: true, tokens: true });
-  const words = (loose.tokens ?? []).flatMap((t) => (t.kind === "positional" ? [t] : []));
-  const n = [3, 2, 1].find((k) => words.length >= k && Object.hasOwn(COMMANDS, words.slice(0, k).map((t) => t.value).join(" ")));
+  const n = [3, 2, 1].find((k) => head.length >= k && Object.hasOwn(COMMANDS, head.slice(0, k).join(" ")));
   if (!n) {
+    const loose = parseArgs({ args: head, options: GLOBAL, strict: false, allowPositionals: true });
     if (loose.values.version) return print(VERSION);
     if (loose.values.help) return print(USAGE);
     process.stderr.write(`${USAGE}\n`);
     process.exitCode = 1;
     return;
   }
-  const command = COMMANDS[words.slice(0, n).map((t) => t.value).join(" ")];
-  const taken = new Set(words.slice(0, n).map((t) => t.index));
-  const { values, positionals } = parseArgs({ args: head.filter((_, i) => !taken.has(i)), options: { ...GLOBAL, ...command.options }, allowPositionals: true });
+  const command = COMMANDS[head.slice(0, n).join(" ")];
+  const { values, positionals } = parseArgs({ args: head.slice(n), options: { ...GLOBAL, ...command.options }, allowPositionals: true });
   if (values.help) return print(USAGE);
   if (values.version) return print(VERSION);
   if (values.format !== "human" && values.format !== "json") throw new Error("--format must be human or json.");
   await command.run(values, [...positionals, ...rest]);
 }
 
-main(process.argv.slice(2)).catch((e) => {
-  process.stderr.write(`[ERROR] ${new Date().toISOString()} ${e?.message ?? e}\n`);
-  process.exitCode = 1;
-});
+module.exports = { maskInto };
+
+if (require.main === module) {
+  main(process.argv.slice(2)).catch((e) => {
+    process.stderr.write(`[ERROR] ${new Date().toISOString()} ${e?.message ?? e}\n`);
+    process.exitCode = 1;
+  });
+}

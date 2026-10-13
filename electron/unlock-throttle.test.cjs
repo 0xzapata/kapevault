@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { createUnlockThrottle } = require("./unlock-throttle.cjs");
 const { MAX_UNLOCK_PAUSE_MS } = require("../core/index.js");
+const { seeded } = require("./fixtures/vault-session-helpers.cjs");
 
 // A throttle on a fresh file with a clock the test moves: the pause is always over before the next
 // guess, so nothing here waits on a real timer.
@@ -25,6 +26,18 @@ function setup() {
 
 const MISS = { ok: false, error: "Wrong master password" };
 const HIT = { ok: true };
+
+test("vaultFile supplies the current salt and an unreadable file falls back to the unnamed target", async () => {
+  const { file: vaultFile } = await seeded();
+  const salt = JSON.parse(fs.readFileSync(vaultFile, "utf8")).kdf.salt;
+  const { file, saved } = setup();
+  const throttled = createUnlockThrottle({ file, vaultFile });
+  await throttled(async () => MISS);
+  assert.deepEqual(saved().targets, { [salt]: { failed: 1, nextAt: 0 } });
+  fs.writeFileSync(vaultFile, "not a vault");
+  await throttled(async () => MISS);
+  assert.deepEqual(saved().targets, { [salt]: { failed: 1, nextAt: 0 }, "?": { failed: 1, nextAt: 0 } });
+});
 
 test("the miss count persists across a restart", async () => {
   const { make, saved, guess } = setup();

@@ -1,8 +1,12 @@
 // The CLI end to end: each test spawns it against a throwaway vault made with the app's own session.
-const test = require("node:test");
+const { test, before } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomInt } = require("node:crypto");
+const { once } = require("node:events");
+const { PassThrough } = require("node:stream");
+const { maskInto } = require("./kapevault.cjs");
 const { spawn, spawnSync } = require("node:child_process");
 const { seeded, MASTER } = require("../electron/fixtures/vault-session-helpers.cjs");
 const { openFile, encryptWithKey } = require("../electron/vault-crypto.cjs");
@@ -42,12 +46,13 @@ const assertOtp = (code) => {
   assert.ok(expected.includes(code), `Expected ${expected.join(" or ")}, got ${code}`);
 };
 
-// One login made through `item create`, read by the four tests after it.
-const created = (async () => {
+// One login made through `item create`, shared by its read tests.
+let created;
+before(async () => {
   const { dir } = await vaultDir();
   const run = cli(dir, ["item", "create", "--category", "login", "--title", "Bank", "--generate-password=letters,digits,20", `otp=${KEY}`, "username=bob", "--format", "json"]);
-  return { dir, item: json(run) };
-})();
+  created = { dir, item: json(run) };
+});
 
 test("vault list --format json lists the personal vault and its live items", async () => {
   const { dir } = await vaultDir();
@@ -57,7 +62,7 @@ test("vault list --format json lists the personal vault and its live items", asy
 });
 
 test("item create makes a login with a generated password and a 2FA key", async () => {
-  const { item } = await created;
+  const { item } = created;
   assert.equal(item.title, "Bank");
   assert.equal(item.category, "LOGIN");
   assert.equal(item.vault.name, "Personal");
@@ -116,7 +121,7 @@ test("item create without a personal vault asks for --vault", async () => {
 });
 
 test("item get --format json reveals the password and gives the current OTP code", async () => {
-  const { dir, item } = await created;
+  const { dir, item } = created;
   const got = json(cli(dir, ["item", "get", "Bank", "--format", "json"]));
   assert.equal(got.id, item.id);
   assert.equal(got.fields.find((f) => f.id === "password").value, item.fields.find((f) => f.id === "password").value);
@@ -125,7 +130,7 @@ test("item get --format json reveals the password and gives the current OTP code
 });
 
 test("item get without --reveal hides the password", async () => {
-  const { dir, item } = await created;
+  const { dir, item } = created;
   const run = cli(dir, ["item", "get", "Bank"]);
   assert.equal(run.code, 0, run.stderr);
   assert.match(run.stdout, /password:\s+\[use --reveal\]/);
@@ -133,14 +138,14 @@ test("item get without --reveal hides the password", async () => {
 });
 
 test("read op://Personal/<title>/password gives the created password", async () => {
-  const { dir, item } = await created;
+  const { dir, item } = created;
   const run = cli(dir, ["read", "op://Personal/Bank/password"]);
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.stdout, `${item.fields.find((f) => f.id === "password").value}\n`);
 });
 
 test("read ?attribute=otp gives the current OTP code", async () => {
-  const { dir } = await created;
+  const { dir } = created;
   const run = cli(dir, ["read", "-n", "op://Personal/Bank/password?attribute=otp"]);
   assert.equal(run.code, 0, run.stderr);
   assertOtp(run.stdout);
@@ -353,4 +358,32 @@ test("item list leaves expired Trash on disk while app.pid names a live app", as
   const before = fs.readFileSync(file);
   assert.deepEqual(json(cli(dir, ["item", "list", "--format", "json"])), []);
   assert.deepEqual(fs.readFileSync(file), before);
+});
+
+test("maskInto matches whole-text replacement across 300 random chunk splits without a secret leak", async () => {
+  const alphabet = "abP: \n";
+  const mask = "<concealed by KAPEVault>";
+  for (let i = 0; i < 300; i++) {
+    const secrets = ["abab", "Password", "ba"].filter(() => randomInt(2));
+    if (!secrets.length) secrets.push("ba");
+    const text = Array.from({ length: randomInt(201) }, () => alphabet[randomInt(alphabet.length)]).join("");
+    const reference = new RegExp([...secrets].sort((a, b) => b.length - a.length).join("|"), "g");
+    const from = new PassThrough();
+    const to = new PassThrough();
+    let output = "";
+    to.setEncoding("utf8");
+    to.on("data", (chunk) => { output += chunk; });
+    maskInto(from, to, secrets);
+    const ended = once(from, "end");
+    for (let at = 0; at < text.length;) {
+      const size = randomInt(1, 8);
+      from.write(text.slice(at, at + size));
+      at += size;
+      for (const secret of secrets) assert.equal(output.includes(secret), false, `case ${i}: a secret escaped`);
+    }
+    from.end();
+    await ended;
+    assert.equal(output, text.replaceAll(reference, mask), `case ${i}`);
+    to.end();
+  }
 });

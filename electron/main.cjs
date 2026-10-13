@@ -107,13 +107,7 @@ const cloud = createCloudBackup({ vault, endpoint: devEnv.KAPEVAULT_R2_ENDPOINT,
 // the misses at the vault it replaced (audit run-1 4.5).
 const throttledUnlock = createUnlockThrottle({
   file: path.join(dataDir, "unlock-throttle.json"),
-  ownSalt: () => {
-    try {
-      return parseVaultFile(fs.readFileSync(vault.status().path))?.kdf.salt ?? null;
-    } catch {
-      return null;
-    }
-  },
+  vaultFile: vault.status().path,
 });
 // Sync with this bucket's other devices. Its status goes to every window; a merge shows at once. A
 // master password another device set, typed here, is a guess like any other (throttledUnlock); once
