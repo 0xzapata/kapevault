@@ -13,7 +13,8 @@ const OTHER_FILE = "?other"; // the count of guesses at another file that names 
 // unreadable), the target of every local guess. Returns throttledUnlock(attemptUnlock, { local, salt }).
 /** @param {{ file: string, now?: () => number, ownSalt?: () => string | null, onWait?: (ms: number) => void }} options */
 function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => null, onWait = (_ms) => {} }) {
-  let throttle = readTargets(readText());
+  /** @type {import("../core/unlock-throttle.js").ThrottleTargets} */
+  let throttle = {};
   let unlockQueue = Promise.resolve();
 
   function readText() {
@@ -40,7 +41,13 @@ function createUnlockThrottle({ file, now = () => Date.now(), ownSalt = () => nu
   /** @param {() => any} attemptUnlock @param {{ local?: boolean, salt?: string }} [options] */
   function throttledUnlock(attemptUnlock, { local = true, salt } = {}) {
     const run = unlockQueue.then(async () => {
-      throttle = readTargets(readText());
+      // A refused save leaves a newer count in memory. A file reload must keep that count.
+      const targets = readTargets(readText());
+      for (const [key, state] of Object.entries(throttle)) {
+        const stored = targets[key];
+        if (!stored || state.failed > stored.failed || (state.failed === stored.failed && state.nextAt > stored.nextAt)) targets[key] = state;
+      }
+      throttle = targets;
       // A guess at another file that names none gets its own count, which an own-vault success never clears:
       // only ANY_TARGET (an unnamed guess at this vault, or an old file's count) is cleared that way.
       const key = salt || (local ? ownSalt() || ANY_TARGET : OTHER_FILE);

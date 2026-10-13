@@ -36,6 +36,17 @@ test("the miss count persists across a restart", async () => {
   assert.equal(saved().failed, 4);
 });
 
+test("six refused saves keep their misses in memory for the seventh save", async (t) => {
+  const { make, saved, guess } = setup();
+  const throttled = make();
+  const refused = t.mock.method(fs, "renameSync", () => { throw new Error("mock disk refused"); });
+  for (let i = 0; i < 6; i++) await guess(throttled, MISS);
+  assert.equal(saved(), null);
+  refused.mock.restore();
+  await guess(throttled, MISS);
+  assert.equal(saved().failed, 7);
+});
+
 test("two instances on one file share alternating misses", async () => {
   const { make, saved, guess } = setup();
   const first = make();
