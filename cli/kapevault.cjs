@@ -496,10 +496,8 @@ const COMMANDS = {
       need(name, "item edit <item> [<field>=<value>...]");
       const { vault, view } = await open(g);
       const e = findItem(view, name, g.vault);
-      // The view's fields are saveEntry's input, secrets left out (kept). Its questions carry no answers:
-      // sent back, they would wipe them; left undefined, they stay.
-      const saved = vault.saveEntry(apply({ ...e, questions: undefined }, g, assignments));
-      showItem(g, vault, saved.vault, e.id);
+      const after = vault.patchEntry(e.id, apply({ kind: e.kind }, g, assignments));
+      showItem(g, vault, after, e.id);
     },
   },
   "item delete": {

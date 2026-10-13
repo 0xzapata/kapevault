@@ -263,12 +263,14 @@ test("run masks a secret on stderr", async () => {
   assert.equal(run.stderr, "<concealed by KAPEVault>\n");
 });
 
-test("item edit changes the username and keeps the password", async () => {
-  const { dir } = await vaultDir();
+test("item edit changes the username and keeps the password and OTP", async () => {
+  const { dir, vault, spaceId, id } = await vaultDir();
+  vault.saveEntry({ id, kind: "login", spaceId, title: "GitHub", username: "me", totp: KEY });
   assert.equal(cli(dir, ["item", "edit", "GitHub", "username=new-me"]).code, 0);
   const fields = json(cli(dir, ["item", "get", "GitHub", "--format", "json"])).fields;
   assert.equal(fields.find((f) => f.id === "username").value, "new-me");
   assert.equal(fields.find((f) => f.id === "password").value, "s3cret-pass!");
+  assertOtp(fields.find((f) => f.type === "OTP").value);
 });
 
 test("an ambiguous title exits 1 and names both items", async () => {

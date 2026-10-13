@@ -24,6 +24,10 @@ function createItems(ctx) {
     return { vault: publicView(), id };
   }
 
+  function patchEntry(id, changes) {
+    return commit((data) => core.patchEntry(data, id, changes));
+  }
+
   // Bulk add from an import file (core's importEntries: all or nothing). A failed write rolls memory
   // back in persist.
   function importEntries(file) {
@@ -141,6 +145,7 @@ function createItems(ctx) {
 
   return {
     saveEntry,
+    patchEntry,
     importEntries,
     deleteEntry,
     restoreEntry,
