@@ -23,6 +23,7 @@ function createUnlockThrottle({ file, vaultFile, now = () => Date.now(), ownSalt
   });
   /** @type {import("../core/unlock-throttle.js").ThrottleTargets} */
   let throttle = {};
+  let unsaved = false; // the last save was refused: memory holds counts the file lacks
   let unlockQueue = Promise.resolve();
 
   function readText() {
@@ -38,8 +39,9 @@ function createUnlockThrottle({ file, vaultFile, now = () => Date.now(), ownSalt
     try {
       if (Object.keys(throttle).length === 0) fs.rmSync(file, { force: true });
       else writeFileAtomic(file, writeTargets(throttle));
+      unsaved = false;
     } catch {
-      // the unlock result still returns if the count cannot be saved
+      unsaved = true; // the unlock result still returns; the count waits in memory for the next save
     }
   }
 
@@ -49,11 +51,14 @@ function createUnlockThrottle({ file, vaultFile, now = () => Date.now(), ownSalt
   /** @param {() => any} attemptUnlock @param {{ local?: boolean, salt?: string }} [options] */
   function throttledUnlock(attemptUnlock, { local = true, salt } = {}) {
     const run = unlockQueue.then(async () => {
-      // A refused save leaves a newer count in memory. A file reload must keep that count.
+      // The file is the shared truth (the app and the CLI both write it): a success elsewhere that cleared a
+      // count must not come back from this instance's memory. Only a count a refused save kept here is merged in.
       const targets = readTargets(readText());
-      for (const [key, state] of Object.entries(throttle)) {
-        const stored = targets[key];
-        if (!stored || state.failed > stored.failed || (state.failed === stored.failed && state.nextAt > stored.nextAt)) targets[key] = state;
+      if (unsaved) {
+        for (const [key, state] of Object.entries(throttle)) {
+          const stored = targets[key];
+          if (!stored || state.failed > stored.failed || (state.failed === stored.failed && state.nextAt > stored.nextAt)) targets[key] = state;
+        }
       }
       throttle = targets;
       // A guess at another file that names none gets its own count, which an own-vault success never clears:

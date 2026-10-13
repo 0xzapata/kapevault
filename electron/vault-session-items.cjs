@@ -12,19 +12,24 @@ function createItems(ctx) {
   // A folder link typed by hand follows the import's rule (audit finding L5, SECURITY-AUDIT-2026-09-28.md):
   // never a whole drive or the home folder. A network folder stays allowed - it lists only after a
   // click. A link saved before this rule keeps working until its folder is changed.
-  function saveEntry(input) {
-    const stored = requireOpen().entries.find((e) => e.id === input?.id);
+  function checkFolderLink(input, stored) {
     const location = core.cleanText(input?.location);
-    if (input?.kind === "link" && input.linkType === "folder" && location !== stored?.location) {
-      if (refusedByName(location)) throw new Error("Use a normal folder path, like C:\\Users\\you\\Documents\\Clients.");
-      if (!isNetworkPath(location) && tooWide(location)) throw new Error("A whole drive or your home folder cannot be linked. Link a folder inside it.");
-    }
+    if (input?.kind !== "link" || input.linkType !== "folder" || location === stored?.location) return;
+    if (refusedByName(location)) throw new Error("Use a normal folder path, like C:\\Users\\you\\Documents\\Clients.");
+    if (!isNetworkPath(location) && tooWide(location)) throw new Error("A whole drive or your home folder cannot be linked. Link a folder inside it.");
+  }
+
+  function saveEntry(input) {
+    checkFolderLink(input, requireOpen().entries.find((e) => e.id === input?.id));
     const id = core.upsertEntry(requireOpen(), input);
     persist();
     return { vault: publicView(), id };
   }
 
+  // Some fields of a stored item, the rest kept (core patchEntry). A patched folder location follows saveEntry's rule.
   function patchEntry(id, changes) {
+    const stored = core.findEntry(requireOpen(), id);
+    checkFolderLink({ ...stored, ...changes }, stored);
     return commit((data) => core.patchEntry(data, id, changes));
   }
 

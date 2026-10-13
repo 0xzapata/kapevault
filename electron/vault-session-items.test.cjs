@@ -698,3 +698,13 @@ test("a save lets go of generated passwords older than 90 days", async () => {
   again.saveEntry({ kind: "note", spaceId: again.publicView().spaces[0].id, title: "Mock note", body: "x" });
   assert.equal("genHistory" in (await openFile("correct horse battery orbit gazelle", JSON.parse(fs.readFileSync(file, "utf8")))).data, false, "gone from the file at the next save");
 });
+
+test("a patch that moves a folder link onto the home folder is refused like a save", async () => {
+  const { vault, spaceId } = await seeded();
+  const ok = path.join(require("node:os").homedir(), "Documents", "Clients");
+  const { id } = vault.saveEntry({ kind: "link", spaceId, title: "Clients", linkType: "folder", location: ok });
+  assert.throws(() => vault.patchEntry(id, { location: require("node:os").homedir() }), /cannot be linked/);
+  assert.equal(vault.publicView().entries.find((e) => e.id === id).location, ok);
+  vault.patchEntry(id, { title: "Renamed" });
+  assert.equal(vault.publicView().entries.find((e) => e.id === id).title, "Renamed");
+});

@@ -228,9 +228,9 @@ export function upsertEntry(data, input) {
   return entry.id;
 }
 
-/** Changes some fields of a stored item. @param {VaultData} data @param {string} id @param {Record<string, any>} changes */
+/** Changes some fields of a stored item; `changes` can never redirect the patch to another item. @param {VaultData} data @param {string} id @param {Record<string, any>} changes */
 export function patchEntry(data, id, changes) {
-  return upsertEntry(data, { ...findEntry(data, id), ...changes });
+  return upsertEntry(data, { ...findEntry(data, id), ...changes, id });
 }
 
 // Drops entries and any sign-in links that pointed at them.

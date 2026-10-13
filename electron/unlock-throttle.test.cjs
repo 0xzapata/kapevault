@@ -60,6 +60,18 @@ test("six refused saves keep their misses in memory for the seventh save", async
   assert.equal(saved().failed, 7);
 });
 
+test("a success in another instance clears a count this instance still holds", async () => {
+  const { make, saved, guess } = setup();
+  const first = make();
+  const second = make();
+  for (let i = 0; i < 3; i++) await guess(first, MISS);
+  assert.equal(saved().failed, 3);
+  await guess(second, HIT);
+  assert.equal(saved(), null);
+  await guess(first, MISS);
+  assert.equal(saved().failed, 1);
+});
+
 test("two instances on one file share alternating misses", async () => {
   const { make, saved, guess } = setup();
   const first = make();

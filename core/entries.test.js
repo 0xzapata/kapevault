@@ -64,6 +64,15 @@ test("patchEntry changes only the username and edit date, keeping the password, 
   assert.deepEqual(data.entries[0], { ...before, username: "new-me", updatedAt: TODAY });
 });
 
+test("patchEntry never redirects to another item through changes.id", () => {
+  const data = vault();
+  const first = save(data, { ...common, kind: "note", title: "First", body: "one" });
+  const second = save(data, { ...common, kind: "note", title: "Second", body: "two" });
+  assert.equal(patchEntry(data, first.id, { id: second.id, title: "Patched" }), first.id);
+  assert.equal(data.entries.find((e) => e.id === first.id).title, "Patched");
+  assert.deepEqual(data.entries.find((e) => e.id === second.id), second);
+});
+
 test("note and key: a secret left undefined keeps the stored one; an expiry is a real day", () => {
   const data = vault();
   const note = save(data, { ...common, kind: "note", body: "secret" });
