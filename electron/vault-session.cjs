@@ -54,7 +54,7 @@ const sha256 = (text) => crypto.createHash("sha256").update(text, "utf8").digest
 // sync's own save, which must not start another sync.
 // installId(): this install's id, which sync stamps changes with ("" when settings.json could not be
 // read this run: nothing is stamped, and the next open's repair catches up).
-function createVaultSession(filePath, { onPersist = (_change) => {}, installId = () => "" } = {}) {
+function createVaultSession(filePath, { onPersist = (_change) => {}, installId = () => "", beforeWrite = () => {} } = {}) {
   sweepStale(path.dirname(filePath)); // temp files a hard kill left beside the vault
   const replaced = createReplacedCopy(filePath);
   const { settleBeforeWrite, keepReplacedCopy, stageReplacedCopy, settleStagedCopy, isReplacedCopy, proveCopy, replacedCopyInfo, deleteReplacedCopy } = replaced;
@@ -117,6 +117,7 @@ function createVaultSession(filePath, { onPersist = (_change) => {}, installId =
   // as this device's edit would win conflicts it never took part in.
   function persist({ backup = true, bySync = false } = {}) {
     try {
+      beforeWrite();
       settleBeforeWrite();
       // Items 30 days in the Trash go with any save of ours, so stamp() sees the delete and sync carries
       // it. Not on sync's own save: merge never edits what it writes.

@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { seeded, MASTER } = require("../electron/fixtures/vault-session-helpers.cjs");
+const { openFile, encryptWithKey } = require("../electron/vault-crypto.cjs");
 const { totpCode } = require("../electron/totp.cjs");
 
 const ROOT = path.join(__dirname, "..");
@@ -276,7 +277,7 @@ test("an unreadable app.pid stops a write", async () => {
   assert.deepEqual(fs.readFileSync(path.join(dir, "vault.kapevault")), before);
 });
 
-test("all vault writes refuse an app.pid that appears after unlock", async () => {
+test("all six vault writes refuse a live app.pid", async () => {
   const commands = [
     ["vault", "create", "Team"],
     ["vault", "edit", "Personal", "--name", "Renamed"],
@@ -289,25 +290,11 @@ test("all vault writes refuse an app.pid that appears after unlock", async () =>
     const { dir, vault } = await vaultDir();
     vault.addSpace("Team");
     const before = fs.readFileSync(path.join(dir, "vault.kapevault"));
-    const preload = path.join(dir, "app-after-unlock.cjs");
-    fs.writeFileSync(preload, `
-const fs = require("node:fs");
-const sessions = require(${JSON.stringify(path.join(ROOT, "electron/vault-session.cjs"))});
-const create = sessions.createVaultSession;
-sessions.createVaultSession = (...args) => {
-  const vault = create(...args);
-  const unlock = vault.unlock;
-  vault.unlock = async (master) => {
-    const result = await unlock(master);
-    fs.writeFileSync(${JSON.stringify(path.join(dir, "app.pid"))}, ${JSON.stringify(String(process.pid))});
-    return result;
-  };
-  return vault;
-};
-`);
-    const run = cli(dir, args, { env: { NODE_OPTIONS: `--require=${preload}` } });
+    const pidFile = path.join(dir, "app.pid");
+    fs.writeFileSync(pidFile, String(process.pid));
+    const run = cli(dir, args);
     assert.equal(run.code, 1, args.join(" "));
-    assert.match(run.stderr, /KAPEVault is open\. Quit it first, then run this command again\./);
+    assert.ok(run.stderr.includes(`KAPEVault is open. Quit it first, then run this command again. If it is not running, delete ${pidFile}.`), run.stderr);
     assert.deepEqual(fs.readFileSync(path.join(dir, "vault.kapevault")), before);
   }
 });
@@ -318,4 +305,18 @@ test("item delete moves the item out of item list", async () => {
   assert.equal(run.code, 0, run.stderr);
   assert.equal(run.stdout, "");
   assert.deepEqual(json(cli(dir, ["item", "list", "--format", "json"])), []);
+});
+
+test("item list leaves expired Trash on disk while app.pid names a live app", async () => {
+  const { dir } = await vaultDir();
+  const file = path.join(dir, "vault.kapevault");
+  const opened = await openFile(MASTER, JSON.parse(fs.readFileSync(file, "utf8")));
+  opened.data.entries[0].trashedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+  delete opened.data.sync;
+  fs.writeFileSync(file, JSON.stringify(encryptWithKey(opened.key, opened.kdf, opened.salt, opened.data)));
+  opened.key.fill(0);
+  fs.writeFileSync(path.join(dir, "app.pid"), String(process.pid));
+  const before = fs.readFileSync(file);
+  assert.deepEqual(json(cli(dir, ["item", "list", "--format", "json"])), []);
+  assert.deepEqual(fs.readFileSync(file), before);
 });

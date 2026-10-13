@@ -167,7 +167,7 @@ function refuseWhileAppOpen(dir) {
     if (e.code === "ESRCH") return fs.rmSync(file, { force: true });
     // EPERM: the process is alive under another user
   }
-  throw new Error("KAPEVault is open. Quit it first, then run this command again.");
+  throw new Error(`KAPEVault is open. Quit it first, then run this command again. If it is not running, delete ${file}.`);
 }
 
 // One line, read a byte at a time so the rest of stdin (a template) stays for the command.
@@ -207,15 +207,14 @@ async function masterPassword(g, alreadyReadMaster) {
 // ponytail: no signin daemon, so every command pays one scrypt unlock (about 100 to 300 ms). Add a
 // session cache like `op signin` when scripts call this in tight loops.
 /** @param {string} [alreadyReadMaster] */
-async function open(g, write = false, alreadyReadMaster) {
+async function open(g, alreadyReadMaster) {
   const dir = dataDir(g["data-dir"]);
   const file = path.join(dir, "vault.kapevault");
   if (!fs.existsSync(file)) throw new Error(`There is no vault at ${file}. Create one in the KAPEVault app, or pass --data-dir.`);
-  if (write) refuseWhileAppOpen(dir);
   const master = await masterPassword(g, alreadyReadMaster);
   if (!master) throw new Error("Master password required: set KAPEVAULT_MASTER or pass --password-stdin.");
   const settings = createAppSettings(dir);
-  const vault = createVaultSession(file, { installId: () => settings.installId() });
+  const vault = createVaultSession(file, { installId: () => settings.installId(), beforeWrite: () => refuseWhileAppOpen(dir) });
   // The app's own throttle file and target (electron/main.cjs), so the app and the CLI share one miss count.
   const throttleFile = path.join(dir, "unlock-throttle.json");
   const throttledUnlock = createUnlockThrottle({
@@ -414,8 +413,7 @@ const COMMANDS = {
   "vault create": {
     run: async (g, [name]) => {
       need(name, "vault create <name>");
-      const { vault } = await open(g, true);
-      refuseWhileAppOpen(dataDir(g["data-dir"]));
+      const { vault } = await open(g);
       const { vault: view, id } = vault.addSpace(name);
       const space = spaceJson(view, spaceOf(view, id));
       show(g, space, () => spaceTable([space]));
@@ -425,9 +423,8 @@ const COMMANDS = {
     options: { name: { type: "string" } },
     run: async (g, [name]) => {
       need(name && g.name, "vault edit <vault> --name <new name>");
-      const { vault, view } = await open(g, true);
+      const { vault, view } = await open(g);
       const { id } = findSpace(view, name);
-      refuseWhileAppOpen(dataDir(g["data-dir"]));
       const after = vault.renameSpace(id, g.name);
       const space = spaceJson(after, spaceOf(after, id));
       show(g, space, () => spaceTable([space]));
@@ -462,7 +459,7 @@ const COMMANDS = {
     options: { ...EDIT, category: { type: "string" }, "dry-run": { type: "boolean" } },
     run: async (g, args) => {
       const fromStdin = args[0] === "-";
-      const { vault, view } = await open(g, !g["dry-run"]);
+      const { vault, view } = await open(g);
       const t = fromStdin ? parseTemplate(fs.readFileSync(0, "utf8")) : {};
       const fields = templateFields(t);
       const kind = kindOf(need(g.category ?? t.category ?? t.kind, "item create --category <category> --title <title>"));
@@ -471,7 +468,6 @@ const COMMANDS = {
       for (const [name, value] of fields) fieldOf(kind, name).set(input, value);
       apply(input, g, fromStdin ? args.slice(1) : args);
       if (g["dry-run"]) return print(JSON.stringify(input, null, 2));
-      refuseWhileAppOpen(dataDir(g["data-dir"]));
       const saved = vault.saveEntry(input);
       showItem(g, vault, saved.vault, saved.id);
     },
@@ -480,11 +476,10 @@ const COMMANDS = {
     options: EDIT,
     run: async (g, [name, ...assignments]) => {
       need(name, "item edit <item> [<field>=<value>...]");
-      const { vault, view } = await open(g, true);
+      const { vault, view } = await open(g);
       const e = findItem(view, name, g.vault);
       // The view's fields are saveEntry's input, secrets left out (kept). Its questions carry no answers:
       // sent back, they would wipe them; left undefined, they stay.
-      refuseWhileAppOpen(dataDir(g["data-dir"]));
       const saved = vault.saveEntry(apply({ ...e, questions: undefined }, g, assignments));
       showItem(g, vault, saved.vault, e.id);
     },
@@ -493,8 +488,7 @@ const COMMANDS = {
     options: { ...VAULT, archive: { type: "boolean" } },
     run: async (g, [name]) => {
       need(name, "item delete <item>");
-      const { vault, view } = await open(g, true);
-      refuseWhileAppOpen(dataDir(g["data-dir"]));
+      const { vault, view } = await open(g);
       vault.deleteEntry(findItem(view, name, g.vault).id);
     },
   },
@@ -502,8 +496,7 @@ const COMMANDS = {
     options: { "current-vault": { type: "string" }, "destination-vault": { type: "string" } },
     run: async (g, [name]) => {
       need(name && g["destination-vault"], "item move <item> --current-vault <vault> --destination-vault <vault>");
-      const { vault, view } = await open(g, true);
-      refuseWhileAppOpen(dataDir(g["data-dir"]));
+      const { vault, view } = await open(g);
       vault.moveEntry(findItem(view, name, g["current-vault"]).id, findSpace(view, g["destination-vault"]).id);
     },
   },
@@ -547,7 +540,7 @@ const COMMANDS = {
       const refs = Object.keys(env).filter((k) => REF.test(env[k] ?? ""));
       const secrets = [];
       if (refs.length) {
-        const { vault, view } = await open(g, false, master);
+        const { vault, view } = await open(g, master);
         for (const k of refs) {
           env[k] = resolve(vault, view, env[k]);
           secrets.push(env[k]);
